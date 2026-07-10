@@ -1,0 +1,24 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+
+# Client and run artifacts
+*.xlsx
+*-results.json
+normalized-results.json
+evidence/
+screenshots/
+.playwright-mcp/
+*.log
+
+# Local tooling
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

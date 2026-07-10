@@ -1,0 +1,27 @@
+name: Bug report
+description: Report a reproducible skill, validation, or workbook problem
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not include client data, domains, IDs, screenshots, credentials, or tracking plans.
+  - type: textarea
+    id: behaviour
+    attributes:
+      label: Observed behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Synthetic reproduction
+      description: Use synthetic values only.
+    validations:
+      required: true
