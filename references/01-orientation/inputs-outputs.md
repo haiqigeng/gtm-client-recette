@@ -1,34 +1,45 @@
 # Inputs And Outputs
 
-## Inputs
+## Essential inputs
 
-Accept the client's original tracking-plan format: XLSX, CSV, sheet export,
-document, screenshot, mock-up, or analyst explanation. Also collect:
+- Existing tracking plan or explicit analyst-defined acceptance rule.
+- Target website/environment.
 
-- website/environment URL;
-- GTM account, web container, workspace, and preview environment when known;
-- journey steps or permission to infer candidate actions;
-- expected events, dataLayer paths, values, tags, variables, parameters, and
-  consent behaviour;
-- analyst identity, browser/device context, and execution date when available.
+Accept the original XLSX, CSV, exported sheet, document, screenshot, mock-up, or
+analyst explanation. Never require the analyst to rewrite it into a template.
 
-Do not force the client to transform the source into a fixed schema. Preserve
-source sheet, row, cell, section, or screenshot references when normalizing it.
+## Supporting inputs
 
-## Outputs
+Collect when known or applicable:
 
-Produce a detailed `.xlsx` workbook with at least:
+- GTM account, web container, workspace, and Preview environment;
+- supplied journeys, URLs, selectors, visible labels, screenshots, or mock-ups;
+- consent scenarios required by the specification;
+- approved test identities or synthetic-data constraints;
+- browser/device context and execution date.
 
-- run and environment context;
-- journey coverage;
-- one row per event, value, variable, tag, tag parameter, and consent check;
-- separate raw API-call and resolved Data Layer evidence;
-- fired and not-fired tag results;
-- observed non-firing reason for every wanted tag that does not fire;
-- unexpected events and tags;
-- evidence catalogue with screenshots, panel captures, URLs, or machine-readable
-  observations;
-- status, confidence/source, and detailed notes.
+Missing journey instructions are not a blocker when relevant interactions can
+be inferred safely. Missing consent scenarios are not a blocker when consent is
+outside scope and the normal functional choice can be used.
 
-The workbook is the achievement artifact. A chat explanation alone is not a
-completed recette.
+Preserve source file, sheet, row, cell, section, screenshot, and original plan
+order when normalizing.
+
+## Continuous output
+
+After each tested event, return a concise `PASS`, `FAIL`, `BLOCKED`, `REVIEW`,
+or `NOT_TESTED` verdict. For a non-pass, state the precise evidence-backed
+reason. Continue automatically unless analyst action is required.
+
+## Final outputs
+
+Return:
+
+- one complete event-status list in original plan order;
+- a schema-v2 normalized evidence file;
+- a validated `.xlsx` with client summary, requirement matrix, journey
+  coverage, event, tag, consent, unexpected-item, blocker, evidence, and run
+  context sheets.
+
+The recette is achieved by complete operational coverage and trustworthy
+comparison. The workbook is its durable delivery artifact.

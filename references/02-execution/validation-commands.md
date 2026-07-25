@@ -1,33 +1,37 @@
 # Validation Commands
 
-Run from the package root. Python 3.11+ and `openpyxl` are required for the
-deterministic workbook path.
+Run from the skill root. Python 3.11+ and `openpyxl` are required.
 
-Install dependencies:
+Validate normalized data without writing a workbook:
 
 ```powershell
-python -m pip install -e ".[analysis,dev]"
+python -B scripts/build_recette_report.py normalized-results.json --strict --validate-only
 ```
 
-Build and strictly validate the report:
+Build and reload-check the report:
 
 ```powershell
 python -B scripts/build_recette_report.py normalized-results.json gtm-recette-results.xlsx --strict
 ```
 
-Run tests:
+Run unit and negative regression tests:
 
 ```powershell
 python -m unittest discover -s tests -v
 ```
 
-Validate the skill metadata from the auto-discovered source copy when changing
-the skill itself:
+Validate skill metadata:
 
 ```powershell
-python C:\Users\Guillaume\.codex\skills\.system\skill-creator\scripts\quick_validate.py C:\Users\Guillaume\.codex\skills\gtm-preview-recette
+python C:\Users\<user>\.codex\skills\.system\skill-creator\scripts\quick_validate.py <skill-path>
 ```
 
-The report builder checks structure and evidence references. It cannot prove
-that browser observations are truthful; the analyst/agent remains responsible
-for evidence accuracy and coverage.
+Inspect a source workbook:
+
+```powershell
+python -B scripts/inspect_tracking_plan.py tracking-plan.xlsx plan-inspection.json
+```
+
+The report validator can prove schema completeness and semantic consistency. It
+cannot prove that captured browser evidence is truthful; the agent and analyst
+remain responsible for authentic evidence.

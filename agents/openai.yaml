@@ -1,4 +1,4 @@
 interface:
   display_name: "GTM Preview Recette"
-  short_description: "Run evidence-based GTM Preview recette"
-  default_prompt: "Use $gtm-preview-recette to show a friendly bullet-point plan, wait for READY, then guide me through the GTM Preview recette and produce an evidence-backed XLSX report."
+  short_description: "Run complete, plan-ordered GTM Preview QA"
+  default_prompt: "Use $gtm-preview-recette to execute every tracking-plan event in order through GTM Preview and deliver evidence-backed verdicts plus a validated XLSX."

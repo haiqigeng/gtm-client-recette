@@ -1,32 +1,42 @@
 # Comparison Contract
 
-Create one canonical comparison row for every required tracking-plan field and
-tag parameter. Do not derive the final matrix from prose notes.
+Create one schema-v2 requirement for every planned field, variable, firing
+condition, runtime tag parameter, or applicable consent condition. Group those
+requirements into plan-ordered events for execution and feedback.
 
-Each row must contain:
-
-- journey, step, event order, and dataLayer event;
-- tracking-plan source reference and expected value/rule;
-- exact raw API-call value and type;
-- resolved Data Layer value and type;
-- GTM variable name, value, and type when used;
-- tag name, configuration field, configured value, and resolved runtime value;
-- tag firing status, consent state, verdict, mismatch, and evidence IDs.
-
-Evaluate every available link independently:
+Evaluate each applicable link independently:
 
 ```text
 tracking plan
--> raw dataLayer.push
+-> event occurrence and chronology
+-> exact raw dataLayer.push
 -> resolved Data Layer
--> GTM variable
--> tag configuration/runtime value
+-> resolved GTM variable
+-> concerned tag configuration
+-> tag firing and fire count
+-> runtime tag parameter
+-> applicable event-level consent
 ```
 
-For fixed values, preserve exact values and types in every column. For dynamic
-values, store the confirmed matching rule. If values differ, show every value;
-never replace the mismatch with a generic note.
+Keep the static tag configuration and resolved runtime value separate. A tag can
+fire correctly while a parameter fails; firing is then `PASS`, parameter is
+`FAIL`, and overall is `FAIL`.
 
-The skill requires a tracking plan or analyst-defined acceptance specification.
-Do not introduce an observation-only operating mode. Unresolved plan semantics
-are `REVIEW`; absent acceptance criteria block the recette.
+Keep exact raw API Call and resolved Data Layer separate. A stale inherited
+resolved value cannot repair a missing or wrong raw field.
+
+Concerned tags are only:
+
+- expected to fire;
+- expected to remain blocked;
+- fired unexpectedly and are relevant to the requirement;
+- necessary to explain why an expected tag did not fire.
+
+Never create an event-by-every-container-tag matrix.
+
+For a full recette, an occurred event requires exact structured Tag Assistant
+API Call evidence. Browser interception may explain chronology but is
+supplemental.
+
+Use a tracking plan or explicit scoped acceptance rule. Unresolved plan meaning
+is `REVIEW`; missing acceptance criteria blocks the run.

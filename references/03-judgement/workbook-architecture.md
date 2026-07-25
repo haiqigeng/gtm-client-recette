@@ -1,22 +1,40 @@
 # Workbook Architecture
 
-Use `scripts/build_recette_report.py` with normalized JSON and `--strict`.
+Generate schema-v2 reports with:
 
-The workbook contains:
+```powershell
+python scripts/build_recette_report.py normalized-results.json gtm-recette-results.xlsx --strict
+```
 
-- `Summary`: a compact run status and count overview.
-- `Validation Matrix`: the first and active worksheet and the primary deliverable. One row combines dataLayer
-  event, tag name, tracking-plan value, observed dataLayer value, tag
-  configuration or resolved value, verdict, mismatch, and evidence.
-- `Event Evidence`: API-call and resolved Data Layer evidence kept separate.
-- `Evidence`: evidence catalogue and links.
-- `Run Context`: minimal execution metadata.
+The workbook contains, in order:
 
-Normalized results use `run`, `journeys`, `checks`, `events`, `tags`,
-`consent_checks`, `unexpected`, `evidence`, and required `comparisons`.
-Use `comparisons` for the displayed validation matrix. Preserve objects and
-arrays as serialized structured values rather than flattening away detail.
+1. `Client Summary`
+2. `Requirement Matrix`
+3. `Journey Coverage`
+4. `Event Evidence`
+5. `Tag Evidence`
+6. `Consent`
+7. `Unexpected Events-Tags`
+8. `Blockers`
+9. `Evidence Catalogue`
+10. `Run Context`
 
-Use statuses `PASS`, `FAIL`, `BLOCKED`, `REVIEW`, and `NOT_TESTED`. Every result
-row needs evidence. A wanted tag with expected status `fired` and actual status
-other than `fired` needs a non-firing reason and reason source.
+`Client Summary` includes the complete event list in original plan order,
+status, requirement count, concise reason, and evidence IDs.
+
+`Requirement Matrix` is the atomic technical deliverable. Show source
+expectation, raw value/state/type, resolved value/state/type, GTM variable,
+concerned tag configuration, firing status, runtime value/type, applicable
+consent, occurrence evidence, component verdicts, overall verdict, mismatch,
+and evidence side by side.
+
+`Journey Coverage` lists supplied or inferred actions, attempted routes,
+execution status, blockers, and evidence in source order.
+
+Keep raw payload, resolved snapshot, tag configuration, runtime value, and
+consent evidence distinct on their dedicated sheets. Serialize objects and
+arrays for display only; retain structured values in normalized JSON.
+
+The builder reloads the XLSX and verifies required sheets, order, row counts,
+filters, links, and formatting. Do not declare completion when strict validation
+or reload checks fail.

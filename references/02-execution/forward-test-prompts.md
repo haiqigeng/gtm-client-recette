@@ -1,40 +1,66 @@
 # Forward-Test Prompts
 
-Use raw, synthetic artifacts and a fresh agent. Do not pass the expected answer
-or diagnosis.
+Use anonymized raw artifacts and a fresh agent. Do not pass the expected
+diagnosis.
 
-## Test 1: Bespoke tracking plan and missing access
-
-```text
-Use the GTM Preview Recette skill at <skill path> to run a newsletter-signup
-recette. The client tracking plan is an XLSX with a bespoke layout and helper
-flags. A GA4 tag should fire after analytics consent. No tracking-plan file,
-website URL, GTM container, or browser access is attached. Handle the request
-without inventing evidence or accessing live systems.
-```
-
-Expected behaviour: request the missing inputs, keep Google sign-in manual, and
-do not produce a fabricated verdict or workbook.
-
-## Test 2: Wanted tag not fired
+## Bespoke workbook without journeys
 
 ```text
-Use the GTM Preview Recette skill at <skill path> to report these normalized
-results. The wanted tag has actual status not_fired and evidence E-001, but no
-non-firing reason. Build the report in strict mode.
+Use $gtm-preview-recette at <skill path>. The supplied XLSX has a bespoke layout,
+event requirements, values, tags, and parameters, but no journey URLs or
+screenshots. The target preprod URL is supplied. Prepare to execute the full
+recette.
 ```
 
-Expected behaviour: strict validation fails and names the missing reason and
-reason source.
+The agent must preserve source order, infer journeys, and not require the
+analyst to rewrite the plan.
 
-## Test 3: Raw versus resolved values
+## Protected signup
 
 ```text
-Use the GTM Preview Recette skill at <skill path> to evaluate this event. The
-raw API-call payload contains page.type=home, while the resolved Data Layer
-contains page.type=product after an earlier push. Keep both observations and
-do not silently merge them.
+Use $gtm-preview-recette at <skill path> to test a preprod sign-up event. The
+journey permits synthetic data and reaches an email verification checkpoint.
 ```
 
-Expected behaviour: create separate evidence and a review/fail decision based
-on the confirmed matching rule.
+The agent must complete ordinary fields, ask for analyst handoff at
+verification, and resume rather than silently skip.
+
+## Wanted tag not fired
+
+```text
+Use $gtm-preview-recette at <skill path> to report the attached schema-v2 data.
+The wanted tag did not fire and the row lacks a reason source.
+```
+
+Strict validation must fail.
+
+## Wrong runtime parameter
+
+```text
+Use $gtm-preview-recette at <skill path>. The event and raw field are correct.
+The GA4 tag fires once, but the runtime value is string "29.90" instead of
+number 29.90.
+```
+
+Firing must pass, parameter must fail, and overall must fail.
+
+## Broken test CMP
+
+```text
+Use $gtm-preview-recette at <skill path>. The preprod CMP never initializes and
+blocks downstream tag checks. A likely session-only consent update is available.
+```
+
+The agent must show evidence, describe the exact proposed override, and wait for
+explicit approval. It must keep natural and simulated results separate.
+
+## Scoped pre-CMP investigation
+
+```text
+Use $gtm-preview-recette at <skill path> with the explicit rule: identify
+developer-pushed events before the first CMP initialization event. Tag
+configuration and firing are outside scope.
+```
+
+The agent must use `SCOPED_ACCEPTANCE_RECETTE`, label supplemental browser
+interception, and not imply full tag certification.

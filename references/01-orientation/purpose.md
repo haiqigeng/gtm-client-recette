@@ -1,10 +1,11 @@
 # Purpose
 
-Run expert acceptance testing for an existing GTM implementation. Use the
-client's tracking plan as the specification, reproduce defined or confirmed
-website journeys, inspect the real GTM Preview event sequence, and deliver an
-evidence-backed XLSX workbook.
+Run daily, expert acceptance testing for an existing client-side GTM
+implementation. Treat the tracking plan or explicit scoped acceptance rule as
+the specification, execute the necessary real website journeys, reconcile each
+source-bound requirement with GTM Preview evidence, and provide immediate
+plan-ordered event feedback plus a validated detailed XLSX.
 
-Keep the purpose narrow: verify whether observed runtime behaviour matches the
-confirmed tracking expectation. Do not turn the execution into planning,
-container hygiene, debugging, or implementation work.
+Journey execution and evidence reconciliation are inseparable. Do not optimize
+for workbook production at the expense of coverage, or for journey completion
+at the expense of exact evidence.

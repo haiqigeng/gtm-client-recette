@@ -54,7 +54,7 @@ GTM, or make legal/privacy decisions.
 Install the small deterministic dependency set:
 
 ```powershell
-python -m pip install -e ".[analysis,dev]"
+python -m pip install -e ".[dev]"
 ```
 
 Build a workbook from normalized evidence:

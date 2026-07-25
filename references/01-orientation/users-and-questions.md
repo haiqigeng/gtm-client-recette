@@ -3,22 +3,24 @@
 ## Primary users
 
 - Web analysts and analytics consultants.
-- GTM specialists and QA experts.
+- GTM specialists and analytics QA experts.
 - Agencies and internal analytics teams using an AI agent with Playwright.
 
-The workflow assumes knowledge of dataLayer, custom events, GTM variables,
-triggers, tags, consent, Tag Assistant, and tracking-plan terminology.
+Assume expert familiarity with dataLayer, GTM variables, triggers, tags,
+consent, Tag Assistant, and tracking-plan terminology.
 
 ## Questions answered
 
-- Did the intended website action create the expected event?
-- Was the exact raw `dataLayer.push` payload correct?
-- Did the resolved Data Layer and GTM variables contain the expected values?
-- Did the expected tag fire, and with the correct runtime parameters?
-- Why did a wanted tag not fire according to Preview evidence?
-- Did consent state produce the expected tag behaviour?
-- Which events, tags, values, variables, and evidence are pass, fail, blocked,
-  review, or not tested?
+- Was every planned event attempted in original plan order?
+- Did the intended website action create the expected event occurrence?
+- Did the exact raw `dataLayer.push` contain the required value, type, and
+  structure?
+- Did resolved Data Layer and GTM variables retain the correct state?
+- Did only the concerned tags fire or remain blocked as specified?
+- Did static configuration map to the correct runtime tag parameter?
+- Why did a wanted tag not fire according to available evidence?
+- Which protected or environmental blocker prevented execution?
+- Which requirements are pass, fail, blocked, review, or deliberately outside
+  scope?
 
-Do not answer whether the tracking plan itself is strategically correct. Treat
-that plan as the supplied acceptance specification.
+Do not evaluate whether the tracking strategy itself is correct.

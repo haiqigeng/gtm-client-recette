@@ -1,46 +1,111 @@
 # Browser Session And Readiness
 
+## Dedicated profile
+
+Use a dedicated persistent Playwright profile. Never copy cookies, login
+databases, or session state from a personal Chrome profile. If a requested
+profile is locked, ask the analyst to close that browser or authenticate
+manually in a fresh dedicated profile.
+
+Keep approved website origins explicit. Do not follow an unexpected
+cross-origin redirect without confirming it is part of the journey.
+
 ## Surface registry
 
-Maintain three browser surfaces throughout a run:
+Maintain three surfaces:
 
 | Role | Identity evidence |
 | --- | --- |
-| GTM workspace | Tag Manager URL, container ID, workspace ID, title |
-| Tag Assistant | Tag Assistant URL, connected domain, container output |
-| Debugged website | Target origin, current URL, title, Preview context |
+| GTM workspace | Tag Manager URL, account, container, workspace, title |
+| Tag Assistant | Tag Assistant URL, connected domain and container |
+| Debugged website | Approved origin, current URL, title, Preview context |
 
-Rediscover surfaces by URL and title before every action. Tab indexes are
-temporary observations, not durable identifiers. Stop if the GTM container,
-workspace, connected domain, or website origin changes unexpectedly.
+Rediscover surfaces by role, URL, origin, and title before every action. A tab
+index is never a durable identifier. Stop if the container, workspace, connected
+domain, or target origin changes unexpectedly.
+
+Use `scripts/preview_session_ledger.py` alongside the browser tool when a run
+needs resumable surface and action-boundary state. Do not store authentication or
+Preview tokens in the ledger or user-facing evidence.
 
 ## Readiness gate
 
-Before a business action, verify:
+Before every business action, verify:
 
 1. Tag Assistant is connected to the intended domain and container.
-2. The website is interactive and no blocking overlay remains.
-3. Required page lifecycle events have appeared when applicable.
-4. The requested consent state is visible in Tag Assistant.
-5. Relevant events have remained unchanged for a short configurable quiet
-   window, normally 1.5 to 3 seconds.
+2. The intended website page is interactive.
+3. No unexpected overlay or navigation state blocks the target.
+4. Applicable lifecycle events have appeared.
+5. The required event-level consent state is visible when consent matters.
+6. The Preview stream is unchanged for a configurable quiet window, normally
+   1.5–3 seconds.
 
 Use state checks and event counts. A fixed sleep alone is not readiness proof.
 
 ## Action boundary
 
-For each action, record the last event before the action, the action timestamp,
-the element and page, the first event after the action, and the settled final
-event index. Associate only events inside this boundary with the action unless
-evidence proves an asynchronous continuation.
+Record:
 
-After the action, wait until either the expected event set is present and the
-stream is quiet, or a bounded timeout expires. A timeout is `BLOCKED` or `FAIL`
-according to whether execution or implementation caused the absence.
+- Preview connection and target readiness before the action;
+- last Preview event index before the action;
+- URL, element, action, supplied/synthetic value, and timestamp;
+- first Preview event index after the action;
+- settled final index;
+- quiet-window and bounded-timeout values;
+- whether the stream settled.
 
-## Timing judgement
+After the action, wait until the expected event set is present and the stream is
+quiet, or until a bounded timeout expires. Treat event absence as:
 
-Preserve actual event order even when a business event appears before a CMP
-update or another asynchronous callback. Do not reorder events to fit an
-expected journey. Compare each event against the consent state that Tag
-Assistant shows at that exact event.
+- `FAIL` when the action was valid, Preview remained connected, and the stream
+  settled without the expected event;
+- `BLOCKED` when execution, Preview connectivity, or an upstream/manual
+  condition prevented a valid implementation check.
+
+## Connection watchdog
+
+Check Preview before and after navigation and consequential actions. If the
+debug window closes or Tag Assistant disconnects:
+
+1. stop assigning implementation verdicts;
+2. retain the last confirmed event cursor;
+3. reconnect the intended container/domain;
+4. record the disconnect and reconnection evidence;
+5. repeat the affected action from a stable checkpoint when safe.
+
+Never classify an event as missing from implementation when Preview was
+disconnected.
+
+## History and deduplication
+
+Clear Preview history when supported, or record an explicit last-event
+baseline. Preserve:
+
+- tracking-plan order for execution and reporting;
+- Tag Assistant event index for runtime chronology;
+- action ID for association.
+
+For SPA or cumulative page history, deduplicate only on stable session identity,
+Tag Assistant event index, event name, and push timestamp. Never deduplicate
+solely by event name.
+
+## Cross-domain flows
+
+Register every authorised funnel origin before following it. After a
+cross-domain navigation, rediscover all surfaces, verify Tag Assistant
+connection for the new domain, and establish a new quiet baseline before the
+next action.
+
+## Checkpoint and resume
+
+Checkpoint after:
+
+- initial Preview connection;
+- analyst authentication handback;
+- each protected or consequential step;
+- every completed journey;
+- consent-scenario changes;
+- connection recovery.
+
+On resume, rediscover surfaces and revalidate container, workspace, domain,
+consent state, and event cursor before continuing.

@@ -1,0 +1,144 @@
+{
+  "schema_version": 2,
+  "run": {
+    "run_id": "RUN-SCOPED-001",
+    "run_type": "SCOPED_ACCEPTANCE_RECETTE",
+    "report_title": "Scoped pre-CMP event-order check",
+    "client": "Example Client",
+    "site_url": "https://site.example.test/",
+    "environment": "Example staging",
+    "environment_class": "staging",
+    "container_id": "GTM-TEST",
+    "workspace": "Recette",
+    "tracking_plan_source": "Analyst-defined rule",
+    "acceptance_scope": "Confirm page_ready is pushed before cmp_init; tag layers excluded.",
+    "executed_at": "2026-07-25T10:00:00+00:00",
+    "included_layers": [
+      "raw_api_call"
+    ],
+    "requirement_inventory": [
+      "REQ-SCOPED-001"
+    ],
+    "event_inventory": [
+      {
+        "event_group_id": "EVG-SCOPED-001",
+        "event_name": "page_ready",
+        "plan_order": 1
+      }
+    ]
+  },
+  "requirements": [
+    {
+      "requirement_id": "REQ-SCOPED-001",
+      "event_group_id": "EVG-SCOPED-001",
+      "scope_status": "IN_SCOPE",
+      "source": {
+        "reference": "Analyst rule / page_ready precedes cmp_init",
+        "section": "Scoped acceptance rule",
+        "plan_order": 1
+      },
+      "journey": {
+        "journey_id": "J-PAGELOAD",
+        "step_id": "S-LOAD",
+        "action": "Open landing page",
+        "url": "https://site.example.test/",
+        "selector_or_element": "document",
+        "inferred": false,
+        "inference_source": null,
+        "confidence": "confirmed",
+        "attempted_routes": [
+          "https://site.example.test/"
+        ],
+        "execution_status": "EXECUTED"
+      },
+      "expectation": {
+        "event_name": "page_ready",
+        "field_path": "event",
+        "match_rule": "equals",
+        "expected_value": "page_ready",
+        "expected_type": "string",
+        "expected_occurrence": {
+          "rule": "before_event",
+          "anchor_event_name": "cmp_init"
+        }
+      },
+      "event_observed": true,
+      "occurrence_evidence": {
+        "actual_count": 1,
+        "event_indexes": [
+          1
+        ],
+        "anchor_event_name": "cmp_init",
+        "anchor_event_index": 2,
+        "evidence_id": "EVD-BROWSER-001"
+      },
+      "action_boundary": {
+        "preview_connected_before": true,
+        "target_ready_before": true,
+        "consent_state_before": {},
+        "last_event_before": 0,
+        "action_timestamp": "2026-07-25T10:01:00+00:00",
+        "first_event_after": 1,
+        "settled_final_event": 3,
+        "quiet_window_ms": 2000,
+        "timeout_ms": 15000,
+        "stream_settled": true
+      },
+      "raw_api_call": {
+        "capture_source": "browser_interception",
+        "event_index": 1,
+        "timestamp": "2026-07-25T10:01:00+00:00",
+        "payload": {
+          "event": "page_ready"
+        },
+        "field_state": "present",
+        "field_value": "page_ready",
+        "field_type": "string",
+        "evidence_id": "EVD-BROWSER-001"
+      },
+      "resolved_data_layer": null,
+      "consent": {
+        "applicable": false,
+        "source": "not_in_scope"
+      },
+      "verdict": {
+        "event_occurrence": "PASS",
+        "raw_payload": "PASS",
+        "resolved_data_layer": null,
+        "gtm_variable": null,
+        "tag_firing": null,
+        "tag_parameter": null,
+        "consent": null,
+        "overall": "PASS",
+        "failure_layer": null,
+        "mismatch": null,
+        "reason_source": "preview"
+      },
+      "evidence_ids": [
+        "EVD-ACTION-001",
+        "EVD-BROWSER-001"
+      ],
+      "notes": "Browser interception is supplemental in a full recette but is the declared scoped layer here."
+    }
+  ],
+  "unexpected": [],
+  "blockers": [],
+  "evidence": [
+    {
+      "evidence_id": "EVD-ACTION-001",
+      "kind": "action_boundary",
+      "source": "Playwright",
+      "path_or_url": "evidence/action-001.json",
+      "captured_at": "2026-07-25T10:01:03+00:00",
+      "description": "Stable scoped page-load boundary."
+    },
+    {
+      "evidence_id": "EVD-BROWSER-001",
+      "kind": "browser_interception",
+      "source": "Playwright",
+      "path_or_url": "evidence/browser-001.json",
+      "captured_at": "2026-07-25T10:01:03+00:00",
+      "description": "Deep-cloned dataLayer push observed before cmp_init."
+    }
+  ]
+}

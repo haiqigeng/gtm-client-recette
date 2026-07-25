@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build an evidence-backed GTM Preview recette workbook from normalized JSON."""
+"""Build and semantically validate a schema-v2 GTM Preview recette workbook."""
 
 from __future__ import annotations
 
@@ -17,8 +17,16 @@ from openpyxl.cell import Cell
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-VALID_STATUSES = {"PASS", "FAIL", "BLOCKED", "REVIEW", "NOT_TESTED"}
-STATUS_PRIORITY = ("FAIL", "BLOCKED", "REVIEW", "NOT_TESTED", "PASS")
+from recette_schema import (
+    ReportValidationError,
+    as_rows,
+    dumps_structured,
+    event_rollup,
+    status_of,
+    validate,
+    worst_status,
+)
+
 STATUS_FILLS = {
     "PASS": "C6EFCE",
     "FAIL": "FFC7CE",
@@ -28,84 +36,233 @@ STATUS_FILLS = {
 }
 HEADER_FILL = PatternFill("solid", fgColor="1F4E78")
 HEADER_FONT = Font(color="FFFFFF", bold=True)
-SUBHEADER_FILL = PatternFill("solid", fgColor="D9EAF7")
+SECTION_FILL = PatternFill("solid", fgColor="D9EAF7")
 THIN_BORDER = Border(bottom=Side(style="thin", color="B7C9D6"))
 WRAP_ALIGNMENT = Alignment(vertical="top", wrap_text=True)
 
-MATRIX_HEADERS = [
-    "comparison_id",
+REQUIRED_SHEETS = [
+    "Client Summary",
+    "Requirement Matrix",
+    "Journey Coverage",
+    "Event Evidence",
+    "Tag Evidence",
+    "Consent",
+    "Unexpected Events-Tags",
+    "Blockers",
+    "Evidence Catalogue",
+    "Run Context",
+]
+
+REQUIREMENT_HEADERS = [
+    "requirement_id",
+    "event_group_id",
+    "plan_order",
+    "source_reference",
+    "source_file",
+    "source_sheet",
+    "source_row",
+    "source_cells",
+    "source_section",
     "journey_id",
-    "event_order",
-    "data_layer_event",
-    "data_layer_field",
+    "step_id",
+    "action",
+    "url",
+    "selector_or_element",
+    "inferred",
+    "inference_source",
+    "event_name",
+    "field_path",
+    "match_rule",
+    "expected_value",
+    "expected_type",
+    "expected_occurrence",
+    "occurrence_verdict",
+    "raw_state",
+    "raw_value",
+    "raw_type",
+    "resolved_state",
+    "resolved_value",
+    "resolved_type",
+    "gtm_variable",
+    "gtm_variable_state",
+    "gtm_variable_value",
+    "gtm_variable_type",
     "tag_name",
+    "tag_relevance",
+    "expected_firing",
+    "actual_firing",
+    "fire_count",
     "tag_configuration_field",
-    "tracking_plan_value",
-    "data_layer_value",
-    "tag_configuration_value",
-    "resolved_tag_value",
-    "status",
+    "expected_tag_configuration",
+    "configured_value",
+    "runtime_state",
+    "runtime_value",
+    "runtime_type",
+    "consent_scenario",
+    "consent_source",
+    "consent_state",
+    "raw_verdict",
+    "resolved_verdict",
+    "variable_verdict",
+    "tag_firing_verdict",
+    "tag_parameter_verdict",
+    "consent_verdict",
+    "overall_status",
+    "failure_layer",
     "mismatch_or_reason",
     "evidence_ids",
     "notes",
 ]
 
-SHEETS: dict[str, list[str]] = {
-    "Event Evidence": [
-        "event_id",
-        "journey_id",
-        "step_id",
-        "event_order",
-        "event_name",
-        "occurred_at",
-        "expected",
-        "api_call",
-        "data_layer_snapshot",
-        "status",
-        "evidence_ids",
-        "notes",
-    ],
-    "Evidence": [
-        "evidence_id",
-        "kind",
-        "source",
-        "path_or_url",
-        "captured_at",
-        "description",
-    ],
-}
+JOURNEY_HEADERS = [
+    "plan_order",
+    "event_group_id",
+    "event_name",
+    "requirement_id",
+    "journey_id",
+    "step_id",
+    "action",
+    "url",
+    "selector_or_element",
+    "inferred",
+    "inference_source",
+    "confidence",
+    "attempted_routes",
+    "execution_status",
+    "blocker_id",
+    "overall_status",
+    "evidence_ids",
+    "notes",
+]
 
-DATA_KEYS = {
-    "Event Evidence": "events",
-    "Evidence": "evidence",
-}
-COLLECTION_KEYS = (
-    "journeys",
-    "checks",
-    "events",
-    "tags",
-    "consent_checks",
-    "unexpected",
-    "evidence",
-    "comparisons",
-)
+EVENT_HEADERS = [
+    "plan_order",
+    "event_group_id",
+    "requirement_id",
+    "event_name",
+    "event_observed",
+    "actual_occurrence_count",
+    "occurrence_event_indexes",
+    "anchor_event_name",
+    "anchor_event_index",
+    "occurrence_evidence_id",
+    "capture_source",
+    "event_index",
+    "event_timestamp",
+    "raw_api_call_payload",
+    "raw_field_path",
+    "raw_field_state",
+    "raw_field_value",
+    "raw_field_type",
+    "resolved_data_layer_snapshot",
+    "resolved_field_state",
+    "resolved_field_value",
+    "resolved_field_type",
+    "preview_connected_before",
+    "target_ready_before",
+    "last_event_before",
+    "action_timestamp",
+    "first_event_after",
+    "settled_final_event",
+    "quiet_window_ms",
+    "timeout_ms",
+    "stream_settled",
+    "raw_evidence_id",
+    "resolved_evidence_id",
+    "status",
+    "notes",
+]
 
+TAG_HEADERS = [
+    "plan_order",
+    "event_group_id",
+    "requirement_id",
+    "event_name",
+    "tag_name",
+    "relevance",
+    "expected_firing",
+    "actual_firing",
+    "fire_count",
+    "configuration_field",
+    "configured_value",
+    "runtime_state",
+    "runtime_value",
+    "runtime_type",
+    "firing_status",
+    "parameter_status",
+    "non_firing_reason",
+    "reason_source",
+    "configuration_evidence_id",
+    "runtime_evidence_id",
+    "notes",
+]
 
-class ReportValidationError(ValueError):
-    """Raised when normalized report data fails validation."""
+CONSENT_HEADERS = [
+    "plan_order",
+    "event_group_id",
+    "requirement_id",
+    "event_name",
+    "applicable",
+    "scenario_id",
+    "scenario",
+    "source",
+    "expected_state",
+    "state_at_event",
+    "override_approved",
+    "override_method",
+    "blocker_id",
+    "approval_evidence_id",
+    "evidence_id",
+    "status",
+    "notes",
+]
+
+UNEXPECTED_HEADERS = [
+    "unexpected_id",
+    "event_group_id",
+    "kind",
+    "event_name",
+    "tag_name",
+    "actual",
+    "status",
+    "evidence_ids",
+    "notes",
+]
+
+BLOCKER_HEADERS = [
+    "blocker_id",
+    "type",
+    "checkpoint",
+    "description",
+    "requirement_ids",
+    "analyst_intervention_required",
+    "analyst_help_requested",
+    "analyst_response",
+    "outcome",
+    "status",
+    "evidence_ids",
+    "notes",
+]
+
+EVIDENCE_HEADERS = [
+    "evidence_id",
+    "kind",
+    "source",
+    "path_or_url",
+    "captured_at",
+    "description",
+]
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("input", help="Schema-v2 normalized JSON path, or - for stdin.")
+    parser.add_argument("output", nargs="?", help="Destination .xlsx path.")
+    parser.add_argument("--strict", action="store_true", help="Reject every semantic error.")
     parser.add_argument(
-        "input",
-        help="Normalized JSON path, or - to read JSON from standard input.",
-    )
-    parser.add_argument("output", help="Destination .xlsx path.")
-    parser.add_argument(
-        "--strict",
+        "--validate-only",
         action="store_true",
-        help="Reject missing evidence, statuses, or wanted-tag non-firing reasons.",
+        help="Validate normalized data without writing a workbook.",
     )
     return parser.parse_args()
 
@@ -118,183 +275,62 @@ def load_data(source: str) -> dict[str, Any]:
     return data
 
 
-def as_rows(value: Any, key: str) -> list[dict[str, Any]]:
-    if value is None:
-        return []
-    if not isinstance(value, list):
-        raise ReportValidationError(f"'{key}' must be an array.")
-    rows: list[dict[str, Any]] = []
-    for index, item in enumerate(value, start=1):
-        if not isinstance(item, dict):
-            raise ReportValidationError(f"'{key}' row {index} must be an object.")
-        rows.append(item)
-    return rows
-
-
-def evidence_ids(value: Any) -> list[str]:
-    if value is None:
-        return []
-    if isinstance(value, list):
-        return [str(item).strip() for item in value if str(item).strip()]
-    return [part.strip() for part in str(value).split(",") if part.strip()]
-
-
-def status_of(row: dict[str, Any]) -> str:
-    return str(row.get("status", "")).strip().upper()
-
-
-def validate(data: dict[str, Any], strict: bool) -> list[str]:
-    warnings: list[str] = []
-    errors: list[str] = []
-    run = data.get("run", {})
-    if not isinstance(run, dict):
-        raise ReportValidationError("'run' must be an object.")
-    if strict:
-        for field in ("site_url", "container_id", "workspace", "tracking_plan_source"):
-            if not str(run.get(field, "")).strip():
-                errors.append(f"run: missing required field '{field}'")
-
-    rows = {key: as_rows(data.get(key), key) for key in COLLECTION_KEYS}
-    checks = rows["checks"]
-    comparisons = rows["comparisons"]
-    evidence = rows["evidence"]
-    if not checks:
-        message = "At least one detailed check is required."
-        if strict:
-            raise ReportValidationError(message)
-        warnings.append(message)
-    if not evidence:
-        message = "At least one evidence row is required."
-        if strict:
-            raise ReportValidationError(message)
-        warnings.append(message)
-    if not comparisons:
-        message = "At least one canonical comparison row is required."
-        if strict:
-            raise ReportValidationError(message)
-        warnings.append(message)
-
-    evidence_catalog = [str(row.get("evidence_id", "")).strip() for row in evidence]
-    nonempty_evidence = [item for item in evidence_catalog if item]
-    duplicates = sorted(item for item, count in Counter(nonempty_evidence).items() if count > 1)
-    if duplicates:
-        raise ReportValidationError(
-            "Duplicate evidence IDs: " + ", ".join(duplicates)
-        )
-    known_evidence = set(nonempty_evidence)
-
-    status_collections = {
-        "checks": checks,
-        "journeys": rows["journeys"],
-        "events": rows["events"],
-        "tags": rows["tags"],
-        "consent_checks": rows["consent_checks"],
-        "unexpected": rows["unexpected"],
-        "comparisons": rows["comparisons"],
-    }
-    for key, collection in status_collections.items():
-        for index, row in enumerate(collection, start=1):
-            status = status_of(row)
-            if not status:
-                errors.append(f"{key} row {index}: missing status")
-            elif status not in VALID_STATUSES:
-                errors.append(f"{key} row {index}: invalid status '{status}'")
-
-    evidence_collections = {
-        "checks": checks,
-        "events": rows["events"],
-        "tags": rows["tags"],
-        "consent_checks": rows["consent_checks"],
-        "unexpected": rows["unexpected"],
-        "comparisons": rows["comparisons"],
-    }
-    for key, collection in evidence_collections.items():
-        for index, row in enumerate(collection, start=1):
-            references = evidence_ids(row.get("evidence_ids"))
-            if strict and not references:
-                errors.append(f"{key} row {index}: missing evidence_ids")
-            unknown = sorted(set(references) - known_evidence)
-            if unknown:
-                errors.append(
-                    f"{key} row {index}: unknown evidence IDs {', '.join(unknown)}"
-                )
-
-    for index, row in enumerate(comparisons, start=1):
-        for field in (
-            "comparison_id",
-            "data_layer_event",
-            "tag_name",
-            "tracking_plan_value",
-            "data_layer_value",
-            "tag_configuration_value",
-        ):
-            if not str(row.get(field, "")).strip():
-                errors.append(f"comparisons row {index}: missing '{field}'")
-
-    for index, row in enumerate(rows["tags"], start=1):
-        expected = str(row.get("expected_status", "")).strip().lower().replace(" ", "_")
-        actual = str(row.get("actual_status", "")).strip().lower().replace(" ", "_")
-        if expected == "fired" and actual != "fired":
-            if not str(row.get("non_firing_reason", "")).strip():
-                errors.append(f"tags row {index}: wanted tag lacks non_firing_reason")
-            if not str(row.get("reason_source", "")).strip():
-                errors.append(f"tags row {index}: wanted tag lacks reason_source")
-
-    for index, row in enumerate(checks, start=1):
-        check_type = str(row.get("check_type", "")).strip().lower()
-        expected = str(row.get("expected", "")).strip().lower().replace(" ", "_")
-        actual = str(row.get("actual", "")).strip().lower().replace(" ", "_")
-        if check_type in {"tag_firing", "tag_non_firing_reason"} and expected == "fired" and actual != "fired":
-            if not str(row.get("non_firing_reason", "")).strip():
-                errors.append(f"checks row {index}: wanted tag lacks non_firing_reason")
-            if not str(row.get("reason_source", "")).strip():
-                errors.append(f"checks row {index}: wanted tag lacks reason_source")
-
-    if errors:
-        message = "\n".join(errors)
-        if strict:
-            raise ReportValidationError(message)
-        warnings.extend(errors)
-    return warnings
-
-
 def serialize(value: Any) -> Any:
     if value is None:
         return ""
     if isinstance(value, (dict, list)):
-        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ": "))
+        return dumps_structured(value)
     if isinstance(value, bool):
         return "true" if value else "false"
     return value
 
 
-def overall_status(data: dict[str, Any]) -> str:
-    statuses: list[str] = []
-    for key in ("comparisons", "checks", "events", "tags", "consent_checks", "unexpected"):
-        for row in as_rows(data.get(key), key):
-            status = status_of(row)
-            if status in VALID_STATUSES:
-                statuses.append(status)
-    if not statuses:
-        return "NOT_TESTED"
-    for candidate in STATUS_PRIORITY:
-        if candidate in statuses:
-            return candidate
-    return "NOT_TESTED"
-
-
 def apply_status_fill(cell: Cell) -> None:
-    status = str(cell.value or "").strip().upper()
+    status = status_of(cell.value)
     colour = STATUS_FILLS.get(status)
     if colour:
         cell.fill = PatternFill("solid", fgColor=colour)
         cell.font = Font(bold=True)
 
 
-def style_table(ws, status_column: int | None = None) -> None:
+def _column_cap(header: str) -> int:
+    if any(
+        token in header
+        for token in (
+            "payload",
+            "snapshot",
+            "attempted_routes",
+            "state",
+            "notes",
+            "reason",
+            "description",
+            "value",
+        )
+    ):
+        return 80
+    return 45
+
+
+def style_table(
+    ws,
+    status_headers: tuple[str, ...] = (
+        "status",
+        "overall_status",
+        "occurrence_verdict",
+        "raw_verdict",
+        "resolved_verdict",
+        "variable_verdict",
+        "tag_firing_verdict",
+        "tag_parameter_verdict",
+        "consent_verdict",
+        "firing_status",
+        "parameter_status",
+    ),
+) -> None:
     ws.freeze_panes = "A2"
     if ws.max_row >= 1 and ws.max_column >= 1:
         ws.auto_filter.ref = ws.dimensions
+    header_map = {str(cell.value): cell.column for cell in ws[1]}
     for cell in ws[1]:
         cell.fill = HEADER_FILL
         cell.font = HEADER_FONT
@@ -303,155 +339,379 @@ def style_table(ws, status_column: int | None = None) -> None:
         for cell in row:
             cell.alignment = WRAP_ALIGNMENT
             cell.border = THIN_BORDER
-        if status_column:
-            apply_status_fill(row[status_column - 1])
-
-    for column_index, column_cells in enumerate(ws.columns, start=1):
-        values = [str(cell.value or "") for cell in column_cells]
+        for header in status_headers:
+            column = header_map.get(header)
+            if column:
+                apply_status_fill(row[column - 1])
+    for column_index, cells in enumerate(ws.columns, start=1):
+        values = [str(cell.value or "") for cell in cells]
         longest = max((len(value) for value in values), default=0)
-        header = str(column_cells[0].value or "")
-        cap = 80 if header in {
-            "api_call",
-            "data_layer_snapshot",
-            "expected_parameters",
-            "actual_parameters",
-            "variable_values",
-            "notes",
-            "description",
-            "non_firing_reason",
-        } else 45
-        ws.column_dimensions[get_column_letter(column_index)].width = min(max(longest + 2, 12), cap)
+        header = str(cells[0].value or "")
+        ws.column_dimensions[get_column_letter(column_index)].width = min(
+            max(longest + 2, 12), _column_cap(header)
+        )
 
 
-def add_table_sheet(wb: Workbook, title: str, headers: list[str], rows: Iterable[dict[str, Any]]) -> None:
+def add_table_sheet(
+    wb: Workbook,
+    title: str,
+    headers: list[str],
+    rows: Iterable[dict[str, Any]],
+) -> None:
     ws = wb.create_sheet(title)
     ws.append(headers)
     for row in rows:
         ws.append([serialize(row.get(header)) for header in headers])
-
-    status_column = headers.index("status") + 1 if "status" in headers else None
-    style_table(ws, status_column)
-
-    if title == "Evidence":
-        path_column = headers.index("path_or_url") + 1
-        for row_index in range(2, ws.max_row + 1):
-            cell = ws.cell(row=row_index, column=path_column)
-            target = str(cell.value or "").strip()
-            if target and (target.startswith(("https://", "http://")) or Path(target).exists()):
-                cell.hyperlink = target
-                cell.style = "Hyperlink"
+    style_table(ws)
 
 
-def build_validation_matrix(data: dict[str, Any]) -> list[dict[str, Any]]:
-    comparisons = as_rows(data.get("comparisons"), "comparisons")
-    if comparisons:
-        return comparisons
+def _observation_value(observation: Any, field: str) -> Any:
+    if not isinstance(observation, dict):
+        return ""
+    if field not in observation:
+        return ""
+    return observation[field]
 
-    matrix: list[dict[str, Any]] = []
-    for tag in as_rows(data.get("tags"), "tags"):
-        reason = str(tag.get("non_firing_reason", "")).strip()
-        matrix.append(
+
+def requirement_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
+    output = []
+    for req in as_rows(data.get("requirements"), "requirements"):
+        source = req.get("source", {})
+        journey = req.get("journey", {})
+        expectation = req.get("expectation", {})
+        raw = req.get("raw_api_call") or {}
+        resolved = req.get("resolved_data_layer") or {}
+        variable = req.get("gtm_variable") or {}
+        tag = req.get("tag") or {}
+        consent = req.get("consent") or {}
+        verdict = req.get("verdict", {})
+        output.append(
             {
-                "comparison_id": tag.get("tag_check_id"),
-                "journey_id": tag.get("journey_id"),
-                "event_order": tag.get("event_order", ""),
-                "data_layer_event": tag.get("event_name"),
-                "data_layer_field": "_event / relevant dataLayer variables",
-                "tag_name": tag.get("tag_name"),
-                "tag_configuration_field": "event and configured parameters",
-                "tracking_plan_value": tag.get("expected_parameters") or tag.get("expected_status"),
-                "data_layer_value": tag.get("variable_values"),
-                "tag_configuration_value": tag.get("actual_parameters"),
-                "resolved_tag_value": tag.get("actual_status"),
-                "status": tag.get("status"),
-                "mismatch_or_reason": reason or tag.get("notes"),
-                "evidence_ids": tag.get("evidence_ids"),
-                "notes": "",
+                "requirement_id": req.get("requirement_id"),
+                "event_group_id": req.get("event_group_id"),
+                "plan_order": source.get("plan_order"),
+                "source_reference": source.get("reference"),
+                "source_file": source.get("file"),
+                "source_sheet": source.get("sheet"),
+                "source_row": source.get("row"),
+                "source_cells": source.get("cells"),
+                "source_section": source.get("section"),
+                "journey_id": journey.get("journey_id"),
+                "step_id": journey.get("step_id"),
+                "action": journey.get("action"),
+                "url": journey.get("url"),
+                "selector_or_element": journey.get("selector_or_element"),
+                "inferred": journey.get("inferred"),
+                "inference_source": journey.get("inference_source"),
+                "event_name": expectation.get("event_name"),
+                "field_path": expectation.get("field_path"),
+                "match_rule": expectation.get("match_rule"),
+                "expected_value": expectation.get("expected_value"),
+                "expected_type": expectation.get("expected_type"),
+                "expected_occurrence": expectation.get("expected_occurrence"),
+                "occurrence_verdict": verdict.get("event_occurrence"),
+                "raw_state": raw.get("field_state"),
+                "raw_value": _observation_value(raw, "field_value"),
+                "raw_type": raw.get("field_type"),
+                "resolved_state": resolved.get("field_state"),
+                "resolved_value": _observation_value(resolved, "field_value"),
+                "resolved_type": resolved.get("field_type"),
+                "gtm_variable": variable.get("name"),
+                "gtm_variable_state": variable.get("field_state"),
+                "gtm_variable_value": _observation_value(variable, "field_value"),
+                "gtm_variable_type": variable.get("field_type"),
+                "tag_name": tag.get("name"),
+                "tag_relevance": tag.get("relevance"),
+                "expected_firing": tag.get("expected_firing"),
+                "actual_firing": tag.get("actual_firing"),
+                "fire_count": tag.get("fire_count"),
+                "tag_configuration_field": tag.get("configuration_field"),
+                "expected_tag_configuration": expectation.get(
+                    "expected_tag_configuration"
+                ),
+                "configured_value": tag.get("configured_value"),
+                "runtime_state": tag.get("runtime_state"),
+                "runtime_value": _observation_value(tag, "runtime_value"),
+                "runtime_type": tag.get("runtime_type"),
+                "consent_scenario": consent.get("scenario"),
+                "consent_source": consent.get("source"),
+                "consent_state": consent.get("state_at_event"),
+                "raw_verdict": verdict.get("raw_payload"),
+                "resolved_verdict": verdict.get("resolved_data_layer"),
+                "variable_verdict": verdict.get("gtm_variable"),
+                "tag_firing_verdict": verdict.get("tag_firing"),
+                "tag_parameter_verdict": verdict.get("tag_parameter"),
+                "consent_verdict": verdict.get("consent"),
+                "overall_status": verdict.get("overall"),
+                "failure_layer": verdict.get("failure_layer"),
+                "mismatch_or_reason": verdict.get("mismatch"),
+                "evidence_ids": req.get("evidence_ids"),
+                "notes": req.get("notes"),
             }
         )
+    return output
 
-    for check in as_rows(data.get("checks"), "checks"):
-        if str(check.get("check_type", "")) not in {"data_layer_state", "variable", "tag_parameter"}:
+
+def journey_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
+    output = []
+    for req in as_rows(data.get("requirements"), "requirements"):
+        source = req.get("source", {})
+        journey = req.get("journey", {})
+        expectation = req.get("expectation", {})
+        output.append(
+            {
+                "plan_order": source.get("plan_order"),
+                "event_group_id": req.get("event_group_id"),
+                "event_name": expectation.get("event_name"),
+                "requirement_id": req.get("requirement_id"),
+                "journey_id": journey.get("journey_id"),
+                "step_id": journey.get("step_id"),
+                "action": journey.get("action"),
+                "url": journey.get("url"),
+                "selector_or_element": journey.get("selector_or_element"),
+                "inferred": journey.get("inferred"),
+                "inference_source": journey.get("inference_source"),
+                "confidence": journey.get("confidence"),
+                "attempted_routes": journey.get("attempted_routes"),
+                "execution_status": journey.get("execution_status"),
+                "blocker_id": req.get("blocker_id"),
+                "overall_status": req.get("verdict", {}).get("overall"),
+                "evidence_ids": req.get("evidence_ids"),
+                "notes": req.get("notes"),
+            }
+        )
+    return output
+
+
+def event_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
+    output = []
+    for req in as_rows(data.get("requirements"), "requirements"):
+        source = req.get("source", {})
+        expectation = req.get("expectation", {})
+        raw = req.get("raw_api_call") or {}
+        resolved = req.get("resolved_data_layer") or {}
+        occurrence = req.get("occurrence_evidence") or {}
+        boundary = req.get("action_boundary") or {}
+        output.append(
+            {
+                "plan_order": source.get("plan_order"),
+                "event_group_id": req.get("event_group_id"),
+                "requirement_id": req.get("requirement_id"),
+                "event_name": expectation.get("event_name"),
+                "event_observed": req.get("event_observed"),
+                "actual_occurrence_count": occurrence.get("actual_count"),
+                "occurrence_event_indexes": occurrence.get("event_indexes"),
+                "anchor_event_name": occurrence.get("anchor_event_name"),
+                "anchor_event_index": occurrence.get("anchor_event_index"),
+                "occurrence_evidence_id": occurrence.get("evidence_id"),
+                "capture_source": raw.get("capture_source"),
+                "event_index": raw.get("event_index"),
+                "event_timestamp": raw.get("timestamp"),
+                "raw_api_call_payload": raw.get("payload"),
+                "raw_field_path": expectation.get("field_path"),
+                "raw_field_state": raw.get("field_state"),
+                "raw_field_value": _observation_value(raw, "field_value"),
+                "raw_field_type": raw.get("field_type"),
+                "resolved_data_layer_snapshot": resolved.get("snapshot"),
+                "resolved_field_state": resolved.get("field_state"),
+                "resolved_field_value": _observation_value(resolved, "field_value"),
+                "resolved_field_type": resolved.get("field_type"),
+                "preview_connected_before": boundary.get("preview_connected_before"),
+                "target_ready_before": boundary.get("target_ready_before"),
+                "last_event_before": boundary.get("last_event_before"),
+                "action_timestamp": boundary.get("action_timestamp"),
+                "first_event_after": boundary.get("first_event_after"),
+                "settled_final_event": boundary.get("settled_final_event"),
+                "quiet_window_ms": boundary.get("quiet_window_ms"),
+                "timeout_ms": boundary.get("timeout_ms"),
+                "stream_settled": boundary.get("stream_settled"),
+                "raw_evidence_id": raw.get("evidence_id"),
+                "resolved_evidence_id": resolved.get("evidence_id"),
+                "status": req.get("verdict", {}).get("raw_payload"),
+                "notes": req.get("notes"),
+            }
+        )
+    return output
+
+
+def tag_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
+    output = []
+    for req in as_rows(data.get("requirements"), "requirements"):
+        tag = req.get("tag")
+        if not isinstance(tag, dict) or tag.get("applicable") is not True:
             continue
-        matrix.append(
+        source = req.get("source", {})
+        expectation = req.get("expectation", {})
+        verdict = req.get("verdict", {})
+        output.append(
             {
-                "comparison_id": check.get("check_id"),
-                "journey_id": check.get("journey_id"),
-                "event_order": check.get("event_order"),
-                "data_layer_event": check.get("event_name"),
-                "data_layer_field": check.get("field_path") or check.get("variable_name"),
-                "tag_name": check.get("tag_name"),
-                "tag_configuration_field": check.get("object_name"),
-                "tracking_plan_value": check.get("expected"),
-                "data_layer_value": check.get("actual") if check.get("check_type") != "tag_parameter" else "",
-                "tag_configuration_value": check.get("actual") if check.get("check_type") == "tag_parameter" else "",
-                "resolved_tag_value": "",
-                "status": check.get("status"),
-                "mismatch_or_reason": check.get("non_firing_reason") or check.get("notes"),
-                "evidence_ids": check.get("evidence_ids"),
-                "notes": "",
+                "plan_order": source.get("plan_order"),
+                "event_group_id": req.get("event_group_id"),
+                "requirement_id": req.get("requirement_id"),
+                "event_name": expectation.get("event_name"),
+                "tag_name": tag.get("name"),
+                "relevance": tag.get("relevance"),
+                "expected_firing": tag.get("expected_firing"),
+                "actual_firing": tag.get("actual_firing"),
+                "fire_count": tag.get("fire_count"),
+                "configuration_field": tag.get("configuration_field"),
+                "configured_value": tag.get("configured_value"),
+                "runtime_state": tag.get("runtime_state"),
+                "runtime_value": _observation_value(tag, "runtime_value"),
+                "runtime_type": tag.get("runtime_type"),
+                "firing_status": verdict.get("tag_firing"),
+                "parameter_status": verdict.get("tag_parameter"),
+                "non_firing_reason": tag.get("non_firing_reason"),
+                "reason_source": tag.get("reason_source"),
+                "configuration_evidence_id": tag.get("configuration_evidence_id"),
+                "runtime_evidence_id": tag.get("runtime_evidence_id"),
+                "notes": req.get("notes"),
             }
         )
-    return matrix
+    return output
 
 
-def add_summary(wb: Workbook, data: dict[str, Any], warnings: list[str]) -> None:
+def consent_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
+    output = []
+    for req in as_rows(data.get("requirements"), "requirements"):
+        consent = req.get("consent")
+        if not isinstance(consent, dict):
+            continue
+        source = req.get("source", {})
+        expectation = req.get("expectation", {})
+        output.append(
+            {
+                "plan_order": source.get("plan_order"),
+                "event_group_id": req.get("event_group_id"),
+                "requirement_id": req.get("requirement_id"),
+                "event_name": expectation.get("event_name"),
+                "applicable": consent.get("applicable"),
+                "scenario_id": consent.get("scenario_id"),
+                "scenario": consent.get("scenario"),
+                "source": consent.get("source"),
+                "expected_state": expectation.get("expected_consent_state"),
+                "state_at_event": consent.get("state_at_event"),
+                "override_approved": consent.get("override_approved"),
+                "override_method": consent.get("override_method"),
+                "blocker_id": consent.get("blocker_id"),
+                "approval_evidence_id": consent.get("approval_evidence_id"),
+                "evidence_id": consent.get("evidence_id"),
+                "status": req.get("verdict", {}).get("consent"),
+                "notes": req.get("notes"),
+            }
+        )
+    return output
+
+
+def client_category(req: dict[str, Any]) -> str:
+    status = status_of(req.get("verdict", {}).get("overall"))
+    if status == "PASS":
+        return "tested and correct"
+    if status == "BLOCKED":
+        return "blocked journey or unavailable element"
+    if status in {"REVIEW", "NOT_TESTED"}:
+        return "review or outside scope"
+    if req.get("event_observed") is False:
+        return "expected event not triggered"
+    verdict = req.get("verdict", {})
+    layer = str(verdict.get("failure_layer", "")).lower()
+    raw = req.get("raw_api_call") or {}
+    tag = req.get("tag") or {}
+    if raw.get("field_state") == "absent":
+        return "raw dataLayer field missing"
+    if layer in {"raw_payload", "raw_value", "raw_type"}:
+        return "wrong raw value/type"
+    if layer in {"resolved_data_layer", "gtm_variable"}:
+        return "resolved Data Layer or GTM variable mismatch"
+    if layer in {"tag_firing", "tag_not_fired"}:
+        return "tag not fired"
+    if tag.get("fire_count", 0) > 1 or layer in {"duplicate_tag", "unexpected_tag"}:
+        return "tag fired unexpectedly or duplicated"
+    if layer in {"tag_configuration", "configuration"}:
+        return "tag configuration mismatch"
+    if layer in {"tag_parameter", "runtime_parameter"}:
+        return "runtime tag parameter mismatch"
+    if layer in {"consent", "timing"}:
+        return "consent/timing issue"
+    return "other confirmed mismatch"
+
+
+def add_client_summary(wb: Workbook, data: dict[str, Any], warnings: list[str]) -> None:
     ws = wb.active
-    ws.title = "Summary"
+    ws.title = "Client Summary"
     run = data.get("run", {})
-    matrix = build_validation_matrix(data)
-    counts = Counter(status_of(row) for row in matrix)
-    report_title = str(run.get("report_title") or "GTM Preview Recette Results")
-    overall = overall_status(data)
+    rollup = event_rollup(data)
+    overall = worst_status(item["status"] for item in rollup)
+    counts = Counter(item["status"] for item in rollup)
 
-    ws["A1"] = report_title
+    ws["A1"] = run.get("report_title", "GTM Preview Recette")
     ws["A1"].font = Font(size=18, bold=True, color="1F4E78")
-    ws["A3"] = "Overall status"
-    ws["B3"] = overall
-    ws["A4"] = "Generated at"
-    ws["B4"] = datetime.now(UTC).isoformat(timespec="seconds")
-    ws["A5"] = "Validation rows"
-    ws["B5"] = len(matrix)
-    ws["A6"] = "Evidence items"
-    ws["B6"] = len(as_rows(data.get("evidence"), "evidence"))
-    evidence_linked_rows = sum(bool(evidence_ids(row.get("evidence_ids"))) for row in matrix)
-    ws["A7"] = "Evidence-linked rows"
-    ws["B7"] = f"{evidence_linked_rows}/{len(matrix)}"
-    ws["A8"] = "Validation warnings"
-    ws["B8"] = len(warnings)
+    summary_rows = [
+        ("Overall status", overall),
+        ("Run type", run.get("run_type")),
+        ("Client", run.get("client")),
+        ("Environment", run.get("environment")),
+        ("Target URL", run.get("site_url")),
+        ("Container / workspace", f"{run.get('container_id')} / {run.get('workspace')}"),
+        ("Tracking plan", run.get("tracking_plan_source")),
+        ("Generated at", datetime.now(UTC).isoformat(timespec="seconds")),
+        ("Validation warnings", len(warnings)),
+    ]
+    for row_index, (label, value) in enumerate(summary_rows, start=3):
+        ws.cell(row=row_index, column=1, value=label)
+        ws.cell(row=row_index, column=2, value=serialize(value))
     apply_status_fill(ws["B3"])
 
-    ws["A10"] = "Status"
-    ws["B10"] = "Count"
-    for cell in ws[10]:
+    event_start = 14
+    ws.cell(row=event_start, column=1, value="Plan-ordered event status")
+    ws.cell(row=event_start, column=1).fill = SECTION_FILL
+    ws.cell(row=event_start, column=1).font = Font(bold=True)
+    event_headers = [
+        "plan_order",
+        "event_name",
+        "status",
+        "requirement_count",
+        "reason",
+        "evidence_ids",
+    ]
+    for column, header in enumerate(event_headers, start=1):
+        cell = ws.cell(row=event_start + 1, column=column, value=header)
         cell.fill = HEADER_FILL
         cell.font = HEADER_FONT
-    for offset, status in enumerate(STATUS_PRIORITY, start=11):
-        ws.cell(row=offset, column=1, value=status)
-        ws.cell(row=offset, column=2, value=counts.get(status, 0))
-        apply_status_fill(ws.cell(row=offset, column=1))
+    for row_index, item in enumerate(rollup, start=event_start + 2):
+        for column, header in enumerate(event_headers, start=1):
+            ws.cell(row=row_index, column=column, value=serialize(item.get(header)))
+        apply_status_fill(ws.cell(row=row_index, column=3))
 
-    start = 19
-    ws.cell(row=start, column=1, value="Run context")
-    ws.cell(row=start, column=1).fill = SUBHEADER_FILL
-    ws.cell(row=start, column=1).font = Font(bold=True)
-    for row_offset, (key, value) in enumerate(run.items(), start=start + 1):
-        ws.cell(row=row_offset, column=1, value=str(key))
-        ws.cell(row=row_offset, column=2, value=serialize(value))
+    counts_start = event_start + len(rollup) + 4
+    ws.cell(row=counts_start, column=1, value="Event status totals")
+    ws.cell(row=counts_start, column=1).fill = SECTION_FILL
+    ws.cell(row=counts_start, column=1).font = Font(bold=True)
+    for offset, status in enumerate(("PASS", "FAIL", "BLOCKED", "REVIEW", "NOT_TESTED"), start=1):
+        ws.cell(row=counts_start + offset, column=1, value=status)
+        ws.cell(row=counts_start + offset, column=2, value=counts.get(status, 0))
+        apply_status_fill(ws.cell(row=counts_start + offset, column=1))
 
-    warning_start = start + max(len(run), 1) + 2
-    if warnings:
-        ws.cell(row=warning_start, column=1, value="Validation warnings")
-        ws.cell(row=warning_start, column=1).fill = SUBHEADER_FILL
-        ws.cell(row=warning_start, column=1).font = Font(bold=True)
-        for index, warning in enumerate(warnings, start=warning_start + 1):
-            ws.cell(row=index, column=1, value=warning)
+    category_start = counts_start + 7
+    ws.cell(row=category_start, column=1, value="Requirement outcome categories")
+    ws.cell(row=category_start, column=1).fill = SECTION_FILL
+    ws.cell(row=category_start, column=1).font = Font(bold=True)
+    category_counts = Counter(
+        client_category(req) for req in as_rows(data.get("requirements"), "requirements")
+    )
+    for offset, (category, count) in enumerate(sorted(category_counts.items()), start=1):
+        ws.cell(row=category_start + offset, column=1, value=category)
+        ws.cell(row=category_start + offset, column=2, value=count)
 
     for row in ws.iter_rows():
         for cell in row:
             cell.alignment = WRAP_ALIGNMENT
-    ws.column_dimensions["A"].width = 32
-    ws.column_dimensions["B"].width = 80
+    ws.column_dimensions["A"].width = 30
+    ws.column_dimensions["B"].width = 42
+    ws.column_dimensions["C"].width = 16
+    ws.column_dimensions["D"].width = 20
+    ws.column_dimensions["E"].width = 80
+    ws.column_dimensions["F"].width = 50
     ws.freeze_panes = "A3"
 
 
@@ -463,31 +723,107 @@ def add_run_context(wb: Workbook, run: dict[str, Any]) -> None:
     style_table(ws)
 
 
-def build_workbook(data: dict[str, Any], output: Path, warnings: list[str]) -> None:
+def _generic_rows(rows: list[dict[str, Any]], headers: list[str]) -> list[dict[str, Any]]:
+    return [{header: row.get(header) for header in headers} for row in rows]
+
+
+def build_workbook(
+    data: dict[str, Any],
+    output: Path,
+    warnings: list[str] | None = None,
+) -> None:
+    warnings = warnings or []
     wb = Workbook()
-    add_summary(wb, data, warnings)
-    add_table_sheet(wb, "Validation Matrix", MATRIX_HEADERS, build_validation_matrix(data))
-    wb.move_sheet(wb["Validation Matrix"], offset=-1)
-    wb.active = 0
-    for title, headers in SHEETS.items():
-        add_table_sheet(wb, title, headers, as_rows(data.get(DATA_KEYS[title]), DATA_KEYS[title]))
+    add_client_summary(wb, data, warnings)
+    add_table_sheet(wb, "Requirement Matrix", REQUIREMENT_HEADERS, requirement_rows(data))
+    add_table_sheet(wb, "Journey Coverage", JOURNEY_HEADERS, journey_rows(data))
+    add_table_sheet(wb, "Event Evidence", EVENT_HEADERS, event_rows(data))
+    add_table_sheet(wb, "Tag Evidence", TAG_HEADERS, tag_rows(data))
+    add_table_sheet(wb, "Consent", CONSENT_HEADERS, consent_rows(data))
+    add_table_sheet(
+        wb,
+        "Unexpected Events-Tags",
+        UNEXPECTED_HEADERS,
+        _generic_rows(as_rows(data.get("unexpected"), "unexpected"), UNEXPECTED_HEADERS),
+    )
+    add_table_sheet(
+        wb,
+        "Blockers",
+        BLOCKER_HEADERS,
+        _generic_rows(as_rows(data.get("blockers"), "blockers"), BLOCKER_HEADERS),
+    )
+    add_table_sheet(
+        wb,
+        "Evidence Catalogue",
+        EVIDENCE_HEADERS,
+        _generic_rows(as_rows(data.get("evidence"), "evidence"), EVIDENCE_HEADERS),
+    )
     add_run_context(wb, data.get("run", {}))
+
+    evidence_ws = wb["Evidence Catalogue"]
+    path_column = EVIDENCE_HEADERS.index("path_or_url") + 1
+    for row_index in range(2, evidence_ws.max_row + 1):
+        cell = evidence_ws.cell(row=row_index, column=path_column)
+        target = str(cell.value or "").strip()
+        if target and (
+            target.startswith(("https://", "http://"))
+            or Path(target).is_absolute()
+            or Path(target).exists()
+        ):
+            cell.hyperlink = target
+            cell.style = "Hyperlink"
+
     output.parent.mkdir(parents=True, exist_ok=True)
     wb.save(output)
+    validate_workbook(output, data)
 
-    # Re-open the generated artifact so corrupt or incomplete writes fail immediately.
-    check = load_workbook(output, read_only=True, data_only=False)
-    missing = [title for title in ["Summary", "Validation Matrix", *SHEETS.keys(), "Run Context"] if title not in check.sheetnames]
-    check.close()
-    if missing:
-        raise ReportValidationError("Generated workbook is missing sheets: " + ", ".join(missing))
+
+def validate_workbook(path: Path, data: dict[str, Any]) -> None:
+    workbook = load_workbook(path, read_only=False, data_only=False)
+    try:
+        missing = [title for title in REQUIRED_SHEETS if title not in workbook.sheetnames]
+        if missing:
+            raise ReportValidationError(
+                "Generated workbook is missing sheets: " + ", ".join(missing)
+            )
+        if workbook.sheetnames != REQUIRED_SHEETS:
+            raise ReportValidationError("Generated workbook sheets are not in the required order.")
+        expected_rows = {
+            "Requirement Matrix": len(as_rows(data.get("requirements"), "requirements")) + 1,
+            "Journey Coverage": len(as_rows(data.get("requirements"), "requirements")) + 1,
+            "Event Evidence": len(as_rows(data.get("requirements"), "requirements")) + 1,
+            "Tag Evidence": len(tag_rows(data)) + 1,
+            "Consent": len(consent_rows(data)) + 1,
+            "Unexpected Events-Tags": len(as_rows(data.get("unexpected"), "unexpected")) + 1,
+            "Blockers": len(as_rows(data.get("blockers"), "blockers")) + 1,
+            "Evidence Catalogue": len(as_rows(data.get("evidence"), "evidence")) + 1,
+        }
+        for title, count in expected_rows.items():
+            sheet = workbook[title]
+            if sheet.max_row != count:
+                raise ReportValidationError(
+                    f"Generated workbook sheet '{title}' has {sheet.max_row} rows; expected {count}."
+                )
+            if not sheet.auto_filter.ref:
+                raise ReportValidationError(
+                    f"Generated workbook sheet '{title}' is missing its filter."
+                )
+    finally:
+        workbook.close()
 
 
 def main() -> int:
     args = parse_args()
     try:
         data = load_data(args.input)
-        warnings = validate(data, args.strict)
+        warnings = validate(data, strict=args.strict)
+        if args.validate_only:
+            print("Schema-v2 recette results are valid.")
+            if warnings:
+                print(f"Completed with {len(warnings)} validation warning(s).")
+            return 0
+        if not args.output:
+            raise ReportValidationError("An output .xlsx path is required unless --validate-only is used.")
         output = Path(args.output)
         if output.suffix.lower() != ".xlsx":
             raise ReportValidationError("Output path must use the .xlsx extension.")

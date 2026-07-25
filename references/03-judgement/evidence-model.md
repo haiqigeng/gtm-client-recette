@@ -1,39 +1,54 @@
 # Evidence Model
 
-## Browser surfaces
+## Authoritative evidence
 
-Preserve the relationship among:
+For a full recette use:
 
-1. GTM workspace: account, web container, workspace, Preview, and environment.
-2. Tag Assistant: connection, timeline, event panels, tags, variables, Data
-   Layer, consent, and console.
-3. Debugged website: journey actions, consent interactions, and page state.
+- Tag Assistant event `API Call`: exact object passed to `dataLayer.push`;
+- Tag Assistant `Data Layer`: resolved state at that event;
+- Tag Assistant `Variables`: resolved GTM-variable values;
+- `Tags Fired` and `Tags Not Fired`;
+- tag detail: configuration, runtime parameters, fire count, and direct error;
+- event-level Consent panel when applicable;
+- read-only GTM configuration inspection when Preview lacks static detail.
 
-Human sign-in, MFA, CAPTCHA, payment, email confirmation, and irreversible
-actions remain manual. Do not store credentials or publish GTM changes.
+## Supplemental evidence
 
-## Event evidence
+Label browser interception, console, network, screenshot, and navigation
+observations with their actual source. Supplemental evidence may prove
+chronology or explain an event pushed before Preview attached. It cannot
+silently satisfy exact Tag Assistant API Call evidence in a full run.
 
-For every selected timeline event capture event order/name, raw API call, Data
-Layer panel, variables, fired tags, not-fired tags, consent, console, and
-evidence IDs.
+## Raw versus resolved
 
-The `API call` is the exact live object passed to `dataLayer.push(...)` and is
-the authoritative raw payload. The `Data Layer` panel is the resolved state at
-that moment and may include inherited values from earlier pushes. Never merge
-these sources.
+The API Call is the authoritative raw push. The Data Layer panel is cumulative
+resolved state and can inherit earlier values. Never merge them, backfill a raw
+field from resolved state, or summarize either with ellipses.
 
-## Tag evidence
+## Wanted tag not fired
 
-For fired or failed tags record name, type, fire count, runtime parameters,
-variable values, consent, and direct error evidence. For a wanted tag that does
-not fire, capture trigger evaluation, blocking exception, variable values,
-consent, failure text, and the most specific observed reason.
+Capture:
 
-Use `preview`, `console`, `consent`, or `inferred` as reason source. If no reason
-is established, write `Reason not established from available Preview evidence`.
-Do not convert this observation into a fix or root-cause diagnosis.
+- firing trigger evaluation;
+- blocking trigger or exception;
+- relevant variable values;
+- event-level consent;
+- direct Preview or console failure text;
+- most specific reason and source.
 
-Assign stable evidence IDs. Capture screenshots or equivalent machine-readable
-evidence for connection, every tested event, every failure/review, every wanted
-non-fired tag, and every consent transition.
+Use reason sources `preview`, `console`, `consent`, `inferred`, or
+`not_established`. When evidence cannot establish a reason, write exactly:
+
+`Reason not established from available Preview evidence`
+
+Do not convert that observation into an unproved root cause or fix.
+
+## Evidence IDs
+
+Assign stable unique IDs. Every normalized result references catalogue entries.
+Capture connection, action boundary, each occurred event, every failure or
+review, every wanted non-fire, every protected blocker, every relevant consent
+transition, and every approved override.
+
+Never place authentication credentials, Preview tokens, real personal data, or
+generated passwords in evidence.

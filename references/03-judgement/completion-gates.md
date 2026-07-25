@@ -1,23 +1,35 @@
 # Completion Gates
 
-Strict validation must reject:
+Strict semantic validation rejects:
 
-- missing run context for site URL, container ID, workspace, or plan source;
-- no detailed checks or evidence catalogue;
-- missing or invalid statuses;
-- result rows without evidence IDs;
-- evidence IDs not present in the evidence catalogue;
-- duplicate evidence IDs;
-- wanted-but-not-fired tags or tag checks without a reason and reason source.
-- no canonical comparison rows;
-- comparison rows missing tracking-plan, dataLayer, or tag-configuration values.
+- missing plan or analyst-defined acceptance source;
+- schema version other than 2;
+- missing, duplicate, or out-of-order requirement/event inventories;
+- source-bound requirements without source references;
+- full runs with uncovered requirements;
+- placeholder or prose raw payloads;
+- occurred events without exact Tag Assistant API Call evidence;
+- raw and resolved evidence collapsed together;
+- `PASS` without actual value, state, type, and evidence;
+- fixed mismatches hidden behind `PASS`;
+- undocumented transformations;
+- concerned tags without configuration/firing evidence;
+- runtime parameter `PASS` without runtime value and type;
+- wanted non-fired tags without reason and source;
+- unrelated tags used as primary comparisons;
+- event absence without a valid settled action boundary;
+- `NOT_TESTED` used for an attempted blocker;
+- final protected `BLOCKED` when analyst help was never requested;
+- natural CMP and override evidence merged together;
+- session override without explicit approval, test-CMP blocker, or
+  non-production environment;
+- unknown or duplicate evidence IDs;
+- overall verdicts that hide worse component statuses.
 
-The agent must additionally verify that all planned events, variables, tags,
-parameters, consent scenarios, and relevant unexpected items have been covered.
-Every business action must have a readiness checkpoint, action boundary, and
-settled event-stream checkpoint. Every canonical comparison must preserve the
-tracking-plan source and each observed value without collapsing mismatches.
-The workbook builder validates report structure; it cannot verify that a browser
-observation is truthful.
+The agent additionally verifies the authenticity of browser evidence, coverage
+of relevant alternate journeys, final ordered event feedback, and workbook
+readability. A structural validator cannot prove that browser observations are
+truthful.
 
-If a gate fails, deliver `Incomplete / blocked` with the exact missing item.
+If a gate fails, report the run as incomplete and name the exact missing or
+blocked evidence.

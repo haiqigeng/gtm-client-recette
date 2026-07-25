@@ -4,11 +4,20 @@
 from __future__ import annotations
 
 import argparse
+import tomllib
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 ROOT = Path(__file__).resolve().parents[1]
-INCLUDED = ("SKILL.md", "LICENSE", "agents", "references", "scripts")
+INCLUDED = (
+    "SKILL.md",
+    "LICENSE",
+    "pyproject.toml",
+    "agents",
+    "references",
+    "scripts",
+    "tests",
+)
 EXCLUDED_NAMES = {"__pycache__", "build_skill_package.py", "check_release.py"}
 
 
@@ -34,6 +43,12 @@ def release_files() -> list[Path]:
 
 def main() -> int:
     args = parse_args()
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    expected_name = f"{project['name']}-v{project['version']}.zip"
+    if args.output.name != expected_name:
+        raise SystemExit(
+            f"release archive must be named {expected_name!r}; got {args.output.name!r}"
+        )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with ZipFile(args.output, "w", compression=ZIP_DEFLATED, compresslevel=9) as archive:
         for path in release_files():
