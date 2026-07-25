@@ -1,13 +1,13 @@
 # Changelog
 
-## v1.0.0
+## [v1.0.0](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v1.0.0)
 
 - Consolidate the optimization handoff into the approved utility-first north star.
 - Cover tracking-plan ingestion, journey inference, live GTM Preview evidence,
   plan-ordered verdicts, coverage control, and validated detailed workbooks.
 - Adopt semantic `v` versioning for releases and reject calendar-date versions.
 
-## 2026.7.11 (legacy calendar release)
+## [2026.7.11 (legacy calendar release)](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v2026.7.11)
 
 - Establish the first-maturity orientation, execution, and judgement architecture.
 - Add deterministic browser-surface, consent-readiness, action-boundary, and event-settling rules.

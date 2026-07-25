@@ -4,6 +4,12 @@
 [![CI](https://github.com/haiqigeng/gtm-preview-recette/actions/workflows/ci.yml/badge.svg)](https://github.com/haiqigeng/gtm-preview-recette/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+## Current release
+
+[v1.0.0](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v1.0.0) is
+the current supported release. Download the validated package:
+[gtm-preview-recette-v1.0.0.zip](https://github.com/haiqigeng/gtm-preview-recette/releases/download/v1.0.0/gtm-preview-recette-v1.0.0.zip).
+
 An expert-only workflow for testing an existing Google Tag Manager implementation
 against a client tracking plan. It coordinates Playwright, GTM Preview, Tag
 Assistant, website journeys, consent scenarios, event-level evidence, and a

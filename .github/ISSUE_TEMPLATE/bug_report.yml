@@ -18,6 +18,14 @@ body:
       label: Expected behaviour
     validations:
       required: true
+  - type: input
+    id: skill-version
+    attributes:
+      label: Skill release
+      description: Report the exact release or tag used, for example v1.0.0.
+      placeholder: v1.0.0
+    validations:
+      required: true
   - type: textarea
     id: reproduction
     attributes:
