@@ -5,13 +5,12 @@ from __future__ import annotations
 
 import argparse
 import re
-import subprocess
 import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 FORBIDDEN_SUFFIXES = {".xlsx", ".log", ".png", ".jpg", ".jpeg"}
-FORBIDDEN_NAMES = {"normalized-results.json", "__pycache__"}
+FORBIDDEN_NAMES = {"normalized-results.json"}
 SEMVER_PATTERN = re.compile(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)")
 CALVER_PATTERN = re.compile(
     r"(?:19|20)\d{2}\.(?:0?[1-9]|1[0-2])\.(?:0?[1-9]|[12]\d|3[01])"
@@ -54,20 +53,13 @@ def main() -> int:
     if args.tag and args.tag != expected_tag:
         errors.append(f"tag {args.tag!r} does not match project version {expected_tag!r}")
 
-    if (ROOT / ".git").exists():
-        result = subprocess.run(
-            ["git", "ls-files"],
-            cwd=ROOT,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        tracked_candidates = [ROOT / line for line in result.stdout.splitlines() if line]
-    else:
-        tracked_candidates = [path for path in ROOT.rglob("*") if path.is_file()]
-    for path in tracked_candidates:
+    release_candidates = [path for path in ROOT.rglob("*") if path.is_file()]
+    for path in release_candidates:
         relative = path.relative_to(ROOT)
-        if any(part in {".git", "dist", ".venv"} for part in relative.parts):
+        if any(
+            part in {".git", "dist", ".venv", "__pycache__"}
+            for part in relative.parts
+        ):
             continue
         if path.suffix.lower() in FORBIDDEN_SUFFIXES or FORBIDDEN_NAMES.intersection(relative.parts):
             errors.append(f"release tree contains forbidden artifact: {relative}")
@@ -78,6 +70,12 @@ def main() -> int:
             errors.append(f"SKILL.md does not route to {required}")
     if "observation mode" in skill.lower():
         errors.append("SKILL.md must not introduce observation mode")
+    for obsolete in ("FULL_TRACKING_PLAN_RECETTE", "SCOPED_ACCEPTANCE_RECETTE"):
+        if obsolete in skill:
+            errors.append(
+                f"SKILL.md contains obsolete workflow label {obsolete}; "
+                "applicability must derive from the acceptance requirements"
+            )
     if not re.search(r"name:\s*gtm-preview-recette", skill):
         errors.append("SKILL.md has an invalid skill name")
     normalized_skill = " ".join(skill.split())
@@ -88,8 +86,25 @@ def main() -> int:
         "scripts/inspect_tracking_plan.py",
         "scripts/init_coverage_ledger.py",
         "scripts/preview_session_ledger.py",
+        "scripts/datalayer_recorder.js",
+        "scripts/dom_interaction_census.js",
+        "scripts/decode_browser_requests.py",
+        "scripts/incremental_recette.py",
+        "scripts/client_side_rules.py",
+        "scripts/validate_business_rules.py",
+        "scripts/scan_sensitive_data.py",
+        "scripts/diff_recette_runs.py",
         "references/03-judgement/schema-v2.md",
         "references/02-execution/journey-inference-and-coverage.md",
+        "references/02-execution/tag-assistant-operations.md",
+        "references/02-execution/interaction-and-capture-playbook.md",
+        "references/02-execution/incremental-evidence-workflow.md",
+        "references/02-execution/client-side-destinations-and-containers.md",
+        "references/02-execution/client-side-runtime-contexts.md",
+        "references/03-judgement/conditional-business-and-privacy-rules.md",
+        "references/03-judgement/regression-comparison.md",
+        "references/gold-mini-recette.md",
+        "tests/fixtures/browser_helpers_smoke.html",
     ):
         if not (ROOT / required_file).is_file():
             errors.append(f"skill is missing required execution resource: {required_file}")

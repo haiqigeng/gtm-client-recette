@@ -10,7 +10,14 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-ROLES = {"gtm_workspace", "tag_assistant", "website"}
+ROLES = {
+    "gtm_workspace",
+    "tag_assistant",
+    "website",
+    "vendor_helper",
+    "vendor_ui",
+}
+REQUIRED_ROLES = {"gtm_workspace", "tag_assistant", "website"}
 
 
 def now() -> str:
@@ -53,6 +60,11 @@ def parse_args() -> argparse.Namespace:
     register.add_argument("--url", required=True)
     register.add_argument("--title", required=True)
     register.add_argument("--connected", choices=("true", "false"))
+    register.add_argument(
+        "--surface-id",
+        help="Unique key when more than one workspace, Preview session, or website is open.",
+    )
+    register.add_argument("--container-id")
 
     begin = subparsers.add_parser("begin-action")
     begin.add_argument("ledger", type=Path)
@@ -63,6 +75,8 @@ def parse_args() -> argparse.Namespace:
     begin.add_argument("--action", required=True)
     begin.add_argument("--last-event-before", type=int, required=True)
     begin.add_argument("--consent-state", required=True)
+    begin.add_argument("--browser-context-id")
+    begin.add_argument("--container-id", action="append", default=[])
     begin.add_argument("--quiet-window-ms", type=int, default=2000)
     begin.add_argument("--timeout-ms", type=int, default=15000)
 
@@ -85,10 +99,20 @@ def parse_args() -> argparse.Namespace:
 
 def require_surfaces(ledger: dict[str, Any]) -> None:
     surfaces = ledger.get("surfaces", {})
-    missing = sorted(ROLES - set(surfaces))
+    roles = {
+        str(surface.get("role"))
+        for surface in surfaces.values()
+        if isinstance(surface, dict)
+    }
+    missing = sorted(REQUIRED_ROLES - roles)
     if missing:
         raise SystemExit("Register all browser surfaces before an action: " + ", ".join(missing))
-    if surfaces["tag_assistant"].get("connected") is not True:
+    assistants = [
+        surface
+        for surface in surfaces.values()
+        if isinstance(surface, dict) and surface.get("role") == "tag_assistant"
+    ]
+    if not assistants or not all(surface.get("connected") is True for surface in assistants):
         raise SystemExit("Tag Assistant is not recorded as connected.")
 
 
@@ -124,7 +148,10 @@ def main() -> int:
         }
         if args.connected is not None:
             surface["connected"] = args.connected == "true"
-        ledger.setdefault("surfaces", {})[args.role] = surface
+        if args.container_id:
+            surface["container_id"] = args.container_id
+        surface_id = args.surface_id or args.role
+        ledger.setdefault("surfaces", {})[surface_id] = surface
     elif args.command == "begin-action":
         require_surfaces(ledger)
         if origin(args.url) not in ledger.get("approved_origins", []):
@@ -144,6 +171,8 @@ def main() -> int:
                 "target_ready_before": True,
                 "last_event_before": args.last_event_before,
                 "consent_state_before": args.consent_state,
+                "browser_context_id": args.browser_context_id,
+                "container_ids": args.container_id,
                 "action_timestamp": now(),
                 "quiet_window_ms": args.quiet_window_ms,
                 "timeout_ms": args.timeout_ms,

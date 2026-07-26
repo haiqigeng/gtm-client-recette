@@ -2,7 +2,6 @@
   "schema_version": 2,
   "run": {
     "run_id": "RUN-SYNTHETIC-001",
-    "run_type": "FULL_TRACKING_PLAN_RECETTE",
     "report_title": "Synthetic add-to-cart GTM recette",
     "client": "Example Client",
     "site_url": "https://shop.example.test/product",
@@ -10,6 +9,14 @@
     "environment_class": "preprod",
     "container_id": "GTM-TEST",
     "workspace": "Recette",
+    "containers": [
+      {
+        "container_id": "GTM-TEST",
+        "workspace": "Recette",
+        "role": "primary",
+        "container_type": "web"
+      }
+    ],
     "tracking_plan_source": "tracking-plan.xlsx",
     "acceptance_scope": "Full synthetic fixture",
     "executed_at": "2026-07-25T10:00:00+00:00",
@@ -55,6 +62,9 @@
         "journey_id": "J-PRODUCT",
         "step_id": "S-ADD",
         "action": "Click Add to cart",
+        "action_value": null,
+        "action_value_type": "null",
+        "action_value_source": "not_applicable",
         "url": "https://shop.example.test/product",
         "selector_or_element": "button:has-text('Add to cart')",
         "inferred": true,
@@ -99,7 +109,8 @@
         "settled_final_event": 12,
         "quiet_window_ms": 2000,
         "timeout_ms": 15000,
-        "stream_settled": true
+        "stream_settled": true,
+        "evidence_id": "EVD-ACTION-001"
       },
       "raw_api_call": {
         "capture_source": "tag_assistant_api_call",
@@ -160,6 +171,7 @@
         "raw_payload": "PASS",
         "resolved_data_layer": "PASS",
         "gtm_variable": "PASS",
+        "tag_configuration": "PASS",
         "tag_firing": "PASS",
         "tag_parameter": "PASS",
         "consent": null,

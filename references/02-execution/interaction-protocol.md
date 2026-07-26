@@ -8,14 +8,14 @@ bullets adapted to the request. Prefix every bullet with exactly one plain
 responsibility label: `Analyst`, `Codex`, or `Shared`.
 
 - `Analyst`: Provide the tracking plan or acceptance rule and target environment.
-- `Codex`: After `READY`, interpret the plan and open the dedicated Playwright session.
-- `Analyst`: Complete protected authentication inside that dedicated session.
+- `Codex`: After `READY`, interpret the plan and attach or open the controlled browser session.
+- `Analyst`: Complete protected authentication inside that controlled session.
 - `Shared`: Confirm container, workspace, Preview connection, target origin, and scope.
-- `Codex`: Execute or infer every journey in plan order, give event verdicts, and build the XLSX.
+- `Codex`: Cover every applicable interaction in plan order, reconcile the event stream, give event verdicts, and build the XLSX.
 
-State that authentication in another browser does not authenticate the
-dedicated Playwright session. Never ask for, copy, store, log, or automate
-credentials.
+State which analyst-approved attached or dedicated browser context will be
+used. Authentication outside that controlled context does not carry over.
+Never ask for, copy, store, log, or automate credentials.
 
 List only missing essentials: acceptance specification and target environment.
 Mention supplied journeys, URLs, screenshots, GTM identifiers, and consent
@@ -66,7 +66,7 @@ consequential choices under analyst control.
 At a protected checkpoint:
 
 1. preserve the Preview connection and current action boundary;
-2. explain the exact step the analyst must complete in the dedicated session;
+2. explain the exact step the analyst must complete in the controlled session;
 3. wait for `SIGNED IN` or `DONE`;
 4. rediscover all browser surfaces and verify connection after handback;
 5. resume the same event automatically.
@@ -77,7 +77,8 @@ execution. Never skip the remainder silently.
 
 ## Per-event feedback
 
-After every planned event, provide one result and continue:
+After completing every applicable interaction case for a planned event, provide
+one aggregate result and continue:
 
 ```text
 Event 07 — add_to_cart: PASS
@@ -101,4 +102,7 @@ Event 09 — purchase: BLOCKED
 ```
 
 Do not list unrelated tags. After coverage, repeat every event once in a
-concise final list in original plan order.
+concise final list in original plan order. Group homogeneous successful cases
+with the tested count, but name each distinct failed, blocked, or review case
+and its placement/value. Do not emit one final verdict after a representative
+click while other applicable cases remain pending.

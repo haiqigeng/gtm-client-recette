@@ -13,11 +13,18 @@ The workbook contains, in order:
 3. `Journey Coverage`
 4. `Event Evidence`
 5. `Tag Evidence`
-6. `Consent`
-7. `Unexpected Events-Tags`
-8. `Blockers`
-9. `Evidence Catalogue`
-10. `Run Context`
+6. `Destination Evidence`
+7. `Trigger & Sequence`
+8. `Consent`
+9. `Business Rules`
+10. `Sensitive Data`
+11. `Client Checks`
+12. `Regression`
+13. `Container Context`
+14. `Unexpected Events-Tags`
+15. `Blockers`
+16. `Evidence Catalogue`
+17. `Run Context`
 
 `Client Summary` includes the complete event list in original plan order,
 status, requirement count, concise reason, and evidence IDs.
@@ -25,15 +32,33 @@ status, requirement count, concise reason, and evidence IDs.
 `Requirement Matrix` is the atomic technical deliverable. Show source
 expectation, raw value/state/type, resolved value/state/type, GTM variable,
 concerned tag configuration, firing status, runtime value/type, applicable
-consent, occurrence evidence, component verdicts, overall verdict, mismatch,
-and evidence side by side.
+destination request, trigger/sequence, consent, business/privacy/client/regression
+components, occurrence evidence, overall verdict, mismatch, and evidence side
+by side.
 
 `Journey Coverage` lists supplied or inferred actions, attempted routes,
-execution status, blockers, and evidence in source order.
+safe action value/type/source, execution status, blockers, and evidence in
+source order. Protected analyst input is represented only by its canonical
+redacted marker.
 
-Keep raw payload, resolved snapshot, tag configuration, runtime value, and
-consent evidence distinct on their dedicated sheets. Serialize objects and
-arrays for display only; retain structured values in normalized JSON.
+Keep raw payload, resolved snapshot, tag configuration, runtime value,
+destination request, trigger/sequence, consent, business-rule, redacted
+sensitive-data, client-check, regression, and container evidence distinct on
+their dedicated sheets. Serialize objects and arrays for display only; retain
+structured values in normalized JSON.
+
+`Destination Evidence` shows the claimed destination ID and vendor event name,
+their declared raw request paths, the expected and actual tested-parameter
+paths, decoded value/type, request behaviour/count, endpoint, and evidence.
+This lets an analyst trace each plan value back to the captured browser send.
+
+`Evidence Catalogue` keeps canonical evidence kind/source separate from
+optional `source_detail`, then path/URL, timezone-qualified capture time, and
+redacted description.
+
+Keep all 17 sheets even when an optional domain has zero rows. The empty,
+filtered sheet makes non-applicability visible and prevents a missing worksheet
+from hiding an omitted layer.
 
 The builder reloads the XLSX and verifies required sheets, order, row counts,
 filters, links, and formatting. Do not declare completion when strict validation

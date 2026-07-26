@@ -1,15 +1,22 @@
 {
   "schema_version": 2,
   "run": {
-    "run_id": "RUN-SCOPED-001",
-    "run_type": "SCOPED_ACCEPTANCE_RECETTE",
-    "report_title": "Scoped pre-CMP event-order check",
+    "run_id": "RUN-LIMITED-001",
+    "report_title": "Pre-CMP event-order check",
     "client": "Example Client",
     "site_url": "https://site.example.test/",
     "environment": "Example staging",
     "environment_class": "staging",
     "container_id": "GTM-TEST",
     "workspace": "Recette",
+    "containers": [
+      {
+        "container_id": "GTM-TEST",
+        "workspace": "Recette",
+        "role": "primary",
+        "container_type": "web"
+      }
+    ],
     "tracking_plan_source": "Analyst-defined rule",
     "acceptance_scope": "Confirm page_ready is pushed before cmp_init; tag layers excluded.",
     "executed_at": "2026-07-25T10:00:00+00:00",
@@ -17,11 +24,11 @@
       "raw_api_call"
     ],
     "requirement_inventory": [
-      "REQ-SCOPED-001"
+      "REQ-LIMITED-001"
     ],
     "event_inventory": [
       {
-        "event_group_id": "EVG-SCOPED-001",
+        "event_group_id": "EVG-LIMITED-001",
         "event_name": "page_ready",
         "plan_order": 1
       }
@@ -29,18 +36,21 @@
   },
   "requirements": [
     {
-      "requirement_id": "REQ-SCOPED-001",
-      "event_group_id": "EVG-SCOPED-001",
+      "requirement_id": "REQ-LIMITED-001",
+      "event_group_id": "EVG-LIMITED-001",
       "scope_status": "IN_SCOPE",
       "source": {
         "reference": "Analyst rule / page_ready precedes cmp_init",
-        "section": "Scoped acceptance rule",
+        "section": "Acceptance rule",
         "plan_order": 1
       },
       "journey": {
         "journey_id": "J-PAGELOAD",
         "step_id": "S-LOAD",
         "action": "Open landing page",
+        "action_value": null,
+        "action_value_type": "null",
+        "action_value_source": "not_applicable",
         "url": "https://site.example.test/",
         "selector_or_element": "document",
         "inferred": false,
@@ -57,6 +67,7 @@
         "match_rule": "equals",
         "expected_value": "page_ready",
         "expected_type": "string",
+        "resolved_data_layer_applicable": false,
         "expected_occurrence": {
           "rule": "before_event",
           "anchor_event_name": "cmp_init"
@@ -82,7 +93,8 @@
         "settled_final_event": 3,
         "quiet_window_ms": 2000,
         "timeout_ms": 15000,
-        "stream_settled": true
+        "stream_settled": true,
+        "evidence_id": "EVD-ACTION-001"
       },
       "raw_api_call": {
         "capture_source": "browser_interception",
@@ -112,13 +124,13 @@
         "overall": "PASS",
         "failure_layer": null,
         "mismatch": null,
-        "reason_source": "preview"
+        "reason_source": "inferred"
       },
       "evidence_ids": [
         "EVD-ACTION-001",
         "EVD-BROWSER-001"
       ],
-      "notes": "Browser interception is supplemental in a full recette but is the declared scoped layer here."
+      "notes": "Browser interception is the declared raw-browser evidence; Preview-dependent layers are not applicable to this acceptance rule."
     }
   ],
   "unexpected": [],
@@ -130,7 +142,7 @@
       "source": "Playwright",
       "path_or_url": "evidence/action-001.json",
       "captured_at": "2026-07-25T10:01:03+00:00",
-      "description": "Stable scoped page-load boundary."
+      "description": "Stable page-load boundary."
     },
     {
       "evidence_id": "EVD-BROWSER-001",

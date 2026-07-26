@@ -24,7 +24,7 @@ Use schema version 2 for every new run:
 }
 ```
 
-Do not normalize a full recette as prose collections. The atomic unit is one
+Do not normalize a recette as prose collections. The atomic unit is one
 source-bound tracking-plan requirement, not merely an event name.
 
 Schema-v1 or observation-only data must be re-normalized from its original plan
@@ -36,8 +36,6 @@ and evidence. Do not mechanically promote incomplete v1 rows to schema-v2
 `run` requires:
 
 - `run_id`;
-- `run_type`: `FULL_TRACKING_PLAN_RECETTE` or
-  `SCOPED_ACCEPTANCE_RECETTE`;
 - `report_title`, `client`, `site_url`, `environment`, and
   `environment_class`;
 - `container_id`, `workspace`, `tracking_plan_source`, and
@@ -46,6 +44,21 @@ and evidence. Do not mechanically promote incomplete v1 rows to schema-v2
 - `included_layers`;
 - `requirement_inventory`: every requirement ID in original source order;
 - `event_inventory`: every event group in original plan order.
+
+Schema version remains 2, but every v1.1 run must explicitly prove its
+client-side scope:
+
+- `containers`: required non-empty inventory with one primary plus applicable
+  analytics, marketing, or shared entries, each explicitly typed `web` or
+  `client_side`;
+- `browser_contexts`: stable viewport, device, user-state, and variant
+  definitions;
+- `regression_context`: optional previous-run source and acceptance-relevant
+  read-only container changes.
+
+The singular `container_id` and `workspace` must match the primary web
+container. Server containers are not valid entries. Re-normalize a legacy row
+that lacks this inventory before certification.
 
 Use this event inventory shape:
 
@@ -57,12 +70,34 @@ Use this event inventory shape:
 }
 ```
 
-For a full recette, the applicable evidence chain includes raw API call,
-resolved Data Layer, GTM variable, tag configuration, tag firing, runtime tag
-parameter, and consent when applicable.
+Use one recette workflow. `acceptance_scope`, source-bound expectations, and
+per-requirement applicability determine the required evidence links. Do not
+add a run-mode field.
 
-For a scoped recette, list the exact included layers. Never imply certification
-of an excluded layer.
+Enumerate every applicable base and extension layer in `included_layers`:
+
+- `raw_api_call`;
+- `resolved_data_layer`;
+- `gtm_variable`;
+- `tag_configuration`;
+- `tag_firing`;
+- `tag_parameter`;
+- `consent_when_applicable`;
+- `source_signal_when_no_data_layer_push`;
+- `destination_request_when_applicable`;
+- `trigger_logic_when_applicable`;
+- `tag_sequence_when_applicable`;
+- `business_rules_when_declared`;
+- `sensitive_data_scan`;
+- `client_checks_when_applicable`;
+- `regression_when_baseline_provided`;
+- `container_context_when_applicable`;
+- `conditional_scenarios_when_applicable`.
+
+The validator derives required layers from in-scope expectations and rejects
+an omitted applicable layer. Extra names outside the supported set are also
+invalid. An unavailable layer remains explicit in the requirement status and
+cannot be silently substituted.
 
 ## Atomic requirement
 
@@ -75,15 +110,26 @@ Each `requirements` row contains:
   "scope_status": "IN_SCOPE",
   "source": {},
   "journey": {},
+  "container_id": "GTM-XXXX",
+  "browser_context_id": "mobile-auth-b",
+  "scenario": {},
   "expectation": {},
   "event_observed": true,
   "occurrence_evidence": {},
   "action_boundary": {},
   "raw_api_call": {},
+  "source_signal": {},
   "resolved_data_layer": {},
   "gtm_variable": {},
   "tag": {},
+  "destination_request": {},
+  "trigger_evaluation": {},
+  "tag_sequence": {},
   "consent": {},
+  "business_rule_results": [],
+  "sensitive_data_scan": {},
+  "client_checks": [],
+  "regression": {},
   "verdict": {},
   "evidence_ids": [],
   "notes": ""
@@ -114,11 +160,23 @@ original row/cell coordinates with that number.
 Record:
 
 - `journey_id`, `step_id`, `action`, and `url`;
+- `action_value`, exact `action_value_type`, and `action_value_source`;
 - `selector_or_element`;
 - `inferred`, `inference_source`, and `confidence`;
 - every `attempted_routes` entry;
 - `execution_status`: `PENDING`, `EXECUTED`, `BLOCKED`, `REVIEW`, or
   `NOT_TESTED`.
+
+Use action-value source `not_applicable`, `synthetic`,
+`analyst_supplied_non_sensitive`, `protected_analyst_entry`, or
+`site_default`. `not_applicable` retains explicit `null`. Protected analyst
+input stores only `<analyst-entered-protected>`, never the entered value.
+
+Keep the lightweight interaction census and its per-case action boundaries in
+the coverage/session ledger. Do not clone a source-bound requirement merely
+because it has repeated element instances. Roll the normalized requirement up
+from all applicable cases using the worst status, and bind distinct failures
+or unexpected occurrences to their own evidence.
 
 ### Expectation
 
@@ -132,10 +190,26 @@ Record:
   parameter expectation when a tag is concerned;
 - `expected_tag_configuration` when the plan prescribes an exact variable or
   configuration mapping;
+- `source_mechanism` when the accepted signal is not an explicit
+  `data_layer_push`;
+- `vendor_family`, `destination_id`, `destination_event_name`, expected
+  request behaviour, endpoint pattern, and destination parameter when a
+  client-side destination is accepted;
+- `destination_id_parameter_path`, `destination_event_parameter_path`, and
+  `destination_parameter_path`, rooted at `query.`, `body.`, or `headers.`,
+  when a browser send is expected;
+- `trigger_contract` and `sequence_contract` when exact trigger/exception/order
+  behaviour is accepted;
 - `expected_consent_state` only when consent is an acceptance requirement;
+- `consent_contract` for advanced four-signal, transition, transport,
+  redaction, or passthrough requirements;
+- `business_rules` and `sensitive_data_policy` when applicable;
 - input, rule, and output for a `documented_transform`.
 
 Preserve explicit expected `null`; do not omit `expected_value`.
+Quote literal vendor keys that contain path syntax:
+`query["ep.value"]` and `query["cd[value]"]`. Use `[0]` for a numeric index and
+`[]` only for an array wildcard.
 
 Represent `expected_occurrence` as `once`, `at_least_once`, `absent`, or an
 object such as:
@@ -147,6 +221,10 @@ object such as:
 }
 ```
 
+Conditional branches use `rule: conditional`, stable `condition_id`, and
+`branch_rule`. `non_deterministic` requires documented attempts and cannot pass
+on silent absence.
+
 ### Action boundary
 
 For an attempted in-scope action retain:
@@ -157,16 +235,21 @@ For an attempted in-scope action retain:
   "target_ready_before": true,
   "consent_state_before": {},
   "last_event_before": 37,
-  "action_timestamp": "ISO-8601",
+  "action_timestamp": "2026-07-25T10:01:00+00:00",
   "first_event_after": 38,
   "settled_final_event": 42,
   "quiet_window_ms": 2000,
   "timeout_ms": 15000,
-  "stream_settled": true
+  "stream_settled": true,
+  "evidence_id": "EVD-ACTION-017"
 }
 ```
 
-For an absent expected event, retain the same negative action evidence.
+The timestamp must be timezone-qualified. Cursor values are non-negative
+integers with `last_event_before < first_event_after <= settled_final_event`,
+and occurrence/anchor indexes must fit the retained window. For an absent
+expected event, retain the same negative action evidence. A finalized
+`REVIEW` attempt needs the boundary too; `REVIEW` cannot erase chronology.
 
 ### Occurrence evidence
 
@@ -205,9 +288,19 @@ For an occurred event:
 }
 ```
 
-The payload must be the exact structured Tag Assistant API Call object. Do not
-store prose, ellipses, or omitted placeholders. Browser interception is
-supplemental and must use `capture_source: browser_interception`.
+When a resolved GTM, variable, tag, firing, or runtime-parameter link applies,
+the payload must be the exact structured Tag Assistant API Call object. Do not
+store prose, ellipses, or omitted placeholders. Browser interception uses
+`capture_source: browser_interception`; it can preserve raw-browser chronology
+but cannot certify an applicable Preview-dependent link.
+
+### Non-dataLayer source signal
+
+When the accepted signal is a GTM native/auto event, DOM event, direct vendor
+call, Custom HTML execution, or enhanced-measurement event, do not fabricate a
+raw API call. Record `source_signal` with mechanism, event name, actual capture
+source, observed state, and evidence ID. Keep resolved, variable, tag, and
+destination layers when they remain applicable.
 
 ### Resolved Data Layer and GTM variable
 
@@ -253,6 +346,36 @@ Use `applicable: true` only for a concerned tag. Record:
 
 Do not add unrelated tags.
 
+Add `container_id`, `vendor_family`, `destination_id`, and `template_type` when
+applicable. Preserve direct execution/console errors separately from firing.
+
+### Destination request
+
+For an accepted analytics or media send, record:
+
+- applicable vendor, container, and destination ID;
+- exact vendor-facing event/conversion name;
+- request behaviour/count, method, URL, and browser-network source;
+- raw request paths for destination ID, vendor event, and tested parameter;
+- decoded parameter state, value, and type;
+- primary evidence ID and optional vendor-helper evidence.
+
+Network `PASS` requires `capture_source: browser_network`. Vendor helpers are
+supplementary and browser evidence does not certify vendor ingestion. The
+validator derives query values from `request_url` and resolves structured body
+or header paths; every decoded ID, event, and parameter claim must reconcile
+with that raw request evidence.
+
+### Trigger and sequence
+
+`trigger_evaluation` records `ALL`, `ANY`, or `TRIGGER_GROUP`, actual result,
+each condition, blocking exceptions, and evidence. `tag_sequence` records the
+actual ordered tags and evidence. A passing row must reconcile with the
+declared contracts. Condition truth is recomputed from expected/actual values,
+matched blocking exceptions force a blocked result, and the default sequence
+contract is exact. Set `allow_additional_steps: true` explicitly only when the
+acceptance source permits intervening steps.
+
 ### Consent
 
 Use `applicable: true` for an acceptance check or necessary tag-behaviour
@@ -269,6 +392,50 @@ evidence.
 
 Never merge a natural-CMP and override result into one requirement.
 
+For Advanced Consent Mode v2, `consent_contract` can prescribe all four
+signals, default/update transition, full/cookieless/blocked transport,
+`ads_data_redaction`, `url_passthrough`, required tag-level consent types, and
+tag-level checks. Each check status is recomputed from its exact expected and
+actual state.
+
+### Business, sensitive-data, and client checks
+
+`business_rule_results` maps every declared safe rule ID to a deterministic
+status and evidence ID. Declared rules require the component verdict and use
+type-strict comparisons.
+
+`sensitive_data_scan` records scanned targets and redacted findings. Findings
+must never retain `value`, `raw_value`, or `sample`. The target inventory and
+full redacted findings must match a fresh deterministic scan.
+
+`client_checks` uses explicit categories for SPA/auto-event source, responsive
+context, cross-domain/linker/cookie/iframe behaviour, dataLayer integrity,
+platform mapping, debug mode/DebugView, current vendor limits, Custom
+JavaScript, container conflicts, and tag dependencies.
+
+`regression` is applicable only with a supplied baseline and records baseline
+and current acceptance status, change classification, and evidence.
+
+Every applicable extension requires its own component verdict. A normalized
+row cannot omit destination, trigger, sequence, consent, business-rule,
+sensitive-data, client-check, or regression evidence/verdict while preserving
+an overall `PASS`.
+
+The same rule applies to base layers: required raw API Call, resolved Data
+Layer, GTM variable, tag configuration, tag firing, and runtime parameter each
+retain their own component verdict. `tag_parameter` never substitutes for
+`tag_configuration`.
+
+### Evidence catalogue binding
+
+Every top-level `evidence` row requires a unique ID, kind, actual source, path
+or URL, timezone-qualified `captured_at`, and concise redacted description.
+Nested evidence IDs are bound to their layer-specific kind: action boundary,
+API Call, resolved Data Layer, variable, tag configuration/runtime,
+source/scenario, browser request/helper, trigger, sequence, consent,
+business-rule evaluation, privacy scan, client checks, and regression
+comparison cannot be interchanged.
+
 ### Verdict
 
 Use component fields:
@@ -276,12 +443,22 @@ Use component fields:
 ```json
 {
   "event_occurrence": "PASS",
+  "source_signal": null,
   "raw_payload": "PASS",
   "resolved_data_layer": "PASS",
   "gtm_variable": "PASS",
+  "tag_configuration": "PASS",
   "tag_firing": "PASS",
   "tag_parameter": "PASS",
+  "destination_request": "PASS",
+  "destination_parameter": "PASS",
+  "trigger_logic": "PASS",
+  "tag_sequence": "PASS",
   "consent": null,
+  "business_rule": "PASS",
+  "sensitive_data": "PASS",
+  "client_checks": "PASS",
+  "regression": null,
   "overall": "PASS",
   "failure_layer": null,
   "mismatch": null,
@@ -301,9 +478,12 @@ For a protected checkpoint, record whether analyst intervention was required,
 requested, and completed. A final protected `BLOCKED` is invalid when help was
 never requested.
 
-Keep relevant unexpected events, duplicate pushes, and unexpected concerned
-tags in `unexpected`. Do not turn every unrelated native or container event into
-noise.
+Keep relevant unplanned, duplicate, premature, delayed, wrong-order, and
+wrong-context business pushes, plus unexpected concerned tags, in `unexpected`.
+Include the case/action identity, event index, page/state context,
+classification, actual observation, status, and evidence IDs in the row or its
+bound evidence. Do not turn every unrelated native `gtm.*` or container event
+into noise.
 
 ## Validation invariants
 
@@ -313,13 +493,22 @@ Strict mode rejects:
 - requirements stored out of plan order;
 - missing source references;
 - placeholder raw payloads;
-- occurred events without exact Tag Assistant API Call evidence in a full run;
+- occurred events without exact Tag Assistant API Call evidence when a
+  Preview-dependent link applies;
+- non-dataLayer signals without exact source evidence;
 - merged raw and resolved evidence;
 - value/type/state contradictions;
 - unsupported silent transformations;
 - event absence without a stable action boundary;
 - `PASS` values that contradict fixed expectations;
 - wanted non-fired tags without a reason and source;
+- destination PASS without browser-network evidence or with wrong ID,
+  endpoint, send behaviour, parameter, value, or type;
+- trigger, exception, or tag-sequence false PASSes;
+- advanced consent false PASSes or unapproved session overrides;
+- cross-field results that contradict deterministic evaluation;
+- unredacted or incomplete sensitive-data findings;
+- client-context and prior-run false PASSes;
 - unrelated tag comparisons;
 - `NOT_TESTED` used for an attempted blocker;
 - protected blockers where analyst help was never requested;
@@ -327,8 +516,9 @@ Strict mode rejects:
 - unknown or duplicate evidence IDs;
 - an overall status that hides a worse component verdict.
 
-The executable example is
-`tests/fixtures/valid_full.json`. Validate normalized results with:
+Executable examples are `tests/fixtures/valid_full.json`,
+`tests/fixtures/valid_limited_layers.json`, and the client-side extension
+fixture used by `tests/test_pipeline.py`. Validate normalized results with:
 
 ```powershell
 python scripts/build_recette_report.py normalized-results.json --strict --validate-only

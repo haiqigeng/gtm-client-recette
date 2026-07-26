@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>GTM recette browser helper smoke test</title>
+    <script src="../../scripts/datalayer_recorder.js"></script>
+  </head>
+  <body>
+    <header>
+      <a id="primary" href="#target" data-track="hero">Primary action</a>
+    </header>
+    <main>
+      <button aria-label="Quote now">Start</button>
+      <input name="postal" value="75001">
+    </main>
+    <script src="../../scripts/dom_interaction_census.js"></script>
+    <script>
+      window.__gtmRecetteJournal.markAction("ACT-001");
+      const payload = {
+        event: "begin_checkout",
+        value: 29.9,
+        optional: undefined
+      };
+      window.dataLayer.push(payload, { event: "second", count: 2 });
+      payload.value = 999;
+
+      const snapshot = window.__gtmRecetteJournal.snapshot();
+      const census = window.__gtmRecetteCensus({ includeOffscreen: true });
+      window.__gtmRecetteSmokeResult = {
+        recorderVersion: snapshot.version,
+        recorderAttached:
+          window.__gtmRecetteJournal.checkIntegrity().recorderAttached,
+        recordCount: snapshot.records.length,
+        actionId: snapshot.records[0].actionId,
+        argumentCount: snapshot.records[0].argumentCount,
+        snapshottedValue: snapshot.records[0].arguments[0].value,
+        undefinedMarker:
+          snapshot.records[0].arguments[0].optional.__gtm_recette_type,
+        secondEvent: snapshot.records[0].arguments[1].event,
+        censusCount: census.count,
+        names: census.items.map((item) => item.accessibleName),
+        placement: census.items[0].placement,
+        selector: census.items[0].selector
+      };
+    </script>
+  </body>
+</html>

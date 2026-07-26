@@ -1,6 +1,6 @@
 ---
 name: gtm-preview-recette
-description: Execute an expert, operational GTM Preview and Tag Assistant acceptance recette against an existing tracking plan or explicit scoped acceptance rule. Use for full-site or journey-level web analytics QA that must preserve tracking-plan order, infer missing website journeys, complete authorised synthetic-data flows, compare exact raw dataLayer.push payloads and types with resolved Data Layer and GTM variables, verify concerned-tag firing and runtime parameters, provide one evidence-backed verdict per event, and deliver a strictly validated XLSX. Do not use for tracking-plan design, general GTM audits, implementation fixes, publishing, legal consent decisions, or observation without acceptance criteria.
+description: Execute an expert, operational client-side GTM Preview and Tag Assistant acceptance recette against an existing tracking plan or explicit scoped acceptance rule. Use for full-site or journey-level analytics and media-tag QA that must preserve tracking-plan order, cover every applicable interaction and material variant, complete authorised synthetic-data and gated flows, reconcile every business dataLayer push in controlled action windows, detect missing, duplicate, mistimed, or wrong-context occurrences, compare exact raw and resolved GTM evidence, verify multi-vendor tags and browser sends, and provide one evidence-backed verdict per event plus a strictly validated XLSX. Do not use for tracking-plan design, general GTM audits, implementation fixes, publishing, server-side GTM, legal consent decisions, or observation without acceptance criteria.
 ---
 
 # GTM Preview Recette
@@ -9,281 +9,357 @@ description: Execute an expert, operational GTM Preview and Tag Assistant accept
 
 > Execute an expert, tracking-plan-led GTM recette on the actual test website, covering every planned event in its original order. Use supplied URLs, screenshots, and journeys when available; otherwise identify and execute the relevant website interactions. For every event, use GTM Preview to compare the tracking-plan expectation with the exact live dataLayer.push payload, its variables, values and types, the resolved GTM variables, the expected tag firing or non-firing behaviour, and every required runtime tag parameter and value. Complete ordinary and authentication-gated journeys with safe synthetic data whenever possible, requesting analyst intervention only at protected, consequential, or genuinely ambiguous boundaries. Return an immediate, evidence-backed verdict and precise reason for each event, omit nothing silently, and finish with a complete plan-ordered status summary and validated detailed workbook.
 
-Treat operational journey completion and evidence reconciliation as inseparable:
-the journey creates the evidence, and the evidence makes the verdict trustworthy.
+Apply this north star to every concerned client-side analytics, advertising,
+Floodlight, pixel, vendor-template, and Custom HTML tag. A browser request
+proves an attempted client send, not vendor ingestion, attribution, or
+reporting.
 
-## Preserve the boundary
+## Keep one acceptance workflow
 
-- Treat the supplied tracking plan or explicit analyst-defined acceptance rule as
-  the specification.
-- Default to `FULL_TRACKING_PLAN_RECETTE`. Use
-  `SCOPED_ACCEPTANCE_RECETTE` only for an explicitly bounded rule and list the
-  included evidence layers.
-- Stop when neither a tracking plan nor an analyst-defined acceptance rule
-  exists. A website and event names alone are not acceptance criteria.
-- Do not design or repair the tracking plan, audit or clean the container,
-  modify GTM or website code, implement fixes, submit, create a version, or
-  publish.
-- Record the most specific observed non-firing reason, but do not claim an
-  unproved root cause or recommend a fix unless separately requested.
-- Keep Google sign-in, MFA, CAPTCHA, external email/SMS verification, real
-  payment, irreversible actions, and unresolved consequential choices under
-  analyst control. Never request, copy, log, store, or automate credentials.
-- Test supplied consent expectations without making legal or privacy-policy
-  judgements.
+Use one workflow whose checks are derived from each confirmed tracking-plan
+requirement. Do not choose a reduced workflow label. Record the acceptance
+scope and the applicable evidence layers explicitly. A requirement that has no
+applicable tag, destination, consent, or other downstream expectation may omit
+that layer, but a declared expectation may never be silently dropped.
 
-## Load the required references
+Treat the tracking plan or explicit analyst-defined acceptance rule as the
+specification. Stop if neither exists. Do not:
 
-- Read [references/01-orientation/inputs-outputs.md](references/01-orientation/inputs-outputs.md)
-  while establishing scope.
-- Read [references/02-execution/interaction-protocol.md](references/02-execution/interaction-protocol.md)
-  before every run.
-- Read [references/03-judgement/schema-v2.md](references/03-judgement/schema-v2.md)
-  before normalizing the plan or evidence.
-- Read [references/02-execution/browser-session-and-readiness.md](references/02-execution/browser-session-and-readiness.md)
-  before opening GTM or executing a journey.
-- Read [references/02-execution/journey-inference-and-coverage.md](references/02-execution/journey-inference-and-coverage.md)
-  before inferring an undocumented route.
-- Read [references/02-execution/consent-and-synthetic-data.md](references/02-execution/consent-and-synthetic-data.md)
-  before handling consent, forms, or a gated journey.
-- Read [references/03-judgement/matching-rules.md](references/03-judgement/matching-rules.md),
-  [references/03-judgement/evidence-model.md](references/03-judgement/evidence-model.md),
-  and [references/03-judgement/comparison-contract.md](references/03-judgement/comparison-contract.md)
-  before assigning verdicts.
-- Read [references/03-judgement/workbook-architecture.md](references/03-judgement/workbook-architecture.md)
-  before generating the report.
+- design or repair the tracking plan;
+- audit, clean, configure, version, submit, or publish GTM;
+- modify the website or implement a fix;
+- make legal or privacy-policy decisions;
+- test server-side GTM, server clients or transformations, or browser/server
+  deduplication;
+- claim vendor receipt from browser-only evidence.
 
-## Execute the workflow
+Record the most specific evidenced reason for a failure or non-firing tag.
+Do not infer an unproved root cause.
 
-### 0. Show preflight and wait for READY
+Complete ordinary forms, sign-up, lead, account, authentication, and
+non-production conversion gates with safe synthetic data unless the analyst
+excluded them. Pause only for credentials, MFA, CAPTCHA, external
+email/SMS verification, real payment, irreversible or consequential actions,
+or genuinely ambiguous choices. Never request, copy, log, or automate
+credentials.
 
-Before opening a browser, reading client files, inspecting the website, or
-generating output, display the five-or-fewer bullet preflight from
-[references/02-execution/interaction-protocol.md](references/02-execution/interaction-protocol.md).
-Use only the labels `Analyst`, `Codex`, and `Shared`.
+Do not invent arbitrary negative journeys. Detect unwanted behaviour by
+classifying every observed business push during the planned positive journeys.
+Reproduce an anomaly when useful, and run an explicit non-firing scenario only
+when the acceptance specification requires it.
 
-The essential inputs are the acceptance specification and target environment.
-Journeys, URLs, screenshots, selectors, GTM identifiers, and consent scenarios
-are supporting inputs when available or applicable; their absence is not a
-blocker when they can be inferred safely.
+## Read the operating references
 
-Wait for `READY` or an equivalent explicit confirmation before any execution
-action. Authentication in another browser does not authenticate the dedicated
-Playwright session.
+Read these before execution:
 
-### 1. Normalize the acceptance contract
+- [inputs and outputs](references/01-orientation/inputs-outputs.md);
+- [interaction protocol](references/02-execution/interaction-protocol.md);
+- [schema v2](references/03-judgement/schema-v2.md);
+- [Tag Assistant operations](references/02-execution/tag-assistant-operations.md);
+- [browser readiness](references/02-execution/browser-session-and-readiness.md);
+- [journey and coverage](references/02-execution/journey-inference-and-coverage.md);
+- [interaction and capture playbook](references/02-execution/interaction-and-capture-playbook.md);
+- [incremental evidence workflow](references/02-execution/incremental-evidence-workflow.md);
+- [evidence model](references/03-judgement/evidence-model.md);
+- [matching rules](references/03-judgement/matching-rules.md);
+- [comparison contract](references/03-judgement/comparison-contract.md); and
+- [workbook architecture](references/03-judgement/workbook-architecture.md).
 
-Recognize the original XLSX, CSV, document, screenshot, mock-up, or analyst
-explanation without forcing a template. Preserve file, sheet, row, cell,
-section, screenshot, and source order when available.
+Read the following only when relevant:
 
-Create schema-v2 stable requirement IDs and two ordered inventories before
-browser execution:
+- [consent and synthetic data](references/02-execution/consent-and-synthetic-data.md)
+  for a CMP, consent expectation, or gated journey;
+- [client-side destinations and containers](references/02-execution/client-side-destinations-and-containers.md)
+  for analytics/media sends, multiple web containers or destinations, or
+  Custom HTML;
+- [client-side runtime contexts](references/02-execution/client-side-runtime-contexts.md)
+  for SPA, auto-event, responsive, iframe, cross-domain, cookie/linker,
+  platform-adapter, Custom JavaScript, or browser-limit checks;
+- [conditional business and privacy rules](references/03-judgement/conditional-business-and-privacy-rules.md)
+  for conditional branches, cross-field rules, ecommerce completeness, or
+  sensitive-data checks; and
+- [regression comparison](references/03-judgement/regression-comparison.md)
+  when a prior recette or acceptance-relevant read-only container comparison is
+  supplied.
 
-1. one source-bound row per required event field, variable, tag firing
-   condition, tag parameter, or applicable consent condition;
-2. one event group per planned event for analyst feedback and final reporting.
+Use [the gold mini-recette](references/gold-mini-recette.md) as the canonical
+example of independent layer verdicts and wrong-context detection.
 
-Extract the journey clue, expected event, field path, value, type, matching
-rule, occurrence rule, GTM variable, concerned tag, configuration field,
-runtime parameter, firing expectation, and applicable consent expectation.
-Ask only when ambiguity could materially change a verdict.
+## Execute the recette
 
-Use:
+### 0. Confirm responsibilities and readiness
+
+Show the responsibility-labelled preflight from the interaction protocol in no
+more than five bullets and wait for `READY` or an equivalent confirmation
+before opening client files or executing the website.
+
+The acceptance specification and test origin are essential. URLs, screenshots,
+selectors, journeys, GTM identifiers, and consent scenarios are supporting
+inputs; infer them safely when possible.
+
+### 1. Normalize the tracking plan in source order
+
+Accept XLSX, CSV, document, screenshot, mock-up, or analyst explanation without
+forcing a template. Preserve file, sheet, row, cell, section, screenshot, and
+original event order.
+
+When the plan is tabular, inspect structure, hyperlinks, comments, hidden
+content, merged ranges, and embedded images:
 
 ```powershell
 python scripts/inspect_tracking_plan.py tracking-plan.xlsx plan-inspection.json
 ```
 
-when a workbook or CSV needs structural inspection.
+Create:
 
-### 2. Build the coverage and journey ledger
+1. one stable source-bound requirement per expected event field, variable,
+   concerned tag, tag configuration field, firing condition, runtime
+   parameter, destination request, consent condition, trigger/sequence
+   contract, or declared client-side rule; and
+2. one ordered event group for analyst feedback and final reporting.
 
-For every event group, record supplied or inferred journey, candidate pages,
-selectors or visible labels, intended action, expected event, inference source,
-confidence, attempted routes, and current status.
+For each requirement preserve the expected value, type, matching rule,
+occurrence rule, page/state/action condition, source mechanism, GTM variable,
+tag owner and configuration, firing or non-firing expectation, runtime
+parameter, destination/vendor ID, and applicable browser request path.
+Represent separate destinations as separate requirements. Ask only when an
+ambiguity could materially change a verdict.
 
-Use this authority order:
+Initialize the coverage ledger with the evidence layers derived from these
+requirements:
 
-1. supplied journey or test scenario;
-2. screenshot, mock-up, or implementation specification;
-3. analyst instruction;
-4. URLs, selectors, labels, or actions in the tracking plan;
-5. relevant website exploration inferred from event semantics and visible
-   elements.
+```powershell
+python scripts/init_coverage_ledger.py interpreted-requirements.json normalized-results.json `
+  --run-id RUN-001 `
+  --title "GTM recette" `
+  --site-url https://example.test/ `
+  --environment Preprod `
+  --environment-class preprod `
+  --container-id GTM-XXXX `
+  --workspace Recette `
+  --tracking-plan-source tracking-plan.xlsx `
+  --acceptance-scope "Confirmed tracking-plan requirements"
+```
 
-Translate production example paths to the confirmed test origin. Mark inferred
-steps. Explore relevant alternative routes before declaring an event or element
-unavailable. Ask before ambiguous consequential actions, real lead submission,
-account changes, payment, or irreversible effects.
+### 2. Build complete but proportionate coverage
 
-### 3. Establish the controlled Preview session
+For every event group, enumerate every applicable interaction, placement,
+branch, and material finite value. Use supplied routes and images first.
+Otherwise explore the actual site and use the DOM census as discovery support:
 
-Open a dedicated Playwright-capable browser session. Register and rediscover
-these surfaces by role, URL, origin, and title before every action:
+```javascript
+await page.addScriptTag({ path: "scripts/dom_interaction_census.js" })
+await page.evaluate(() => window.__gtmRecetteCensus())
+```
 
-1. GTM workspace;
-2. Tag Assistant;
-3. debugged website.
+The census identifies candidates; execute real user-facing interactions through
+the browser. Do not call one header item, menu item, card, CTA, footer link, or
+product count representative of the family.
 
-Require the analyst to authenticate manually inside that session. Record the
-account, web container, workspace, Preview environment, target origin, initial
-consent state, and `Connected` status. Do not start verdicts until the intended
-container, workspace, domain, and Preview connection are confirmed.
+- Exhaust safe, practical finite sets. Counts 1 through 9 require nine isolated
+  cases when the count can change payload or firing.
+- Reset state between cases when prior actions can affect results.
+- For large spaces, document semantic partitions, boundaries, and risk-based
+  combinations.
+- Create explicit cases for planned conditional, responsive, error-only,
+  personalised, or experiment branches. Do not call an unacquired branch
+  `PASS`.
+- Explore relevant alternative routes before declaring an event unavailable.
 
-Apply the readiness, action-boundary, quiet-window, cross-domain, SPA
-deduplication, reconnect, and checkpoint rules in
-[references/02-execution/browser-session-and-readiness.md](references/02-execution/browser-session-and-readiness.md).
+### 3. Establish the controlled browser and Preview session
 
-### 4. Establish applicable consent state
+Use either an analyst-approved attached browser session or a dedicated
+Playwright-capable profile. Follow the Tag Assistant operations reference for
+extension attachment, existing authenticated profiles, connection recovery,
+history clearing, and analyst handback.
 
-Capture the natural/default event-level consent state before interaction. For a
-normal functional journey without a consent requirement, use the normal CMP
-choice needed to execute the journey and mark consent checks `NOT_TESTED`.
-Execute refused, partial, change-of-choice, or Advanced Consent Mode scenarios
-only when required by the acceptance contract.
+Before verdict work, confirm:
 
-Never inject or simulate consent as routine setup. If a missing or defective CMP
-on a non-production test environment prevents otherwise valid testing:
+- intended account, web container, workspace, Preview environment, and target
+  origin;
+- correct Tag Assistant tab and `Connected` status;
+- each concerned tag's owning client-side container;
+- the natural initial consent state; and
+- stable identities for the website, GTM, Tag Assistant, and any applicable
+  vendor-helper surfaces.
 
-1. show the observed blocker;
-2. explain the exact temporary browser-session override, values, scope, and what
-   it will not validate;
-3. request explicit analyst approval;
-4. proceed only after approval;
-5. preserve natural-CMP and `session_override` evidence as separate scenarios.
+Keep separate cursors and evidence when multiple containers must be tested
+sequentially. Never merge their event histories.
 
-Without approval, keep affected checks blocked and continue unaffected coverage.
-Never use an override to pass the natural CMP implementation.
+Install the supplemental recorder at document start before navigation, then
+start context-level request capture:
 
-### 5. Execute continuously in plan order
+```javascript
+await context.addInitScript({ path: "scripts/datalayer_recorder.js" })
+```
 
-For each event group:
+The recorder helps preserve early, multi-argument, mutated-object, and
+state-clearing pushes. It is never a substitute for exact Tag Assistant
+`API Call` evidence when Preview-dependent layers apply. Capture requests at
+browser-context level so unload, redirect, popup, iframe, service-worker, and
+batched sends are not lost. Decode retained safe request records with:
 
-1. verify the intended page, Preview connection, applicable consent state, and
-   quiet event stream;
-2. record the last Preview event before the action;
-3. execute the exact supplied or inferred website interaction;
-4. record URL, element, action, value, timestamp, and inference status;
-5. wait for expected events or a bounded timeout and then a quiet window;
+```powershell
+python scripts/decode_browser_requests.py requests.json decoded-requests.json
+```
+
+Do not retain credentials, authorization headers, cookies, or raw sensitive
+values.
+
+### 4. Establish consent without silently changing it
+
+Capture the natural/default event-level consent state. For an ordinary journey
+with no consent acceptance requirement, make the normal CMP choice needed to
+continue and mark consent-specific checks `NOT_TESTED`.
+
+Test refusal, partial choice, change of choice, or Advanced Consent Mode v2 only
+when required by the tracking plan. A banner click is not proof of event-level
+consent state.
+
+Never inject consent values as routine setup. If a defective or missing CMP on
+a non-production environment blocks the recette, show the blocker and ask the
+analyst before applying any temporary browser-session override. State the exact
+values, scope, and limitations, and keep natural-CMP evidence separate from the
+override. An override cannot pass the CMP implementation.
+
+### 5. Run every event group in original order
+
+For each case:
+
+1. confirm the page, connection, consent state, and quiet stream;
+2. mark the action boundary and previous Preview event index;
+3. perform one exact real interaction or value variant;
+4. record case identity, element, placement, URL/state, safe input, value type,
+   and timezone-qualified timestamp;
+5. wait for the expected event or bounded timeout, then a quiet window;
 6. record first and settled final event indexes;
-7. inspect every concerned Preview event and capture the full comparison chain;
-8. assign component and event verdicts;
-9. emit one concise event verdict with the exact mismatch or blocker;
-10. continue automatically to the next planned event.
+7. inspect and classify every business `dataLayer` push in the action window,
+   not just pushes with the expected event name;
+8. capture applicable resolved state, variables, concerned-tag evidence,
+   trigger/exception/sequence evidence, requests, consent, and direct errors;
+9. assign independent component verdicts; and
+10. validate and deliver the event verdict after all its cases, then continue
+    automatically.
 
-Do not require repeated `continue` or `generate report` commands.
+Keep a gapless cursor from the first controlled load through the final action.
+Classify each push against its trigger condition, page/state, causal action,
+expected count, and order. This is how the recette detects duplicates,
+premature, delayed, wrong-order, and wrong-context events, including planned
+event names firing where they do not belong.
 
-For authorised ordinary registration, lead, checkout-preparation, and account
-flows, infer form formats and use unique synthetic data. Accept only required
-terms and declarations. Leave optional marketing, profiling, partner-sharing,
-and communication choices unchecked unless they are the tested conversion.
+Treat an encountered form or authentication gate as part of the journey. Use
+unique synthetic data and submit ordinary non-production lead, registration,
+and conversion steps. Leave optional marketing and profiling choices unchecked
+unless they are the tested interaction. At a protected checkpoint, prepare the
+journey, ask the analyst to complete only that step, and resume. Never silently
+skip the remainder.
 
-At a protected checkpoint, pause and ask the analyst to complete the step in the
-dedicated browser, then resume. Assign `BLOCKED` only when the analyst cannot or
-does not complete it, no safe test method exists, or an evidenced external
-blocker such as HTTP 403 prevents execution. Never automate real payment.
+### 6. Reconcile the independent evidence chain
 
-### 6. Capture the full evidence chain
-
-For every occurred event retain separately:
+For every applicable occurrence, compare in this order:
 
 ```text
 tracking-plan requirement
--> event occurrence and chronology
--> exact Tag Assistant API Call / raw dataLayer.push
--> resolved Data Layer at that event
+-> occurrence, action window, count, context, and chronology
+-> exact live Tag Assistant API Call / raw dataLayer.push
+-> resolved Data Layer at that exact event
 -> resolved GTM variable
 -> concerned tag configuration
--> tag firing status and fire count
+-> expected firing or non-firing status and fire count
 -> runtime tag parameter value and type
--> applicable event-level consent state
+-> expected client-side destination and decoded browser request value
+-> applicable trigger, exception, sequence, consent, and client-side rules
+-> requirement and event verdict
 ```
 
-The Tag Assistant `API Call` is authoritative for the raw push. The `Data
-Layer` panel is resolved state and may contain inherited values. Browser
-interception is supplemental and must never be relabelled as Tag Assistant
-evidence.
+This chain is non-substitutive:
 
-Inspect only concerned tags: expected to fire, expected to remain blocked,
-unexpected but relevant, or needed to explain a wanted tag’s non-firing. Never
-create an event-by-every-container-tag matrix.
+- Tag Assistant `API Call` is the authoritative raw push. Its `Data Layer`
+  panel is resolved state and may include inherited values.
+- Compare absent, JavaScript `undefined`, explicit `null`, empty string, empty
+  array/object, value, and type exactly.
+- A correct raw payload does not pass a wrong resolved variable, wrong
+  configured tag value, wrong firing decision, wrong runtime value/type, or
+  wrong outbound request.
+- A fired tag does not prove correct configuration or runtime parameters.
+- A correct runtime value does not prove the correct configured source.
+- A correct event name at a time when its trigger condition is false is
+  `FAIL`.
+- A duplicate beyond the allowed count, wrong action window, or wrong order is
+  `FAIL`.
+- An unplanned business push is `REVIEW` unless it contradicts a confirmed
+  expectation, in which case it is `FAIL`.
 
-### 7. Compare and explain
+When no push is expected, replace only the raw-push link with exact
+`source_signal` evidence for the native GTM event, DOM/auto-event, enhanced
+measurement, direct vendor call, or Custom HTML execution. Keep every
+applicable downstream comparison.
 
-Use the strict comparison and dependency rules in the judgement references.
-Preserve absent, JavaScript `undefined`, explicit `null`, empty string, empty
-array/object, and each actual value type.
-
-For a wanted tag that does not fire, capture trigger evaluation, blockers or
-exceptions, relevant variable values, event-level consent, and direct Preview
-or console messages. Use the most specific evidenced reason and its source. If
-the reason is not established, write:
+Inspect only concerned tags: expected to fire, expected not to fire,
+unexpected but relevant, or needed to explain non-firing. For a wanted tag that
+does not fire, capture trigger evaluation, blockers/exceptions, relevant
+variables, event-level consent, and direct Preview errors. If the cause is not
+evidenced, write:
 
 `Reason not established from available Preview evidence`
 
-Do not stop at event-name presence, page success, or tag firing; validate every
-applicable requirement independently.
+### 7. Validate and report each event incrementally
 
-### 8. Close coverage and give the final ordered summary
+Use `PASS`, `FAIL`, `BLOCKED`, `REVIEW`, or `NOT_TESTED`.
 
-Compare executed results with both inventories. Attempt relevant alternative
-routes for every pending event before final classification. Never use
-`NOT_TESTED` for an attempted journey blocked by an external condition.
+- `PASS`: the confirmed expectation is satisfied with exact evidence.
+- `FAIL`: observed implementation contradicts it.
+- `BLOCKED`: a documented external, protected, or upstream blocker prevented an
+  attempted check.
+- `REVIEW`: evidence exists but confirmed semantics require analyst judgement.
+- `NOT_TESTED`: deliberately outside the confirmed acceptance scope.
 
-After coverage is complete, output a concise list of every planned event in
-original order with `PASS`, `FAIL`, `BLOCKED`, `REVIEW`, or `NOT_TESTED`.
-Component failures must remain visible beneath any event roll-up.
+The requirement and event status is the worst applicable component status.
+Never allow a successful journey or upstream component to hide a downstream
+failure.
 
-### 9. Build and validate the workbook
-
-Normalize results as schema version 2 and generate:
+Before announcing an event result, validate its complete atomic patch and then
+apply it:
 
 ```powershell
+python scripts/incremental_recette.py apply-event normalized-results.json event-001-patch.json
+python scripts/incremental_recette.py validate-event normalized-results.json --event-group-id EVG-001
+```
+
+Give one immediate evidence-backed verdict and precise reason per event. Group
+homogeneous successful cases compactly, but name every distinct failed,
+blocked, or review variant and placement. Do not wait until the final workbook
+to reveal failures.
+
+### 8. Close coverage and build the workbook
+
+Before completion, confirm that:
+
+- every source-bound requirement and event group is present once in original
+  order;
+- every applicable case was attempted or has an explicit limitation;
+- every observed business push is classified;
+- raw, resolved, variable, configuration, firing, runtime, destination, and
+  conditional layers each have their own evidence and verdict when applicable;
+- all ordinary gates were completed and protected checkpoints were offered to
+  the analyst;
+- unexpected events and tags remain visible; and
+- no sensitive raw content is stored in the normalized data or report.
+
+Run the final deterministic checks and workbook build:
+
+```powershell
+python scripts/incremental_recette.py final-validate normalized-results.json
+python scripts/validate_business_rules.py normalized-results.json
+python scripts/scan_sensitive_data.py normalized-results.json
 python scripts/build_recette_report.py normalized-results.json gtm-recette-results.xlsx --strict
 ```
 
-Use the bundled script’s absolute path when outside the skill directory. Reload
-the workbook and verify required sheets, row counts, filters, hyperlinks,
-structured values, wrapped notes, and status formatting. Do not declare
-completion when strict validation fails.
+Reload the workbook and verify sheets, row counts, filters, hyperlinks,
+structured values, wrapped notes, and status formatting. If strict validation
+fails, the recette is incomplete.
 
-## Use the status model
-
-- `PASS`: the confirmed expectation is satisfied with exact evidence.
-- `FAIL`: implementation contradicts a confirmed expectation.
-- `BLOCKED`: execution was attempted but a documented external, protected, or
-  upstream blocker prevented the check.
-- `REVIEW`: evidence exists but plan semantics or interpretation require analyst
-  confirmation.
-- `NOT_TESTED`: deliberately outside confirmed scope; never a substitute for a
-  failed attempt or blocker.
-
-The overall requirement and event status is the worst applicable component
-status. A successful journey cannot hide a failed event field, variable, firing
-condition, parameter, or applicable consent requirement.
-
-## Enforce completion
-
-Declare a full recette complete only when:
-
-- every source-bound requirement and event group from the confirmed inventory is
-  present once;
-- every planned event has been attempted in original order or has an explicit
-  confirmed out-of-scope status;
-- every action has readiness, action-boundary, and settled-stream evidence;
-- every occurred event has exact raw API-call and separate resolved Data Layer
-  evidence;
-- every applicable variable, concerned tag, firing condition, tag parameter,
-  and consent condition has its own verdict;
-- every wanted non-fired tag has an evidenced reason or the explicit
-  reason-not-established statement;
-- every protected checkpoint was offered to the analyst before final
-  `BLOCKED`;
-- every result references known evidence;
-- relevant unexpected events and tags are listed;
-- the final plan-ordered event summary has been delivered; and
-- the detailed XLSX passes strict semantic validation and reload checks.
-
-If any gate is unmet, state that the recette is incomplete and name the exact
-missing or blocked evidence.
+Finish with every planned event in original order and its aggregate status.
+Keep each component failure and affected case visible beneath the event
+roll-up. State exact missing or blocked evidence instead of implying
+completion.

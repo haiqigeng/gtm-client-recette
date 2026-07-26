@@ -7,9 +7,10 @@ container IDs, screenshots, reports, credentials, emails, or browser traces.
 
 Use semantic `v` versioning, never calendar-date versioning:
 
-- Store `MAJOR.MINOR.PATCH` in `pyproject.toml`, for example `1.0.0`.
-- Prefix Git tags and release archives with `v`, for example `v1.0.0` and
-  `gtm-preview-recette-v1.0.0.zip`.
+- Store `MAJOR.MINOR.PATCH` in `pyproject.toml`; the current release is
+  `1.1.0`.
+- Prefix Git tags and release archives with `v`, for example `v1.1.0` and
+  `gtm-preview-recette-v1.1.0.zip`.
 - Increment PATCH for compatible fixes, MINOR for compatible functionality,
   and MAJOR for incompatible changes.
 
@@ -19,9 +20,31 @@ Before opening a pull request, run:
 python -m pip install -e ".[dev]"
 python -m ruff check --no-cache .
 python -m unittest discover -s tests -v
-python -B scripts/check_release.py --tag v1.0.0
+python -B scripts/check_release.py --tag v1.1.0
 ```
 
 Changes to verdict logic require a regression fixture that fails before the
 change and passes after it. Keep the skill limited to recette execution; do not
 add GTM audit, implementation, debugging, or publishing behaviour.
+
+Keep one acceptance workflow. Derive applicable evidence layers from confirmed
+requirements and preserve independent verdicts for raw API Call, resolved Data
+Layer, GTM variable, tag configuration, firing, runtime parameter, and browser
+request. Do not reintroduce named full/scoped run types or allow one layer to
+substitute for another.
+
+Changes to interaction coverage, event-stream reconciliation, or gated-journey
+behaviour also require an anonymized case in
+`references/02-execution/forward-test-prompts.md`. Keep coverage proportional:
+exhaust practical finite sets, document risk-based large-space coverage, and
+do not add speculative negative crawling.
+
+Changes to the dataLayer recorder or DOM census require a synthetic browser
+smoke check using `tests/fixtures/browser_helpers_smoke.html`. Changes to plan
+inspection, request decoding, or incremental event handling require focused
+unit tests.
+
+Preserve schema-v2 normalization where possible. If stricter certification
+requires new fields, update the fixtures and document the legacy-row upgrade in
+the README and changelog. Add strict negative tests for every new
+component-level PASS rule. Server-side GTM remains a future, separate scope.

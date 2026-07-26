@@ -1,0 +1,278 @@
+#!/usr/bin/env python3
+"""Apply, validate, resume, and summarize plan-ordered recette event results."""
+
+from __future__ import annotations
+
+import argparse
+import json
+from copy import deepcopy
+from pathlib import Path
+from typing import Any
+
+from recette_schema import STATUS_PRIORITY, validate
+
+
+def load_object(path: Path) -> dict[str, Any]:
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError(f"{path} must contain a JSON object.")
+    return value
+
+
+def save_atomic(path: Path, value: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(
+        json.dumps(value, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(path)
+
+
+def rows(value: Any, field: str) -> list[dict[str, Any]]:
+    if value is None:
+        return []
+    if not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
+        raise ValueError(f"{field} must be an array of objects.")
+    return value
+
+
+def event_requirements(data: dict[str, Any], event_group_id: str) -> list[dict[str, Any]]:
+    selected = [
+        row
+        for row in rows(data.get("requirements"), "requirements")
+        if str(row.get("event_group_id")) == event_group_id
+    ]
+    if not selected:
+        raise ValueError(f"Unknown event_group_id: {event_group_id}")
+    return selected
+
+
+def _row_applies(
+    row: dict[str, Any],
+    event_group_id: str,
+    requirement_ids: set[str],
+) -> bool:
+    if str(row.get("event_group_id", "")) == event_group_id:
+        return True
+    if str(row.get("requirement_id", "")) in requirement_ids:
+        return True
+    affected = row.get("affected_requirement_ids")
+    return isinstance(affected, list) and bool(
+        requirement_ids & {str(item) for item in affected}
+    )
+
+
+def event_view(data: dict[str, Any], event_group_id: str) -> dict[str, Any]:
+    view = deepcopy(data)
+    selected = event_requirements(view, event_group_id)
+    requirement_ids = {str(row.get("requirement_id")) for row in selected}
+    view["requirements"] = selected
+    run = view.get("run")
+    if not isinstance(run, dict):
+        raise ValueError("run must be an object.")
+    run["requirement_inventory"] = [
+        item
+        for item in run.get("requirement_inventory", [])
+        if str(item) in requirement_ids
+    ]
+    run["event_inventory"] = [
+        row
+        for row in rows(run.get("event_inventory"), "run.event_inventory")
+        if str(row.get("event_group_id")) == event_group_id
+    ]
+    view["unexpected"] = [
+        row
+        for row in rows(view.get("unexpected"), "unexpected")
+        if _row_applies(row, event_group_id, requirement_ids)
+    ]
+    view["blockers"] = [
+        row
+        for row in rows(view.get("blockers"), "blockers")
+        if _row_applies(row, event_group_id, requirement_ids)
+    ]
+    return view
+
+
+def _status(requirements: list[dict[str, Any]]) -> str:
+    if any(
+        row.get("journey", {}).get("execution_status") == "PENDING"
+        for row in requirements
+    ):
+        return "PENDING"
+    statuses = [
+        str(row.get("verdict", {}).get("overall"))
+        for row in requirements
+        if str(row.get("verdict", {}).get("overall")) in STATUS_PRIORITY
+    ]
+    if not statuses:
+        return "PENDING"
+    return min(statuses, key=STATUS_PRIORITY.index)
+
+
+def validate_event(data: dict[str, Any], event_group_id: str) -> dict[str, Any]:
+    view = event_view(data, event_group_id)
+    errors = validate(view, strict=True)
+    if errors:
+        raise ValueError("\n".join(errors))
+    selected = event_requirements(view, event_group_id)
+    event_name = next(
+        (
+            row.get("event_name")
+            for row in view["run"].get("event_inventory", [])
+            if row.get("event_group_id") == event_group_id
+        ),
+        selected[0].get("expectation", {}).get("event_name"),
+    )
+    return {
+        "event_group_id": event_group_id,
+        "event_name": event_name,
+        "status": _status(selected),
+        "requirement_count": len(selected),
+        "validated": True,
+    }
+
+
+def _merge_event_rows(
+    current: list[dict[str, Any]],
+    patch: list[dict[str, Any]],
+    event_group_id: str,
+    requirement_ids: set[str],
+) -> list[dict[str, Any]]:
+    return [
+        row
+        for row in current
+        if not _row_applies(row, event_group_id, requirement_ids)
+    ] + deepcopy(patch)
+
+
+def apply_event(
+    data: dict[str, Any],
+    patch: dict[str, Any],
+) -> tuple[dict[str, Any], str]:
+    event_group_id = str(patch.get("event_group_id", "")).strip()
+    if not event_group_id:
+        raise ValueError("Event patch requires event_group_id.")
+    current_rows = event_requirements(data, event_group_id)
+    current_ids = {str(row.get("requirement_id")) for row in current_rows}
+    patch_rows = rows(patch.get("requirements"), "patch.requirements")
+    patch_ids = {str(row.get("requirement_id")) for row in patch_rows}
+    if patch_ids != current_ids or len(patch_rows) != len(current_rows):
+        raise ValueError(
+            "Event patch requirement IDs must exactly match the ledger event group."
+        )
+    if any(str(row.get("event_group_id")) != event_group_id for row in patch_rows):
+        raise ValueError("Every patched requirement must use the patch event_group_id.")
+
+    updated = deepcopy(data)
+    replacements = {str(row["requirement_id"]): deepcopy(row) for row in patch_rows}
+    updated["requirements"] = [
+        replacements.get(str(row.get("requirement_id")), row)
+        for row in rows(updated.get("requirements"), "requirements")
+    ]
+
+    patch_evidence = rows(patch.get("evidence"), "patch.evidence")
+    patch_evidence_ids = [str(row.get("evidence_id", "")).strip() for row in patch_evidence]
+    if any(not item for item in patch_evidence_ids):
+        raise ValueError("Every patch evidence row requires evidence_id.")
+    if len(patch_evidence_ids) != len(set(patch_evidence_ids)):
+        raise ValueError("Event patch contains duplicate evidence IDs.")
+    current_evidence = rows(updated.get("evidence"), "evidence")
+    existing_ids = {
+        str(row.get("evidence_id", "")).strip()
+        for row in current_evidence
+        if str(row.get("evidence_id", "")).strip()
+    }
+    conflicts = sorted(existing_ids & set(patch_evidence_ids))
+    if conflicts:
+        raise ValueError(
+            "Event patch evidence IDs already exist: " + ", ".join(conflicts)
+        )
+    updated["evidence"] = current_evidence + deepcopy(patch_evidence)
+
+    for collection in ("unexpected", "blockers"):
+        if collection in patch:
+            updated[collection] = _merge_event_rows(
+                rows(updated.get(collection), collection),
+                rows(patch.get(collection), f"patch.{collection}"),
+                event_group_id,
+                current_ids,
+            )
+
+    validate_event(updated, event_group_id)
+    return updated, event_group_id
+
+
+def status_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
+    run = data.get("run")
+    if not isinstance(run, dict):
+        raise ValueError("run must be an object.")
+    output = []
+    for inventory in rows(run.get("event_inventory"), "run.event_inventory"):
+        event_group_id = str(inventory.get("event_group_id"))
+        selected = event_requirements(data, event_group_id)
+        output.append(
+            {
+                "plan_order": inventory.get("plan_order"),
+                "event_group_id": event_group_id,
+                "event_name": inventory.get("event_name"),
+                "status": _status(selected),
+                "requirements": len(selected),
+            }
+        )
+    return output
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    validate_event_parser = subparsers.add_parser("validate-event")
+    validate_event_parser.add_argument("ledger", type=Path)
+    validate_event_parser.add_argument("--event-group-id", required=True)
+
+    apply_parser = subparsers.add_parser("apply-event")
+    apply_parser.add_argument("ledger", type=Path)
+    apply_parser.add_argument("event_patch", type=Path)
+    apply_parser.add_argument("--output", type=Path)
+
+    status_parser = subparsers.add_parser("status")
+    status_parser.add_argument("ledger", type=Path)
+
+    final_parser = subparsers.add_parser("final-validate")
+    final_parser.add_argument("ledger", type=Path)
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    try:
+        data = load_object(args.ledger)
+        if args.command == "validate-event":
+            output = validate_event(data, args.event_group_id)
+        elif args.command == "apply-event":
+            patch = load_object(args.event_patch)
+            updated, event_group_id = apply_event(data, patch)
+            destination = args.output or args.ledger
+            save_atomic(destination, updated)
+            output = validate_event(updated, event_group_id)
+            output["output"] = str(destination.resolve())
+        elif args.command == "status":
+            output = {"events": status_rows(data)}
+        else:
+            errors = validate(data, strict=True)
+            if errors:
+                raise ValueError("\n".join(errors))
+            output = {
+                "validated": True,
+                "event_count": len(status_rows(data)),
+                "status": "PASS",
+            }
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    print(json.dumps(output, ensure_ascii=False, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

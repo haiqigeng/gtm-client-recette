@@ -17,6 +17,16 @@ CANONICAL_LAYERS = [
     "tag_firing",
     "tag_parameter",
     "consent_when_applicable",
+    "source_signal_when_no_data_layer_push",
+    "destination_request_when_applicable",
+    "trigger_logic_when_applicable",
+    "tag_sequence_when_applicable",
+    "business_rules_when_declared",
+    "sensitive_data_scan",
+    "client_checks_when_applicable",
+    "regression_when_baseline_provided",
+    "container_context_when_applicable",
+    "conditional_scenarios_when_applicable",
 ]
 
 
@@ -25,7 +35,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("requirements", type=Path, help="Interpreted requirement JSON.")
     parser.add_argument("output", type=Path, help="Destination working ledger JSON.")
     parser.add_argument("--run-id", required=True)
-    parser.add_argument("--run-type", default="FULL_TRACKING_PLAN_RECETTE")
     parser.add_argument("--title", required=True)
     parser.add_argument("--site-url", required=True)
     parser.add_argument("--environment", required=True)
@@ -36,8 +45,33 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--container-id", required=True)
     parser.add_argument("--workspace", required=True)
+    parser.add_argument(
+        "--additional-container",
+        action="append",
+        default=[],
+        metavar="ID|WORKSPACE|ROLE",
+        help="Additional client-side container; ROLE is analytics, marketing, or shared.",
+    )
+    parser.add_argument("--browser-context-id", default="desktop-default")
+    parser.add_argument(
+        "--device-class",
+        choices=("desktop", "mobile", "tablet", "responsive"),
+        default="desktop",
+    )
+    parser.add_argument("--viewport-width", type=int, default=1440)
+    parser.add_argument("--viewport-height", type=int, default=900)
     parser.add_argument("--tracking-plan-source", required=True)
     parser.add_argument("--acceptance-scope", required=True)
+    parser.add_argument(
+        "--included-layer",
+        action="append",
+        default=[],
+        choices=tuple(CANONICAL_LAYERS),
+        help=(
+            "Additional accepted evidence layer. Applicable layers are inferred "
+            "from the requirements; this option may be repeated."
+        ),
+    )
     parser.add_argument("--client", default="")
     return parser.parse_args()
 
@@ -64,19 +98,52 @@ def initialize_requirement(row: dict[str, Any]) -> dict[str, Any]:
     requirement.setdefault("scope_status", "IN_SCOPE")
     journey = dict(requirement["journey"])
     journey.setdefault("selector_or_element", "")
+    journey.setdefault("action_value", None)
+    journey.setdefault("action_value_type", "null")
+    journey.setdefault("action_value_source", "not_applicable")
     journey.setdefault("inferred", False)
     journey.setdefault("inference_source", None)
     journey.setdefault("confidence", "confirmed")
     journey.setdefault("attempted_routes", [])
     journey["execution_status"] = "PENDING"
     requirement["journey"] = journey
-    expectation = requirement["expectation"]
+    expectation = dict(requirement["expectation"])
+    expectation.setdefault(
+        "sensitive_data_policy",
+        {
+            "forbidden_categories": [
+                "email",
+                "phone",
+                "postal_address",
+                "person_name",
+                "ip_address",
+                "sensitive_query_parameter",
+            ],
+            "allowlisted_paths": [],
+        },
+    )
+    expectation.setdefault("source_mechanism", "data_layer_push")
+    requirement["expectation"] = expectation
+    has_destination = any(
+        expectation.get(field) not in (None, "")
+        for field in (
+            "vendor_family",
+            "destination_id",
+            "destination_event_name",
+            "destination_id_parameter_path",
+            "destination_event_parameter_path",
+            "destination_parameter_path",
+            "expected_request_behavior",
+        )
+    )
     requirement.update(
         {
+            "browser_context_id": requirement.get("browser_context_id", "desktop-default"),
             "event_observed": False,
             "occurrence_evidence": None,
             "action_boundary": None,
             "raw_api_call": None,
+            "source_signal": None,
             "resolved_data_layer": None,
             "gtm_variable": {
                 "applicable": bool(expectation.get("variable_name")),
@@ -91,24 +158,73 @@ def initialize_requirement(row: dict[str, Any]) -> dict[str, Any]:
                     else "expected_block"
                 ),
             },
+            "destination_request": None,
+            "trigger_evaluation": None,
+            "tag_sequence": None,
             "consent": {
-                "applicable": expectation.get("expected_consent_state") not in (None, ""),
+                "applicable": (
+                    expectation.get("expected_consent_state") not in (None, "")
+                    or expectation.get("consent_contract") is not None
+                ),
                 "source": "not_in_scope",
             },
+            "business_rule_results": [],
+            "sensitive_data_scan": (
+                {
+                    "applicable": True,
+                    "scanned_targets": [],
+                    "findings": [],
+                    "status": "REVIEW",
+                    "evidence_id": None,
+                }
+                if expectation.get("sensitive_data_policy")
+                else None
+            ),
+            "client_checks": [],
+            "regression": None,
             "verdict": {
                 "event_occurrence": "REVIEW",
+                "source_signal": (
+                    "REVIEW"
+                    if expectation.get("source_mechanism") != "data_layer_push"
+                    else None
+                ),
                 "raw_payload": "REVIEW",
                 "resolved_data_layer": "REVIEW",
                 "gtm_variable": "REVIEW" if expectation.get("variable_name") else None,
+                "tag_configuration": (
+                    "REVIEW" if expectation.get("tag_name") else None
+                ),
                 "tag_firing": "REVIEW" if expectation.get("tag_name") else None,
                 "tag_parameter": (
                     "REVIEW" if expectation.get("tag_configuration_field") else None
                 ),
+                "destination_request": "REVIEW" if has_destination else None,
+                "destination_parameter": (
+                    "REVIEW" if expectation.get("destination_parameter_path") else None
+                ),
+                "trigger_logic": (
+                    "REVIEW" if expectation.get("trigger_contract") else None
+                ),
+                "tag_sequence": (
+                    "REVIEW" if expectation.get("sequence_contract") else None
+                ),
                 "consent": (
                     "REVIEW"
-                    if expectation.get("expected_consent_state") not in (None, "")
+                    if (
+                        expectation.get("expected_consent_state") not in (None, "")
+                        or expectation.get("consent_contract") is not None
+                    )
                     else None
                 ),
+                "business_rule": (
+                    "REVIEW" if expectation.get("business_rules") else None
+                ),
+                "sensitive_data": (
+                    "REVIEW" if expectation.get("sensitive_data_policy") else None
+                ),
+                "client_checks": None,
+                "regression": None,
                 "overall": "REVIEW",
                 "failure_layer": None,
                 "mismatch": "Pending execution",
@@ -119,6 +235,70 @@ def initialize_requirement(row: dict[str, Any]) -> dict[str, Any]:
         }
     )
     return requirement
+
+
+def applicable_layers(
+    requirements: list[dict[str, Any]],
+    container_count: int,
+) -> list[str]:
+    layers: set[str] = set()
+    for requirement in requirements:
+        if requirement.get("scope_status") == "OUT_OF_SCOPE":
+            continue
+        expectation = requirement.get("expectation", {})
+        mechanism = expectation.get("source_mechanism", "data_layer_push")
+        if mechanism == "data_layer_push":
+            layers.add("raw_api_call")
+        else:
+            layers.add("source_signal_when_no_data_layer_push")
+        if expectation.get(
+            "resolved_data_layer_applicable",
+            mechanism in {"data_layer_push", "gtm_native_event", "gtm_auto_event"},
+        ):
+            layers.add("resolved_data_layer")
+        if expectation.get("variable_name"):
+            layers.add("gtm_variable")
+        if expectation.get("tag_name"):
+            layers.update({"tag_configuration", "tag_firing"})
+        if expectation.get("tag_configuration_field"):
+            layers.add("tag_parameter")
+        if (
+            expectation.get("expected_consent_state") not in (None, "")
+            or expectation.get("consent_contract") is not None
+        ):
+            layers.add("consent_when_applicable")
+        if any(
+            expectation.get(field) not in (None, "")
+            for field in (
+                "vendor_family",
+                "destination_id",
+                "destination_event_name",
+                "destination_id_parameter_path",
+                "destination_event_parameter_path",
+                "destination_parameter_path",
+                "expected_request_behavior",
+            )
+        ):
+            layers.add("destination_request_when_applicable")
+        if expectation.get("trigger_contract") is not None:
+            layers.add("trigger_logic_when_applicable")
+        if expectation.get("sequence_contract") is not None:
+            layers.add("tag_sequence_when_applicable")
+        if expectation.get("business_rules"):
+            layers.add("business_rules_when_declared")
+        if expectation.get("sensitive_data_policy"):
+            layers.add("sensitive_data_scan")
+        if requirement.get("client_checks"):
+            layers.add("client_checks_when_applicable")
+        if requirement.get("regression") is not None:
+            layers.add("regression_when_baseline_provided")
+        occurrence = expectation.get("expected_occurrence")
+        rule = occurrence.get("rule") if isinstance(occurrence, dict) else occurrence
+        if rule in {"conditional", "non_deterministic"}:
+            layers.add("conditional_scenarios_when_applicable")
+    if container_count > 1:
+        layers.add("container_context_when_applicable")
+    return [layer for layer in CANONICAL_LAYERS if layer in layers]
 
 
 def event_inventory(requirements: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -145,11 +325,39 @@ def main() -> int:
             key=lambda item: item["source"]["plan_order"],
         )
     ]
+    containers = [
+        {
+            "container_id": args.container_id,
+            "workspace": args.workspace,
+            "role": "primary",
+            "container_type": "web",
+        }
+    ]
+    for value in args.additional_container:
+        parts = [part.strip() for part in value.split("|")]
+        if len(parts) != 3 or parts[2] not in {"analytics", "marketing", "shared"}:
+            raise ValueError(
+                "--additional-container must use ID|WORKSPACE|ROLE with a supported role"
+            )
+        containers.append(
+            {
+                "container_id": parts[0],
+                "workspace": parts[1],
+                "role": parts[2],
+                "container_type": "web",
+            }
+        )
+    if args.viewport_width <= 0 or args.viewport_height <= 0:
+        raise ValueError("Viewport dimensions must be positive integers.")
+    included_layers = applicable_layers(requirements, len(containers))
+    for layer in args.included_layer:
+        if layer not in included_layers:
+            included_layers.append(layer)
+    included_layers.sort(key=CANONICAL_LAYERS.index)
     result = {
         "schema_version": 2,
         "run": {
             "run_id": args.run_id,
-            "run_type": args.run_type,
             "report_title": args.title,
             "client": args.client,
             "site_url": args.site_url,
@@ -157,10 +365,23 @@ def main() -> int:
             "environment_class": args.environment_class,
             "container_id": args.container_id,
             "workspace": args.workspace,
+            "containers": containers,
+            "browser_contexts": [
+                {
+                    "context_id": args.browser_context_id,
+                    "device_class": args.device_class,
+                    "viewport": {
+                        "width": args.viewport_width,
+                        "height": args.viewport_height,
+                    },
+                    "user_state": "anonymous",
+                    "variant": "default",
+                }
+            ],
             "tracking_plan_source": args.tracking_plan_source,
             "acceptance_scope": args.acceptance_scope,
             "executed_at": datetime.now(UTC).isoformat(timespec="seconds"),
-            "included_layers": CANONICAL_LAYERS,
+            "included_layers": included_layers,
             "requirement_inventory": [row["requirement_id"] for row in requirements],
             "event_inventory": event_inventory(requirements),
         },

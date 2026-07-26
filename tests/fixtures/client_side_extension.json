@@ -1,0 +1,675 @@
+{
+  "run_patch": {
+    "run_id": "RUN-CLIENT-V11-001",
+    "included_layers": [
+      "raw_api_call",
+      "resolved_data_layer",
+      "gtm_variable",
+      "tag_configuration",
+      "tag_firing",
+      "tag_parameter",
+      "consent_when_applicable",
+      "destination_request_when_applicable",
+      "trigger_logic_when_applicable",
+      "tag_sequence_when_applicable",
+      "business_rules_when_declared",
+      "sensitive_data_scan",
+      "client_checks_when_applicable",
+      "regression_when_baseline_provided",
+      "container_context_when_applicable",
+      "conditional_scenarios_when_applicable"
+    ],
+    "containers": [
+      {
+        "container_id": "GTM-TEST",
+        "workspace": "Recette",
+        "role": "primary",
+        "container_type": "web",
+        "version": "42"
+      },
+      {
+        "container_id": "GTM-MEDIA",
+        "workspace": "Media recette",
+        "role": "marketing",
+        "container_type": "web",
+        "version": "17"
+      }
+    ],
+    "browser_contexts": [
+      {
+        "context_id": "mobile-default",
+        "device_class": "mobile",
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "user_state": "authenticated_synthetic",
+        "variant": "hero-b"
+      }
+    ],
+    "regression_context": {
+      "baseline_source": "tests/fixtures/valid_full.json",
+      "baseline_run_id": "RUN-SYNTHETIC-001",
+      "acceptance_relevant_container_changes": [
+        {
+          "container_id": "GTM-MEDIA",
+          "change": "AddToCart tag parameter mapping updated"
+        }
+      ],
+      "evidence_ids": [
+        "EVD-REGRESSION-001"
+      ]
+    }
+  },
+  "requirement_patch": {
+    "container_id": "GTM-MEDIA",
+    "browser_context_id": "mobile-default",
+    "scenario": {
+      "scenario_id": "SCN-HERO-B",
+      "kind": "ab_variant",
+      "condition": "Synthetic authenticated visitor assigned to hero-b",
+      "branch": "hero-b",
+      "condition_met": true,
+      "acquisition_method": "Deterministic test cookie",
+      "attempts": [
+        "Set synthetic variant cookie",
+        "Reload product route",
+        "Confirm hero-b marker"
+      ],
+      "evidence_id": "EVD-SCENARIO-001"
+    },
+    "expectation_patch": {
+      "expected_occurrence": {
+        "rule": "conditional",
+        "condition_id": "AB-HERO-B",
+        "branch_rule": "once"
+      },
+      "source_mechanism": "data_layer_push",
+      "tag_name": "Meta - AddToCart",
+      "vendor_family": "meta",
+      "destination_id": "META-TEST-001",
+      "destination_event_name": "AddToCart",
+      "destination_id_parameter_path": "query.id",
+      "destination_event_parameter_path": "query.ev",
+      "expected_request_behavior": "sent_once",
+      "expected_endpoint_pattern": "^https://www\\.facebook\\.com/tr/",
+      "destination_parameter_path": "query.value",
+      "expected_destination_value": 29.9,
+      "expected_destination_type": "number",
+      "trigger_contract": {
+        "mode": "ALL",
+        "expected_result": "matched",
+        "conditions": [
+          {
+            "condition_id": "COND-EVENT"
+          },
+          {
+            "condition_id": "COND-VALUE"
+          }
+        ],
+        "blocking_exceptions": [
+          "Consent - ads denied"
+        ]
+      },
+      "sequence_contract": {
+        "expected_order": [
+          "Media - Setup",
+          "Meta - AddToCart",
+          "Media - Cleanup"
+        ]
+      },
+      "consent_contract": {
+        "mode": "advanced_v2",
+        "signals": {
+          "ad_storage": "granted",
+          "analytics_storage": "granted",
+          "ad_user_data": "granted",
+          "ad_personalization": "granted"
+        },
+        "transport_mode": "full",
+        "ads_data_redaction": true,
+        "url_passthrough": false,
+        "transition": {
+          "before": {
+            "ad_storage": "denied",
+            "analytics_storage": "denied",
+            "ad_user_data": "denied",
+            "ad_personalization": "denied"
+          },
+          "after": {
+            "ad_storage": "granted",
+            "analytics_storage": "granted",
+            "ad_user_data": "granted",
+            "ad_personalization": "granted"
+          }
+        }
+      },
+      "business_rules": [
+        {
+          "rule_id": "BR-VALUE",
+          "operator": "sum_product_equals",
+          "target_path": "ecommerce.value",
+          "items_path": "ecommerce.items",
+          "price_field": "price",
+          "quantity_field": "quantity",
+          "tolerance": 0.001
+        },
+        {
+          "rule_id": "BR-CURRENCY",
+          "operator": "all_items_equal",
+          "items_path": "ecommerce.items",
+          "item_field": "currency",
+          "expected_path": "ecommerce.currency"
+        },
+        {
+          "rule_id": "BR-COUPON",
+          "operator": "implies",
+          "if": {
+            "path": "ecommerce.coupon",
+            "match_rule": "present"
+          },
+          "then": {
+            "path": "ecommerce.discount",
+            "match_rule": "greater_than",
+            "expected_value": 0
+          }
+        },
+        {
+          "rule_id": "BR-TRANSACTION-FORMAT",
+          "operator": "format",
+          "path": "ecommerce.transaction_id",
+          "format": "uuid"
+        },
+        {
+          "rule_id": "BR-TRANSACTION-UNIQUE",
+          "operator": "unique_across_requirements",
+          "path": "ecommerce.transaction_id"
+        },
+        {
+          "rule_id": "BR-VALUE-RANGE",
+          "operator": "range",
+          "path": "ecommerce.value",
+          "min": 0,
+          "max": 999999
+        },
+        {
+          "rule_id": "BR-CURRENCY-FORMAT",
+          "operator": "format",
+          "path": "ecommerce.currency",
+          "format": "iso_currency"
+        }
+      ],
+      "sensitive_data_policy": {
+        "forbidden_categories": [
+          "email",
+          "phone",
+          "postal_address",
+          "person_name",
+          "ip_address",
+          "sensitive_query_parameter"
+        ],
+        "allowlisted_paths": []
+      }
+    },
+    "raw_payload_patch": {
+      "ecommerce": {
+        "value": 29.9,
+        "currency": "EUR",
+        "coupon": "SYNTHETIC10",
+        "discount": 3,
+        "transaction_id": "123e4567-e89b-42d3-a456-426614174000",
+        "items": [
+          {
+            "item_id": "SKU-TEST-001",
+            "price": 14.95,
+            "quantity": 2,
+            "currency": "EUR"
+          }
+        ]
+      }
+    },
+    "tag_patch": {
+      "container_id": "GTM-MEDIA",
+      "vendor_family": "meta",
+      "destination_id": "META-TEST-001",
+      "event_name": "AddToCart",
+      "template_type": "gallery_template",
+      "name": "Meta - AddToCart"
+    },
+    "destination_request": {
+      "applicable": true,
+      "container_id": "GTM-MEDIA",
+      "vendor_family": "meta",
+      "destination_id": "META-TEST-001",
+      "event_name": "AddToCart",
+      "request_behavior": "sent",
+      "request_count": 1,
+      "method": "GET",
+      "request_url": "https://www.facebook.com/tr/?id=META-TEST-001&ev=AddToCart&value=29.9",
+      "parameter_path": "query.value",
+      "field_state": "present",
+      "field_value": 29.9,
+      "field_type": "number",
+      "capture_source": "browser_network",
+      "vendor_helper_status": "detected",
+      "evidence_id": "EVD-DESTINATION-001",
+      "vendor_helper_evidence_id": "EVD-VENDOR-HELPER-001"
+    },
+    "trigger_evaluation": {
+      "mode": "ALL",
+      "actual_result": "matched",
+      "conditions": [
+        {
+          "condition_id": "COND-EVENT",
+          "variable": "{{Event}}",
+          "operator": "equals",
+          "expected": "add_to_cart",
+          "actual": "add_to_cart",
+          "matched": true
+        },
+        {
+          "condition_id": "COND-VALUE",
+          "variable": "{{DLV - ecommerce.value}}",
+          "operator": "greater_than",
+          "expected": 0,
+          "actual": 29.9,
+          "matched": true
+        }
+      ],
+      "blocking_exceptions": [
+        {
+          "name": "Consent - ads denied",
+          "matched": false
+        }
+      ],
+      "evidence_id": "EVD-TRIGGER-001"
+    },
+    "tag_sequence": {
+      "actual_order": [
+        "Media - Setup",
+        "Meta - AddToCart",
+        "Media - Cleanup"
+      ],
+      "evidence_id": "EVD-SEQUENCE-001"
+    },
+    "consent": {
+      "applicable": true,
+      "scenario_id": "CONSENT-GRANTED-AFTER-UPDATE",
+      "scenario": "Advanced Consent Mode v2 transition",
+      "source": "natural_cmp",
+      "state_at_event": {
+        "ad_storage": "granted",
+        "analytics_storage": "granted",
+        "ad_user_data": "granted",
+        "ad_personalization": "granted"
+      },
+      "transport_mode": "full",
+      "ads_data_redaction": true,
+        "url_passthrough": false,
+        "required_tag_consent_types": [
+          "ad_storage",
+          "ad_user_data",
+          "ad_personalization"
+        ],
+      "transition": {
+        "before": {
+          "ad_storage": "denied",
+          "analytics_storage": "denied",
+          "ad_user_data": "denied",
+          "ad_personalization": "denied"
+        },
+        "after": {
+          "ad_storage": "granted",
+          "analytics_storage": "granted",
+          "ad_user_data": "granted",
+          "ad_personalization": "granted"
+        }
+      },
+      "tag_consent_checks": [
+        {
+          "consent_type": "ad_storage",
+          "expected": "granted",
+          "actual": "granted",
+          "status": "PASS"
+        },
+        {
+          "consent_type": "ad_user_data",
+          "expected": "granted",
+          "actual": "granted",
+          "status": "PASS"
+        },
+        {
+          "consent_type": "ad_personalization",
+          "expected": "granted",
+          "actual": "granted",
+          "status": "PASS"
+        }
+      ],
+      "evidence_id": "EVD-CONSENT-V2-001"
+    },
+    "business_rule_results": [
+      {
+        "rule_id": "BR-VALUE",
+        "status": "PASS",
+        "evidence_id": "EVD-BUSINESS-001"
+      },
+      {
+        "rule_id": "BR-CURRENCY",
+        "status": "PASS",
+        "evidence_id": "EVD-BUSINESS-001"
+      },
+      {
+        "rule_id": "BR-COUPON",
+        "status": "PASS",
+        "evidence_id": "EVD-BUSINESS-001"
+      },
+      {
+        "rule_id": "BR-TRANSACTION-FORMAT",
+        "status": "PASS",
+        "evidence_id": "EVD-BUSINESS-001"
+      },
+      {
+        "rule_id": "BR-TRANSACTION-UNIQUE",
+        "status": "PASS",
+        "evidence_id": "EVD-BUSINESS-001"
+      },
+      {
+        "rule_id": "BR-VALUE-RANGE",
+        "status": "PASS",
+        "evidence_id": "EVD-BUSINESS-001"
+      },
+      {
+        "rule_id": "BR-CURRENCY-FORMAT",
+        "status": "PASS",
+        "evidence_id": "EVD-BUSINESS-001"
+      }
+    ],
+    "sensitive_data_scan": {
+      "applicable": true,
+      "scanned_targets": [
+        "raw_api_call.payload",
+        "resolved_data_layer.snapshot",
+        "tag.runtime_value",
+        "destination_request.request_url",
+        "destination_request.field_value",
+        "journey.url",
+        "journey.action_value",
+        "client_checks[0].actual",
+        "client_checks[1].actual",
+        "client_checks[2].actual",
+        "client_checks[3].actual",
+        "client_checks[4].actual",
+        "client_checks[5].actual",
+        "client_checks[6].actual",
+        "client_checks[7].actual",
+        "client_checks[8].actual",
+        "client_checks[9].actual",
+        "client_checks[10].actual",
+        "client_checks[11].actual",
+        "client_checks[12].actual",
+        "client_checks[13].actual"
+      ],
+      "findings": [],
+      "status": "PASS",
+      "evidence_id": "EVD-SENSITIVE-001"
+    },
+    "client_checks": [
+      {
+        "check_id": "CHECK-SPA",
+        "category": "spa_navigation_source",
+        "context_id": "mobile-default",
+        "comparison": "equals",
+        "expected": "history_push",
+        "actual": "history_push",
+        "status": "PASS",
+        "evidence_id": "EVD-CLIENT-CHECKS-001"
+      },
+      {
+        "check_id": "CHECK-AUTO-EVENT",
+        "category": "auto_event_source",
+        "context_id": "mobile-default",
+        "comparison": "equals",
+        "expected": "explicit_data_layer_push",
+        "actual": "explicit_data_layer_push",
+        "status": "PASS",
+        "evidence_id": "EVD-CLIENT-CHECKS-001"
+      },
+      {
+        "check_id": "CHECK-RESPONSIVE",
+        "category": "responsive_context",
+        "context_id": "mobile-default",
+        "comparison": "equals",
+        "expected": "mobile_cta",
+        "actual": "mobile_cta",
+        "status": "PASS",
+        "evidence_id": "EVD-CLIENT-CHECKS-001"
+      },
+      {
+        "check_id": "CHECK-LINKER",
+        "category": "cross_domain_linker",
+        "context_id": "mobile-default",
+        "comparison": "present",
+        "expected": true,
+        "actual": "_gl=synthetic",
+        "status": "PASS",
+        "evidence_id": "EVD-CLIENT-CHECKS-001"
+      },
+      {
+        "check_id": "CHECK-COOKIE",
+        "category": "cookie_domain",
+        "context_id": "mobile-default",
+        "comparison": "equals",
+        "expected": "auto",
+        "actual": "auto",
+        "status": "PASS",
+        "evidence_id": "EVD-CLIENT-CHECKS-001"
+      },
+      {
+        "check_id": "CHECK-IFRAME",
+        "category": "iframe_tracking",
+        "context_id": "mobile-default",
+        "comparison": "equals",
+        "expected": "parent_postmessage",
+        "actual": "parent_postmessage",
+        "status": "PASS",
+        "evidence_id": "EVD-CLIENT-CHECKS-001"
+      },
+      {
+        "check_id": "CHECK-DATALAYER",
+        "category": "data_layer_integrity",
+        "context_id": "mobile-default",
+        "comparison": "equals",
+        "expected": {
+          "reassigned_after_gtm": false,
+          "push_method_intact": true
+        },
+        "actual": {
+          "reassigned_after_gtm": false,
+          "push_method_intact": true
+        },
+        "status": "PASS",
+        "evidence_id": "EVD-CLIENT-CHECKS-001"
+      },
+      {
+        "check_id": "CHECK-PLATFORM",
+        "category": "platform_convention",
+        "context_id": "mobile-default",
+        "comparison": "equals",
+        "expected": "standard_dataLayer",
+        "actual": "standard_dataLayer",
+        "status": "PASS",
+        "evidence_id": "EVD-CLIENT-CHECKS-001"
+      },
+      {
+        "check_id": "CHECK-DEBUG",
+        "category": "debug_mode",
+        "context_id": "mobile-default",
+        "comparison": "equals",
+        "expected": true,
+        "actual": true,
+        "status": "PASS",
+        "evidence_id": "EVD-CLIENT-CHECKS-001"
+      },
+      {
+        "check_id": "CHECK-DEBUGVIEW",
+        "category": "debugview",
+        "context_id": "mobile-default",
+        "comparison": "equals",
+        "expected": "observed",
+        "actual": "observed",
+        "status": "PASS",
+        "evidence_id": "EVD-CLIENT-CHECKS-001"
+      },
+      {
+        "check_id": "CHECK-LIMIT",
+        "category": "client_limit",
+        "context_id": "mobile-default",
+        "comparison": "maximum",
+        "expected": 25,
+        "actual": 12,
+        "status": "PASS",
+        "limit_source": "Synthetic current-vendor-limit acceptance rule",
+        "evidence_id": "EVD-CLIENT-CHECKS-001"
+      },
+      {
+        "check_id": "CHECK-CUSTOM-JS",
+        "category": "custom_javascript",
+        "context_id": "mobile-default",
+        "comparison": "equals",
+        "expected": "no_error",
+        "actual": "no_error",
+        "status": "PASS",
+        "evidence_id": "EVD-CLIENT-CHECKS-001"
+      },
+      {
+        "check_id": "CHECK-CONTAINERS",
+        "category": "container_conflict",
+        "context_id": "mobile-default",
+        "comparison": "equals",
+        "expected": "none",
+        "actual": "none",
+        "status": "PASS",
+        "evidence_id": "EVD-CLIENT-CHECKS-001"
+      },
+      {
+        "check_id": "CHECK-DEPENDENCY",
+        "category": "tag_dependency",
+        "context_id": "mobile-default",
+        "comparison": "equals",
+        "expected": "satisfied",
+        "actual": "satisfied",
+        "status": "PASS",
+        "evidence_id": "EVD-CLIENT-CHECKS-001"
+      }
+    ],
+    "regression": {
+      "applicable": true,
+      "baseline_run_id": "RUN-SYNTHETIC-001",
+      "baseline_status": "PASS",
+      "current_status": "PASS",
+      "change": "UNCHANGED",
+      "evidence_id": "EVD-REGRESSION-001",
+      "notes": "Previously passing requirement remains correct."
+    },
+    "verdict_patch": {
+      "source_signal": null,
+      "tag_configuration": "PASS",
+      "destination_request": "PASS",
+      "destination_parameter": "PASS",
+      "trigger_logic": "PASS",
+      "tag_sequence": "PASS",
+      "consent": "PASS",
+      "business_rule": "PASS",
+      "sensitive_data": "PASS",
+      "client_checks": "PASS",
+      "regression": "PASS"
+    }
+  },
+  "evidence": [
+    {
+      "evidence_id": "EVD-SCENARIO-001",
+      "kind": "scenario_branch",
+      "source": "Playwright",
+      "path_or_url": "evidence/scenario-001.json",
+      "captured_at": "2026-07-25T10:01:03+00:00",
+      "description": "Synthetic hero-b condition and branch evidence."
+    },
+    {
+      "evidence_id": "EVD-DESTINATION-001",
+      "kind": "browser_network_request",
+      "source": "Browser Network",
+      "source_detail": "Captured through Playwright request instrumentation",
+      "path_or_url": "evidence/destination-001.json",
+      "captured_at": "2026-07-25T10:01:03+00:00",
+      "description": "Exact browser request and decoded Meta value parameter."
+    },
+    {
+      "evidence_id": "EVD-VENDOR-HELPER-001",
+      "kind": "vendor_helper",
+      "source": "Vendor Helper",
+      "source_detail": "Synthetic Meta helper fixture",
+      "path_or_url": "evidence/vendor-helper-001.json",
+      "captured_at": "2026-07-25T10:01:03+00:00",
+      "description": "Supplementary helper observation."
+    },
+    {
+      "evidence_id": "EVD-TRIGGER-001",
+      "kind": "trigger_evaluation",
+      "source": "Tag Assistant",
+      "path_or_url": "evidence/trigger-001.json",
+      "captured_at": "2026-07-25T10:01:03+00:00",
+      "description": "Trigger conditions and blocking exception evaluation."
+    },
+    {
+      "evidence_id": "EVD-SEQUENCE-001",
+      "kind": "tag_sequence",
+      "source": "Tag Assistant",
+      "path_or_url": "evidence/sequence-001.json",
+      "captured_at": "2026-07-25T10:01:03+00:00",
+      "description": "Setup, main, and cleanup tag order."
+    },
+    {
+      "evidence_id": "EVD-CONSENT-V2-001",
+      "kind": "tag_assistant_consent",
+      "source": "Tag Assistant",
+      "path_or_url": "evidence/consent-v2-001.json",
+      "captured_at": "2026-07-25T10:01:03+00:00",
+      "description": "Four signals, transition, transport, and tag consent checks."
+    },
+    {
+      "evidence_id": "EVD-BUSINESS-001",
+      "kind": "business_rule_evaluation",
+      "source": "Deterministic Validator",
+      "path_or_url": "evidence/business-001.json",
+      "captured_at": "2026-07-25T10:01:03+00:00",
+      "description": "Safe declarative cross-field rule results."
+    },
+    {
+      "evidence_id": "EVD-SENSITIVE-001",
+      "kind": "sensitive_data_scan",
+      "source": "Deterministic Validator",
+      "source_detail": "scan_sensitive_data.py",
+      "path_or_url": "evidence/sensitive-001.json",
+      "captured_at": "2026-07-25T10:01:03+00:00",
+      "description": "Redacted client-side sensitive-data scan."
+    },
+    {
+      "evidence_id": "EVD-CLIENT-CHECKS-001",
+      "kind": "client_side_checks",
+      "source": "Playwright",
+      "source_detail": "Playwright with referenced Tag Assistant observations",
+      "path_or_url": "evidence/client-checks-001.json",
+      "captured_at": "2026-07-25T10:01:03+00:00",
+      "description": "SPA, responsive, cross-domain, dataLayer, debug, and limit checks."
+    },
+    {
+      "evidence_id": "EVD-REGRESSION-001",
+      "kind": "previous_run_comparison",
+      "source": "Deterministic Validator",
+      "source_detail": "diff_recette_runs.py",
+      "path_or_url": "evidence/regression-001.json",
+      "captured_at": "2026-07-25T10:01:03+00:00",
+      "description": "Requirement and acceptance-relevant container comparison."
+    }
+  ]
+}

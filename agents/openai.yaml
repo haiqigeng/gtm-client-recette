@@ -1,4 +1,4 @@
 interface:
   display_name: "GTM Preview Recette"
-  short_description: "Run complete, plan-ordered GTM Preview QA"
-  default_prompt: "Use $gtm-preview-recette to execute every tracking-plan event in order through GTM Preview and deliver evidence-backed verdicts plus a validated XLSX."
+  short_description: "Run exhaustive client-side GTM acceptance QA"
+  default_prompt: "Use $gtm-preview-recette to test every applicable tracking-plan interaction in order, reconcile every business push through raw API Call, resolved Data Layer, GTM variable, concerned tag configuration, firing decision, runtime value, and browser send, complete safe gated journeys, and deliver one evidence-backed verdict per event plus a validated XLSX."
