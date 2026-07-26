@@ -231,16 +231,21 @@ For an attempted in-scope action retain:
 
 ```json
 {
+  "action_id": "ACT-017",
+  "retry_of_action_id": null,
   "preview_connected_before": true,
   "target_ready_before": true,
   "consent_state_before": {},
   "last_event_before": 37,
   "action_timestamp": "2026-07-25T10:01:00+00:00",
+  "interaction_outcome": "completed",
+  "completion_signal": "Visible confirmation state",
   "first_event_after": 38,
   "settled_final_event": 42,
   "quiet_window_ms": 2000,
   "timeout_ms": 15000,
   "stream_settled": true,
+  "settlement_reason": "expected_and_quiet",
   "evidence_id": "EVD-ACTION-017"
 }
 ```
@@ -250,6 +255,13 @@ integers with `last_event_before < first_event_after <= settled_final_event`,
 and occurrence/anchor indexes must fit the retained window. For an absent
 expected event, retain the same negative action evidence. A finalized
 `REVIEW` attempt needs the boundary too; `REVIEW` cannot erase chronology.
+
+Current session-ledger output also retains the stable `action_id`, optional
+`retry_of_action_id`, `interaction_outcome`, independent safe
+`completion_signal`, and `settlement_reason`. These fields are optional for
+legacy schema-v2 input, but when present they are validated. A completed
+interaction requires a non-empty completion signal, and a failed or uncertain
+interaction cannot support an event-occurrence `FAIL`.
 
 ### Occurrence evidence
 
@@ -499,7 +511,8 @@ Strict mode rejects:
 - merged raw and resolved evidence;
 - value/type/state contradictions;
 - unsupported silent transformations;
-- event absence without a stable action boundary;
+- event absence without an independently completed interaction and stable
+  relevant-stream action boundary;
 - `PASS` values that contradict fixed expectations;
 - wanted non-fired tags without a reason and source;
 - destination PASS without browser-network evidence or with wrong ID,

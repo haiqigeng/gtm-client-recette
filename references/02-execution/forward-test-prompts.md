@@ -174,3 +174,43 @@ The agent must install supplemental capture before page scripts, cross-check
 the exact Tag Assistant API Call, retain the navigation request, decode the
 batch without equating request count with event count, and preserve the
 dataLayer/tag/runtime/request verdict chain.
+
+## Failed interaction and bounded retry
+
+```text
+Use $gtm-preview-recette at <skill path>. During a planned CTA case, an overlay
+intercepts the first real click. A business event nevertheless appears in that
+failed action window. After the overlay closes, the real CTA action can be
+performed normally.
+```
+
+The agent must prove website completion independently from tracking, preserve
+and classify the first window, restore readiness, retry once with a linked new
+action ID, and keep both attempts. It must not use the failed click to claim the
+expected event is missing or merge away the event that appeared prematurely.
+
+## Slow and noisy SPA settlement
+
+```text
+Use $gtm-preview-recette at <skill path>. A planned SPA interaction completes
+immediately, but acceptance-relevant state and business pushes arrive over six
+seconds while unrelated technical events continue in the background.
+```
+
+The agent must choose and record an adaptive relevant-stream quiet window and
+bounded timeout, restart settlement after relevant pushes, and distinguish
+technical background noise. It must not finalize absence, count, order, or
+deduplication from an unsettled relevant window.
+
+## Journal-only push missing from Preview
+
+```text
+Use $gtm-preview-recette at <skill path>. The document-start journal records a
+planned dataLayer.push inside the controlled action window, but the expected API
+Call is not visible in the selected Tag Assistant page node.
+```
+
+The agent must stop the affected verdict, verify container/origin/page-node/
+iframe-or-SPA ownership and connection, inspect the complete index window, and
+repeat once when safe. It must retain the discrepancy and never relabel the
+journal as Tag Assistant evidence or pass unavailable Preview-dependent layers.

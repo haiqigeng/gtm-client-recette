@@ -35,7 +35,8 @@ Strict semantic validation rejects:
   contradicts a `PASS`;
 - wanted non-fired tags without reason and source;
 - unrelated tags used as primary comparisons;
-- event absence without a valid settled action boundary;
+- event absence without an independently completed interaction and valid
+  settled relevant-stream boundary;
 - reviewed attempts without a boundary, unsafe/missing action-value metadata,
   invalid timestamps, or impossible event-cursor chronology;
 - `NOT_TESTED` used for an attempted blocker;
@@ -64,9 +65,12 @@ Strict semantic validation rejects:
 - overall verdicts that hide worse component statuses.
 
 The agent additionally verifies the authenticity of browser evidence, complete
-applicable interaction coverage, continuous business-stream reconciliation,
-gate completion, relevant alternate journeys, final ordered event feedback,
-and workbook readability. A structural validator cannot prove that browser
+applicable interaction coverage, independent non-tracking proof that each
+judged action completed, retention of failed attempts and retry lineage,
+adaptive relevant-stream settlement, controlled reconciliation of any
+journal/Preview gap, continuous business-stream reconciliation, gate
+completion, relevant alternate journeys, final ordered event feedback, and
+workbook readability. A structural validator cannot prove that browser
 observations are truthful.
 
 If a gate fails, report the run as incomplete and name the exact missing or

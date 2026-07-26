@@ -31,6 +31,12 @@ fire correctly while a parameter fails; firing is then `PASS`, parameter is
 Keep exact raw API Call and resolved Data Layer separate. A stale inherited
 resolved value cannot repair a missing or wrong raw field.
 
+Before judging event absence, prove the real website interaction completed
+through a non-tracking signal and that the acceptance-relevant stream settled.
+A failed or uncertain interaction is an execution blocker, not proof of a
+tracking defect. Preserve and classify every push from a failed attempt before
+one bounded retry with a new action ID.
+
 Compare occurrence at both levels:
 
 1. did every applicable interaction case produce its required event and count;
@@ -62,6 +68,11 @@ Tag Assistant API Call. A planned native, DOM, enhanced-measurement,
 direct-vendor, or Custom HTML signal requires exact `source_signal` evidence
 instead. Browser interception explains chronology and cannot replace an
 applicable Preview link.
+
+A journal-only push missing from Tag Assistant triggers the controlled
+discrepancy procedure and cannot pass a required Preview-dependent layer.
+Unreliable Preview is `BLOCKED`; an evidenced acceptance contradiction is
+`FAIL`; unresolved semantics are `REVIEW`.
 
 Browser network is authoritative for the outbound client send attempt; vendor
 helpers and UIs are supplementary. Reconcile the decoded destination ID,

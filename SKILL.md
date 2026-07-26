@@ -1,6 +1,6 @@
 ---
 name: gtm-preview-recette
-description: Execute an expert, operational client-side GTM Preview and Tag Assistant acceptance recette against an existing tracking plan or explicit scoped acceptance rule. Use for full-site or journey-level analytics and media-tag QA that must preserve tracking-plan order, cover every applicable interaction and material variant, complete authorised synthetic-data and gated flows, reconcile every business dataLayer push in controlled action windows, detect missing, duplicate, mistimed, or wrong-context occurrences, compare exact raw and resolved GTM evidence, verify multi-vendor tags and browser sends, and provide one evidence-backed verdict per event plus a strictly validated XLSX. Do not use for tracking-plan design, general GTM audits, implementation fixes, publishing, server-side GTM, legal consent decisions, or observation without acceptance criteria.
+description: Execute expert client-side GTM Preview and Tag Assistant acceptance recette against an existing tracking plan or explicit acceptance rule. Use for plan-ordered analytics and media-tag QA that must cover every applicable interaction and material variant, complete safe gated flows, reconcile every business dataLayer push by action window, compare exact raw and resolved GTM, tag, runtime, and browser-send evidence, detect missing, duplicate, mistimed, or wrong-context occurrences, and deliver one evidence-backed verdict per event plus a validated XLSX. Excludes tracking-plan design, container audit or configuration, implementation fixes, publishing, server-side GTM, and legal consent decisions.
 ---
 
 # GTM Preview Recette
@@ -48,22 +48,32 @@ classifying every observed business push during the planned positive journeys.
 Reproduce an anomaly when useful, and run an explicit non-firing scenario only
 when the acceptance specification requires it.
 
-## Read the operating references
+## Load references progressively
 
-Read these before execution:
+Do not preload the complete reference library. Always read only:
 
-- [inputs and outputs](references/01-orientation/inputs-outputs.md);
-- [interaction protocol](references/02-execution/interaction-protocol.md);
-- [schema v2](references/03-judgement/schema-v2.md);
-- [Tag Assistant operations](references/02-execution/tag-assistant-operations.md);
-- [browser readiness](references/02-execution/browser-session-and-readiness.md);
-- [journey and coverage](references/02-execution/journey-inference-and-coverage.md);
-- [interaction and capture playbook](references/02-execution/interaction-and-capture-playbook.md);
-- [incremental evidence workflow](references/02-execution/incremental-evidence-workflow.md);
-- [evidence model](references/03-judgement/evidence-model.md);
-- [matching rules](references/03-judgement/matching-rules.md);
-- [comparison contract](references/03-judgement/comparison-contract.md); and
-- [workbook architecture](references/03-judgement/workbook-architecture.md).
+- [interaction protocol](references/02-execution/interaction-protocol.md); and
+- [core execution contract](references/03-judgement/execution-contract.md).
+
+Then load each stage reference immediately before that stage:
+
+- **Normalize and design cases:** [inputs and outputs](references/01-orientation/inputs-outputs.md)
+  and [journey and coverage](references/02-execution/journey-inference-and-coverage.md).
+  Read [schema v2](references/03-judgement/schema-v2.md) before manually
+  constructing or repairing normalized requirements or event patches; use the
+  deterministic initializer and validators instead of reading code.
+- **Connect and execute:** [Tag Assistant operations](references/02-execution/tag-assistant-operations.md),
+  [browser readiness](references/02-execution/browser-session-and-readiness.md),
+  and the [interaction and capture playbook](references/02-execution/interaction-and-capture-playbook.md).
+- **Compare and judge:** [evidence model](references/03-judgement/evidence-model.md)
+  and [comparison contract](references/03-judgement/comparison-contract.md).
+  Load [matching rules](references/03-judgement/matching-rules.md) when a
+  requirement uses anything beyond literal equality, presence, absence, or
+  exact type.
+- **Validate and close:** [incremental evidence workflow](references/02-execution/incremental-evidence-workflow.md)
+  before the first event patch, and
+  [workbook architecture](references/03-judgement/workbook-architecture.md)
+  only before final report generation.
 
 Read the following only when relevant:
 
@@ -82,8 +92,9 @@ Read the following only when relevant:
   when a prior recette or acceptance-relevant read-only container comparison is
   supplied.
 
-Use [the gold mini-recette](references/gold-mini-recette.md) as the canonical
-example of independent layer verdicts and wrong-context detection.
+Use [the gold mini-recette](references/gold-mini-recette.md) only when
+calibration is needed for independent layer verdicts, wrong-context detection,
+or output structure.
 
 ## Execute the recette
 
@@ -206,6 +217,13 @@ python scripts/decode_browser_requests.py requests.json decoded-requests.json
 Do not retain credentials, authorization headers, cookies, or raw sensitive
 values.
 
+If the journal records a candidate push that Tag Assistant does not show,
+freeze the affected verdict and follow the discrepancy protocol in the Tag
+Assistant operations reference. Recheck the correct page node, container,
+origin, connection and full action-index window, then repeat once only when
+safe. Supplemental capture may expose the gap; it cannot pass a required
+Preview link.
+
 ### 4. Establish consent without silently changing it
 
 Capture the natural/default event-level consent state. For an ordinary journey
@@ -226,20 +244,41 @@ override. An override cannot pass the CMP implementation.
 
 For each case:
 
-1. confirm the page, connection, consent state, and quiet stream;
+1. confirm the page, connection, consent state, and an observed quiet baseline;
 2. mark the action boundary and previous Preview event index;
 3. perform one exact real interaction or value variant;
-4. record case identity, element, placement, URL/state, safe input, value type,
-   and timezone-qualified timestamp;
-5. wait for the expected event or bounded timeout, then a quiet window;
-6. record first and settled final event indexes;
-7. inspect and classify every business `dataLayer` push in the action window,
+4. verify the interaction itself completed through a safe non-tracking signal
+   such as URL, visible state, control value, navigation, or success message;
+5. record case and attempt identity, element, placement, URL/state, safe input,
+   value type, completion signal, and timezone-qualified timestamp;
+6. wait for the expected event or bounded timeout, then for the relevant
+   business stream to settle under the adaptive quiet-window rule;
+7. record first and settled final event indexes, chosen quiet window, timeout,
+   settlement result, and reason;
+8. inspect and classify every business `dataLayer` push in the action window,
    not just pushes with the expected event name;
-8. capture applicable resolved state, variables, concerned-tag evidence,
+9. capture applicable resolved state, variables, concerned-tag evidence,
    trigger/exception/sequence evidence, requests, consent, and direct errors;
-9. assign independent component verdicts; and
-10. validate and deliver the event verdict after all its cases, then continue
+10. assign independent component verdicts; and
+11. validate and deliver the event verdict after all its cases, then continue
     automatically.
+
+Never use the expected tracking event as proof that the website interaction
+completed. If an overlay, stale locator, animation, validation error, or other
+transient UI condition prevents the action, retain and reconcile that failed
+attempt, restore a quiet baseline, and retry once with a new action ID. More
+retries require an evidenced transient reason. If no valid action can be
+completed, use `BLOCKED`, not an implementation `FAIL`. If tracking fires
+during the failed attempt, keep it as possible premature or wrong-context
+evidence.
+
+Choose the quiet window from the observed baseline rather than from a fixed
+sleep. Restart it after every acceptance-relevant business or state push;
+unrelated technical noise alone need not keep the relevant window open. Extend
+the bounded timeout only for evidenced application latency. If the relevant
+stream never settles, do not pass or fail absence, count, or deduplication from
+that incomplete window; block the affected occurrence evidence and state the
+limitation.
 
 Keep a gapless cursor from the first controlled load through the final action.
 Classify each push against its trigger condition, page/state, causal action,

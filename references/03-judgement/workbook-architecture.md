@@ -41,6 +41,11 @@ safe action value/type/source, execution status, blockers, and evidence in
 source order. Protected analyst input is represented only by its canonical
 redacted marker.
 
+`Event Evidence` keeps action and retry IDs, independent interaction outcome
+and completion signal, adaptive quiet/timeout values, stream-settlement reason,
+event indexes, raw API Call, and resolved Data Layer evidence together without
+collapsing their verdicts.
+
 Keep raw payload, resolved snapshot, tag configuration, runtime value,
 destination request, trigger/sequence, consent, business-rule, redacted
 sensitive-data, client-check, regression, and container evidence distinct on

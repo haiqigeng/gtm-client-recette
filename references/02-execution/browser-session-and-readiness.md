@@ -1,5 +1,18 @@
 # Browser Session And Readiness
 
+## Contents
+
+1. [Controlled browser context](#controlled-browser-context)
+2. [Surface registry](#surface-registry)
+3. [Readiness gate](#readiness-gate)
+4. [Action boundary](#action-boundary)
+5. [Adaptive settlement](#adaptive-settlement)
+6. [Continuous business-event cursor](#continuous-business-event-cursor)
+7. [Connection watchdog](#connection-watchdog)
+8. [History and deduplication](#history-and-deduplication)
+9. [Cross-domain flows](#cross-domain-flows)
+10. [Checkpoint and resume](#checkpoint-and-resume)
+
 ## Controlled browser context
 
 Use an analyst-approved existing browser/extension session when the browser
@@ -49,8 +62,8 @@ Before every business action, verify:
 3. No unexpected overlay or navigation state blocks the target.
 4. Applicable lifecycle events have appeared.
 5. The required event-level consent state is visible when consent matters.
-6. The Preview stream is unchanged for a configurable quiet window, normally
-   1.5–3 seconds.
+6. The acceptance-relevant Preview stream is unchanged for a configurable
+   baseline quiet window, normally 1.5–3 seconds on a naturally settling page.
 
 Use state checks and event counts. A fixed sleep alone is not readiness proof.
 
@@ -61,10 +74,12 @@ Record:
 - Preview connection and target readiness before the action;
 - last Preview event index before the action;
 - URL, element, action, supplied/synthetic value, and timestamp;
+- independent interaction outcome and safe completion signal;
+- retry relationship when this is a bounded repeat of a retained attempt;
 - first Preview event index after the action;
 - settled final index;
 - quiet-window and bounded-timeout values;
-- whether the stream settled.
+- whether the relevant stream settled and why.
 
 Normalize the action value, JSON-compatible type, and source. Use explicit
 `null`/`not_applicable` for a plain click or load. Preserve safe supplied or
@@ -74,15 +89,45 @@ synthetic values; for protected analyst entry store only
 After the action, wait until the expected event set is present and the stream is
 quiet, or until a bounded timeout expires. Treat event absence as:
 
-- `FAIL` when the action was valid, Preview remained connected, and the stream
-  settled without the expected event;
+- `FAIL` when the interaction independently completed, Preview remained
+  connected, and the relevant stream settled without the expected event;
 - `BLOCKED` when execution, Preview connectivity, or an upstream/manual
-  condition prevented a valid implementation check.
+  condition prevented a valid implementation check, or when the relevant
+  stream never settled.
 
 Use a timezone-qualified action timestamp and non-negative integer event
 cursors. The target occurrence must fall after the last pre-action cursor and
 at or before the settled final cursor. A finalized `REVIEW` attempt keeps the
 same boundary and occurrence evidence.
+
+## Adaptive settlement
+
+Choose the initial quiet window from the observed page baseline:
+
+- normally use 1.5–3 seconds for a stable synchronous or ordinary SPA page;
+- increase it when the plan, measured application behaviour, lazy rendering,
+  form processing, or a vendor callback evidences longer latency;
+- never wait indefinitely; retain an explicit bounded timeout.
+
+After the interaction, restart the quiet timer whenever a new business event
+or acceptance-relevant state-only push appears. Continuous unrelated technical
+events may be recorded as background noise without preventing the relevant
+business window from settling. Do not ignore technical events that explain
+chronology, triggering, or non-firing.
+
+Record the quiet window, timeout, final index, `stream_settled`, and one
+settlement reason:
+
+- `expected_and_quiet`;
+- `quiet_without_expected`;
+- `timeout`;
+- `interaction_failed`; or
+- `preview_disconnected`.
+
+If the bounded timeout ends while the relevant stream is still changing,
+retain the incomplete window and block absence, exact count, order, and
+deduplication verdicts. Do not convert timing uncertainty into a tracking
+`FAIL` or a premature `PASS`.
 
 ## Continuous business-event cursor
 

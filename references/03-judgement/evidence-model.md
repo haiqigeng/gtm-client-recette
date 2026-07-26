@@ -33,6 +33,14 @@ Network capture is authoritative only for what the browser attempted to send.
 It does not prove vendor receipt, processing, attribution, reporting, or
 server-side forwarding.
 
+When the journal shows a push that Tag Assistant does not, follow the
+recorder/Preview discrepancy protocol in the Tag Assistant operations
+reference. Preserve both sources and any controlled repeat. The journal-only
+record may expose a gap, but it cannot make a required Preview-dependent layer
+`PASS`. Use `FAIL` only for an evidenced contradiction of the acceptance rule;
+otherwise use `BLOCKED` for unavailable authoritative evidence or `REVIEW` for
+unresolved semantics.
+
 ## Raw versus resolved
 
 The API Call is the authoritative raw push. The Data Layer panel is cumulative

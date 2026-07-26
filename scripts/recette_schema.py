@@ -74,6 +74,14 @@ ACTION_VALUE_SOURCES = {
     "protected_analyst_entry",
     "site_default",
 }
+INTERACTION_OUTCOMES = {"completed", "failed", "uncertain"}
+SETTLEMENT_REASONS = {
+    "expected_and_quiet",
+    "quiet_without_expected",
+    "timeout",
+    "interaction_failed",
+    "preview_disconnected",
+}
 SCOPE_STATUSES = {"IN_SCOPE", "OUT_OF_SCOPE"}
 RAW_SOURCES = {"tag_assistant_api_call", "browser_interception", "not_observed"}
 CONSENT_SOURCES = {"natural_cmp", "session_override", "not_in_scope"}
@@ -800,6 +808,39 @@ def _validate_action_boundary(
             errors.append(f"{label}: action_boundary missing '{field}'")
     if not _is_nonempty_string(boundary.get("evidence_id")):
         errors.append(f"{label}: action_boundary requires evidence_id")
+    action_id = boundary.get("action_id")
+    if action_id is not None and not _is_nonempty_string(action_id):
+        errors.append(f"{label}: action_id must be a non-empty string when supplied")
+    retry_of_action_id = boundary.get("retry_of_action_id")
+    if retry_of_action_id not in (None, ""):
+        if not _is_nonempty_string(retry_of_action_id):
+            errors.append(
+                f"{label}: retry_of_action_id must be a non-empty string when supplied"
+            )
+        if not _is_nonempty_string(action_id):
+            errors.append(f"{label}: retry_of_action_id requires action_id")
+        if retry_of_action_id == action_id:
+            errors.append(f"{label}: an action cannot retry itself")
+    interaction_outcome = boundary.get("interaction_outcome")
+    if (
+        interaction_outcome is not None
+        and interaction_outcome not in INTERACTION_OUTCOMES
+    ):
+        errors.append(f"{label}: invalid interaction_outcome")
+    completion_signal = boundary.get("completion_signal")
+    if completion_signal is not None and not _is_nonempty_string(completion_signal):
+        errors.append(
+            f"{label}: completion_signal must be a non-empty string when supplied"
+        )
+    if interaction_outcome == "completed" and not _is_nonempty_string(
+        completion_signal
+    ):
+        errors.append(
+            f"{label}: completed interaction requires an independent completion_signal"
+        )
+    settlement_reason = boundary.get("settlement_reason")
+    if settlement_reason is not None and settlement_reason not in SETTLEMENT_REASONS:
+        errors.append(f"{label}: invalid settlement_reason")
     if require_ready:
         for field in ("preview_connected_before", "target_ready_before"):
             if boundary.get(field) is not True:
@@ -812,6 +853,11 @@ def _validate_action_boundary(
         errors.append(f"{label}: timeout_ms must be a positive integer")
     if require_settled and boundary.get("stream_settled") is not True:
         errors.append(f"{label}: event stream was not recorded as settled")
+    if boundary.get("stream_settled") is False and settlement_reason in {
+        "expected_and_quiet",
+        "quiet_without_expected",
+    }:
+        errors.append(f"{label}: unsettled stream cannot use a quiet settlement_reason")
     if "last_event_before" not in boundary:
         errors.append(f"{label}: action_boundary missing 'last_event_before'")
     if "settled_final_event" not in boundary:
@@ -2758,8 +2804,18 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
                 require_ready=not preview_disconnected,
                 require_settled=not preview_disconnected,
             )
-            _validate_occurrence(requirement, label, errors)
             boundary = requirement.get("action_boundary")
+            if (
+                observed is False
+                and status_of(verdict.get("event_occurrence")) == "FAIL"
+                and isinstance(boundary, dict)
+                and boundary.get("interaction_outcome") in {"failed", "uncertain"}
+            ):
+                errors.append(
+                    f"{label}: failed or uncertain interaction cannot prove "
+                    "expected-event absence"
+                )
+            _validate_occurrence(requirement, label, errors)
             occurrence = requirement.get("occurrence_evidence")
             if isinstance(boundary, dict) and isinstance(occurrence, dict):
                 event_indexes = occurrence.get("event_indexes")

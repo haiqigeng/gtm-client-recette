@@ -6,17 +6,20 @@
 
 ## Current release
 
-[v1.1.0](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v1.1.0) is
+[v1.1.1](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v1.1.1) is
 the current supported release. Download the validated package:
-[gtm-preview-recette-v1.1.0.zip](https://github.com/haiqigeng/gtm-preview-recette/releases/download/v1.1.0/gtm-preview-recette-v1.1.0.zip).
+[gtm-preview-recette-v1.1.1.zip](https://github.com/haiqigeng/gtm-preview-recette/releases/download/v1.1.1/gtm-preview-recette-v1.1.1.zip).
 
-v1.1.0 is the schema-v2 client-side hardening release. It requires explicit
-web-container inventory, action-value metadata, applicability-derived evidence
-layers, and stricter provenance; legacy normalized rows must be upgraded before
-certification. It also adds embedded tracking-plan asset extraction,
-visible-interaction census, document-start dataLayer journalling, robust
-request decoding, practical Tag Assistant recovery guidance, and atomic
-per-event validation.
+v1.1.1 is the verdict-safety and progressive-loading patch. It proves each
+website interaction through a non-tracking completion signal before judging
+event absence, retains bounded retries as linked action windows, settles the
+acceptance-relevant event stream adaptively, and defines the exact outcome when
+the supplemental journal shows a push missing from Tag Assistant. The session
+ledger and Event Evidence sheet retain these fields. Detailed references now
+load at their execution stage instead of all 12 being preloaded. The release
+keeps schema version 2, one recette workflow, and the existing client-side
+scope; legacy schema-v2 rows remain valid because the new action fields are
+compatible and conditionally validated.
 
 An expert-only workflow for testing an existing client-side Google Tag Manager
 implementation against a tracking plan. It coordinates Playwright, GTM Preview,
@@ -69,6 +72,13 @@ tracking plan -> raw push/API Call -> resolved Data Layer -> GTM variable
 Every link keeps its own status. A correct dataLayer payload therefore cannot
 hide a wrong configured source, firing decision, runtime value or type, or
 browser request.
+
+Before an absent event can fail, the real website interaction must have
+independently completed and the acceptance-relevant stream must have settled.
+A failed click is retained, its event window is reconciled, and one transient
+retry uses a new linked action ID. A journal-only push missing from Tag
+Assistant triggers a controlled connection/page-node/window check and cannot
+substitute for required Preview evidence.
 
 Every run begins with a concise responsibility-labelled preflight, waits for
 `READY`, and then pauses only at protected checkpoints.
@@ -149,7 +159,9 @@ Run regression tests:
 python -m unittest discover -s tests -v
 ```
 
-The full agent workflow starts in `SKILL.md`. The reference map is:
+The full agent workflow starts in `SKILL.md`. It loads the compact interaction
+and execution contracts first, then loads detailed references only at the stage
+that uses them. The reference map is:
 
 - `references/01-orientation/`: purpose, users, inputs, outputs, acceptance, and non-goals.
 - `references/02-execution/`: interaction, browser readiness, multi-vendor

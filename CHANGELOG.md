@@ -1,5 +1,35 @@
 # Changelog
 
+## [v1.1.1](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v1.1.1) (2026-07-26)
+
+- Require independent, non-tracking proof that a real website interaction
+  completed before an absent expected event can be judged as an implementation
+  failure.
+- Preserve failed or uncertain interaction windows, classify any business
+  pushes they contain, and allow one bounded retry with a new linked action ID
+  instead of merging or erasing attempts.
+- Replace fixed-sleep assumptions with adaptive acceptance-relevant stream
+  settlement, recorded quiet/timeout values, and explicit settlement reasons;
+  unsettled windows cannot certify absence, count, order, or deduplication.
+- Add a deterministic recorder-versus-Tag Assistant discrepancy procedure that
+  rechecks container, origin, page node, ownership, connection, full event
+  window, and one safe controlled repeat without allowing supplemental evidence
+  to pass a required Preview link.
+- Extend the resumable session ledger, optional schema-v2 action fields, strict
+  conditional validation, Event Evidence worksheet columns, runtime templates,
+  and regression fixtures for interaction outcome, completion signal, retry
+  lineage, and settlement reason.
+- Replace the 12-reference mandatory preload with a compact core execution
+  contract and stage-specific progressive loading while preserving every
+  acceptance layer and the exact approved north star.
+- Add forward-test cases for transient interaction failure, slow/noisy SPA
+  settlement, and journal-only pushes missing from Preview.
+- Validate release alignment across README, changelog, contribution guide,
+  security policy, issue template, agent metadata, package name, and Git tag so
+  repository sections cannot silently advertise different versions.
+- Preserve one client-side recette workflow; add no container-audit, automatic
+  negative-probe, publication, server-side, or legal-consent scope.
+
 ## [v1.1.0](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v1.1.0) (2026-07-26)
 
 - Consolidate execution into one acceptance workflow whose required evidence

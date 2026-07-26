@@ -24,6 +24,7 @@ Known limitations:
 
 ```text
 Action ID:
+Retry of action ID:
 Case / instance ID:
 Requirement IDs:
 Page / placement / element / state:
@@ -34,9 +35,13 @@ Target ready before:
 Consent state before:
 Last event before:
 Action timestamp:
+Interaction outcome:
+Independent completion signal:
 First event after:
 Settled final event:
 Quiet window / timeout:
+Relevant stream settled:
+Settlement reason:
 Action-boundary evidence ID:
 ```
 
