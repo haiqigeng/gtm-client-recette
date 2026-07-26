@@ -6,10 +6,11 @@
 2. [Connect Preview](#connect-preview)
 3. [Prove readiness](#prove-readiness)
 4. [Extract event evidence](#extract-event-evidence)
-5. [Clear history safely](#clear-history-safely)
-6. [Recover a session](#recover-a-session)
-7. [Handle common connection failures](#handle-common-connection-failures)
-8. [Return an authenticated session](#return-an-authenticated-session)
+5. [Reconcile a recorder and Preview gap](#reconcile-a-recorder-and-preview-gap)
+6. [Clear history safely](#clear-history-safely)
+7. [Recover a session](#recover-a-session)
+8. [Handle common connection failures](#handle-common-connection-failures)
+9. [Return an authenticated session](#return-an-authenticated-session)
 
 Use this reference for the physical GTM Preview and Tag Assistant workflow.
 Keep the comparison and verdict rules in the judgement references.
@@ -67,7 +68,8 @@ Before the first controlled page load and every business action:
 - confirm the selected website/page node in Tag Assistant belongs to the
   current page;
 - record the last event index;
-- wait for the configured quiet window;
+- wait for the observed-baseline quiet window from the browser-readiness
+  reference;
 - confirm the website is interactive and the target is not covered;
 - capture applicable event-level consent state;
 - check that the supplemental dataLayer journal, when installed, remains
@@ -98,6 +100,41 @@ Tag Assistant events.
 For a wanted tag that did not fire, inspect the event where it should have
 fired. Capture the evaluated trigger, blocking exception, variable values,
 event-level consent, and direct Preview message. Do not inspect unrelated tags.
+
+## Reconcile a recorder and Preview gap
+
+When the supplemental dataLayer journal records a candidate push but no
+corresponding Tag Assistant API Call is visible, stop the affected verdict and:
+
+1. retain the journal call index, action ID, timestamp, URL, arguments, and
+   integrity result;
+2. confirm the intended container, origin, selected Tag Assistant page node,
+   iframe/SPA ownership, and connection before and after the action;
+3. inspect every Tag Assistant event index in the retained action window,
+   including the correct page node after navigation;
+4. check for dataLayer reassignment, late recorder installation, multi-argument
+   pushes, and a disconnected or changed Preview surface;
+5. when the action is safe and repeatable, restore the checkpoint and repeat
+   once with a new action ID after reconnection or reload;
+6. preserve both attempts and their independent event windows.
+
+Apply these outcomes:
+
+- when the exact API Call is found, continue with the normal evidence chain;
+- when Preview was unreliable, use `BLOCKED` for unavailable Preview-dependent
+  layers rather than an implementation `FAIL`;
+- when the journal-only observation reproduces under a reliable Preview
+  connection, retain it as supplemental discrepancy evidence, but do not use it
+  to pass raw API Call, resolved state, variable, tag, firing, or runtime
+  checks;
+- use `FAIL` only when the evidenced discrepancy itself contradicts a confirmed
+  acceptance requirement; otherwise state the unavailable authoritative
+  evidence as `BLOCKED` or unresolved semantics as `REVIEW`;
+- when the first journal-only observation does not reproduce, retain it as an
+  isolated `REVIEW` observation rather than silently deleting it.
+
+A browser request, console object, or journal call cannot be relabelled as a
+Tag Assistant API Call.
 
 ## Clear history safely
 

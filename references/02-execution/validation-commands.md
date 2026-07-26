@@ -56,6 +56,13 @@ Decode browser-request captures:
 python -B scripts/decode_browser_requests.py requests.json decoded-requests.json
 ```
 
+Inspect the resumable session ledger, including interaction outcome, completion
+signal, retry lineage, and settlement reason:
+
+```powershell
+python -B scripts/preview_session_ledger.py status session.json
+```
+
 Validate one completed event, inspect progress, and validate the final ledger:
 
 ```powershell

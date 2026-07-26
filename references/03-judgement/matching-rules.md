@@ -43,7 +43,8 @@ as Python or JavaScript.
 
 Apply dependencies:
 
-- expected event absent after a valid settled action: occurrence `FAIL`;
+- expected event absent after an independently completed action and settled
+  relevant stream: occurrence `FAIL`;
   unavailable raw and downstream checks, including applicable event-level
   consent, `BLOCKED`; overall `FAIL`;
 - planned event present while its page/action/state trigger condition is false:

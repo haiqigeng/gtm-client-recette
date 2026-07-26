@@ -49,7 +49,8 @@ is required.
 Return:
 
 - one complete event-status list in original plan order;
-- a schema-v2 normalized evidence file;
+- a schema-v2 normalized evidence file retaining action outcome, independent
+  completion signal, linked retry attempts, and adaptive settlement evidence;
 - a validated `.xlsx` with client summary, requirement matrix, journey
   coverage, event, tag, destination, trigger/sequence, consent, business-rule,
   sensitive-data, client-check, regression, container, unexpected-item,

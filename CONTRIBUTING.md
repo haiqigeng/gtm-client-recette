@@ -8,9 +8,9 @@ container IDs, screenshots, reports, credentials, emails, or browser traces.
 Use semantic `v` versioning, never calendar-date versioning:
 
 - Store `MAJOR.MINOR.PATCH` in `pyproject.toml`; the current release is
-  `1.1.0`.
-- Prefix Git tags and release archives with `v`, for example `v1.1.0` and
-  `gtm-preview-recette-v1.1.0.zip`.
+  `1.1.1`.
+- Prefix Git tags and release archives with `v`, for example `v1.1.1` and
+  `gtm-preview-recette-v1.1.1.zip`.
 - Increment PATCH for compatible fixes, MINOR for compatible functionality,
   and MAJOR for incompatible changes.
 
@@ -20,7 +20,7 @@ Before opening a pull request, run:
 python -m pip install -e ".[dev]"
 python -m ruff check --no-cache .
 python -m unittest discover -s tests -v
-python -B scripts/check_release.py --tag v1.1.0
+python -B scripts/check_release.py --tag v1.1.1
 ```
 
 Changes to verdict logic require a regression fixture that fails before the
@@ -38,6 +38,11 @@ behaviour also require an anonymized case in
 `references/02-execution/forward-test-prompts.md`. Keep coverage proportional:
 exhaust practical finite sets, document risk-based large-space coverage, and
 do not add speculative negative crawling.
+
+Changes to action execution or absence judgement must keep interaction outcome
+independent from tracking, retain failed attempts and retry lineage, and test
+adaptive settlement. A supplemental recorder observation may expose a Preview
+gap but cannot pass a required Tag Assistant layer.
 
 Changes to the dataLayer recorder or DOM census require a synthetic browser
 smoke check using `tests/fixtures/browser_helpers_smoke.html`. Changes to plan

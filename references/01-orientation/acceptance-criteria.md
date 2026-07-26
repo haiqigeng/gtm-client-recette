@@ -12,9 +12,14 @@ A recette is complete only when:
   was prepared and offered to the analyst before final `BLOCKED`;
 - GTM account, every applicable web container/workspace, connected domain,
   browser context, target origin, and starting state are recorded;
-- every case has readiness, boundary, and settled-stream evidence;
+- every case has readiness, boundary, independent interaction-outcome, safe
+  completion-signal, and adaptive relevant-stream settlement evidence;
+- every failed or uncertain interaction attempt and its event window remains
+  visible, and any bounded retry uses a new linked action ID;
 - every controlled load, navigation, and interaction window has a reconciled
   ordered business-push stream with no unclassified occurrence;
+- every journal-only push missing from Tag Assistant has the controlled
+  discrepancy check and cannot substitute for a required Preview link;
 - every occurred planned dataLayer event has exact raw Tag Assistant API Call
   and separate resolved Data Layer evidence; a planned non-dataLayer signal has
   exact source evidence;

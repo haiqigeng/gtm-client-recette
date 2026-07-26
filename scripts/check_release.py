@@ -37,6 +37,15 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def markdown_section(text: str, heading: str) -> str:
+    match = re.search(
+        rf"^## {re.escape(heading)}\s*$([\s\S]*?)(?=^## |\Z)",
+        text,
+        flags=re.MULTILINE,
+    )
+    return match.group(1) if match else ""
+
+
 def main() -> int:
     args = parse_args()
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
@@ -52,6 +61,57 @@ def main() -> int:
         errors.append("calendar-date versions are forbidden; use semantic v-versioning")
     if args.tag and args.tag != expected_tag:
         errors.append(f"tag {args.tag!r} does not match project version {expected_tag!r}")
+
+    repository_url = "https://github.com/haiqigeng/gtm-preview-recette"
+    archive_name = f"gtm-preview-recette-{expected_tag}.zip"
+    release_url = f"{repository_url}/releases/tag/{expected_tag}"
+    archive_url = f"{repository_url}/releases/download/{expected_tag}/{archive_name}"
+
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    current_release = markdown_section(readme, "Current release")
+    for required in (expected_tag, release_url, archive_name, archive_url):
+        if required not in current_release:
+            errors.append(
+                f"README.md current-release section is not aligned to {expected_tag}: "
+                f"missing {required!r}"
+            )
+
+    changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    newest_changelog = re.search(
+        r"^## \[(v\d+\.\d+\.\d+)\]", changelog, flags=re.MULTILINE
+    )
+    if not newest_changelog or newest_changelog.group(1) != expected_tag:
+        errors.append(f"CHANGELOG.md newest release must be {expected_tag}")
+    if release_url not in changelog:
+        errors.append(f"CHANGELOG.md does not link the {expected_tag} release")
+
+    contributing = (ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    for required in (
+        f"`{version}`",
+        f"`{expected_tag}`",
+        f"`{archive_name}`",
+        f"--tag {expected_tag}",
+    ):
+        if required not in contributing:
+            errors.append(
+                f"CONTRIBUTING.md is not aligned to {expected_tag}: "
+                f"missing {required!r}"
+            )
+
+    security = (ROOT / "SECURITY.md").read_text(encoding="utf-8")
+    for required in (expected_tag, release_url):
+        if required not in security:
+            errors.append(
+                f"SECURITY.md is not aligned to {expected_tag}: missing {required!r}"
+            )
+
+    bug_template = (ROOT / ".github/ISSUE_TEMPLATE/bug_report.yml").read_text(
+        encoding="utf-8"
+    )
+    if bug_template.count(expected_tag) < 2:
+        errors.append(
+            f"bug-report release example and placeholder must both use {expected_tag}"
+        )
 
     release_candidates = [path for path in ROOT.rglob("*") if path.is_file()]
     for path in release_candidates:
@@ -81,6 +141,31 @@ def main() -> int:
     normalized_skill = " ".join(skill.split())
     if NORTH_STAR not in normalized_skill:
         errors.append("SKILL.md does not contain the exact approved north star")
+    if "Do not preload the complete reference library." not in skill:
+        errors.append("SKILL.md does not enforce progressive reference loading")
+    if "core execution contract" not in skill:
+        errors.append("SKILL.md does not route to the compact execution contract")
+    safety_contracts = {
+        "references/02-execution/browser-session-and-readiness.md": (
+            "## Adaptive settlement"
+        ),
+        "references/02-execution/interaction-and-capture-playbook.md": (
+            "## Verify completion and retry safely"
+        ),
+        "references/02-execution/tag-assistant-operations.md": (
+            "## Reconcile a recorder and Preview gap"
+        ),
+        "references/03-judgement/execution-contract.md": (
+            "## Verdict-safety invariants"
+        ),
+    }
+    for relative, required in safety_contracts.items():
+        content = (ROOT / relative).read_text(encoding="utf-8")
+        if required not in content:
+            errors.append(f"{relative} is missing required contract {required!r}")
+    agent_metadata = (ROOT / "agents/openai.yaml").read_text(encoding="utf-8")
+    if "$gtm-preview-recette" not in agent_metadata:
+        errors.append("agents/openai.yaml default prompt must invoke $gtm-preview-recette")
     for required_file in (
         "scripts/recette_schema.py",
         "scripts/inspect_tracking_plan.py",

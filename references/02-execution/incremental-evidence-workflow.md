@@ -50,6 +50,36 @@ open one action; settle it only after the event stream reaches the quiet
 boundary. Checkpoint after Preview connection, authentication handback,
 completed journeys and connection recovery.
 
+Record the action and its independent website completion signal:
+
+```powershell
+python -B scripts/preview_session_ledger.py begin-action session.json `
+  --action-id ACT-001 `
+  --requirement-id REQ-001 `
+  --url https://example.test/product `
+  --element "Add to cart" `
+  --action click `
+  --last-event-before 10 `
+  --consent-state "analytics_storage=granted" `
+  --quiet-window-ms 3000 `
+  --timeout-ms 20000
+
+python -B scripts/preview_session_ledger.py settle-action session.json `
+  --action-id ACT-001 `
+  --first-event-after 11 `
+  --settled-final-event 12 `
+  --expected-seen true `
+  --preview-connected-after true `
+  --interaction-outcome completed `
+  --completion-signal "Basket count changed from 0 to 1" `
+  --stream-settled true `
+  --settlement-reason expected_and_quiet
+```
+
+For one bounded retry, begin a new action with
+`--retry-of-action-id <retained-action-id>`. Never reuse an action ID or merge
+the failed and repeated windows.
+
 ## Complete one event group
 
 Execute every applicable case for the next event in plan order. Reconcile every

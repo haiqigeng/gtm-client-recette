@@ -5,10 +5,11 @@
 1. [Inspect the supplied plan](#inspect-the-supplied-plan)
 2. [Build the interaction census](#build-the-interaction-census)
 3. [Execute real interactions](#execute-real-interactions)
-4. [Use the supplemental dataLayer journal](#use-the-supplemental-datalayer-journal)
-5. [Capture browser requests](#capture-browser-requests)
-6. [Exercise specialized browser interactions](#exercise-specialized-browser-interactions)
-7. [Check dataLayer runtime semantics](#check-datalayer-runtime-semantics)
+4. [Verify completion and retry safely](#verify-completion-and-retry-safely)
+5. [Use the supplemental dataLayer journal](#use-the-supplemental-datalayer-journal)
+6. [Capture browser requests](#capture-browser-requests)
+7. [Exercise specialized browser interactions](#exercise-specialized-browser-interactions)
+8. [Check dataLayer runtime semantics](#check-datalayer-runtime-semantics)
 
 Use only the sections applicable to the tracking plan and reachable website.
 This playbook does not authorize a generic crawl or invented negative cases.
@@ -77,6 +78,38 @@ cursor windows. Verify every instance's event count and payload before rolling
 up homogeneous success. Reset the page, form, basket, user state, consent
 scenario, or funnel checkpoint whenever the previous case can influence the
 next one.
+
+## Verify completion and retry safely
+
+After every real interaction, prove that the website action itself completed
+without using the expected tracking event. Use the smallest safe independent
+signal available:
+
+- URL, route, title, or navigation change;
+- visible menu, modal, validation, success, or confirmation state;
+- control value, selected option, basket count, or rendered result change;
+- a safe application response or DOM state tied to the action.
+
+Record `interaction_outcome` as `completed`, `failed`, or `uncertain`, plus the
+completion signal. A tracking event is evidence about tracking, not evidence
+that the click, submit, or selection succeeded.
+
+When a transient overlay, stale locator, animation, disabled control, or
+similar execution condition prevents completion:
+
+1. preserve the failed attempt and its complete action-window stream;
+2. inspect any pushes in that failed window for premature or wrong-context
+   behaviour;
+3. correct only the transient execution condition without changing the
+   implementation;
+4. re-establish readiness and the quiet baseline;
+5. retry once with a new action ID linked to the failed action.
+
+Do not merge the two windows or erase the failed attempt. More than one retry
+requires a recorded transient reason. If no valid interaction can be
+completed, classify the case `BLOCKED`; do not call the expected event missing
+from implementation. If the interaction completed and the relevant stream
+settled without the event, the occurrence can be `FAIL`.
 
 ## Use the supplemental dataLayer journal
 

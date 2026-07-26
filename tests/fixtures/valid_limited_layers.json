@@ -84,16 +84,21 @@
         "evidence_id": "EVD-BROWSER-001"
       },
       "action_boundary": {
+        "action_id": "ACT-001",
+        "retry_of_action_id": null,
         "preview_connected_before": true,
         "target_ready_before": true,
         "consent_state_before": {},
         "last_event_before": 0,
         "action_timestamp": "2026-07-25T10:01:00+00:00",
+        "interaction_outcome": "completed",
+        "completion_signal": "Document reached interactive state",
         "first_event_after": 1,
         "settled_final_event": 3,
         "quiet_window_ms": 2000,
         "timeout_ms": 15000,
         "stream_settled": true,
+        "settlement_reason": "expected_and_quiet",
         "evidence_id": "EVD-ACTION-001"
       },
       "raw_api_call": {

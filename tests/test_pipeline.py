@@ -127,6 +127,12 @@ def add_blocker(
     req["journey"]["execution_status"] = "BLOCKED"
     req["blocker_id"] = "BLK-001"
     req["action_boundary"]["stream_settled"] = settled
+    if not settled:
+        req["action_boundary"]["settlement_reason"] = (
+            "preview_disconnected"
+            if blocker_type == "PREVIEW_DISCONNECTED"
+            else "timeout"
+        )
     data["blockers"] = [
         {
             "blocker_id": "BLK-001",
@@ -234,6 +240,26 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(REQUIRED_SHEETS, workbook.sheetnames)
             self.assertEqual("PASS", workbook["Client Summary"]["B3"].value)
             self.assertEqual(2, workbook["Requirement Matrix"].max_row)
+            event_sheet = workbook["Event Evidence"]
+            event_headers = {cell.value: cell.column for cell in event_sheet[1]}
+            self.assertEqual(
+                "ACT-001",
+                event_sheet.cell(row=2, column=event_headers["action_id"]).value,
+            )
+            self.assertEqual(
+                "completed",
+                event_sheet.cell(
+                    row=2,
+                    column=event_headers["interaction_outcome"],
+                ).value,
+            )
+            self.assertEqual(
+                "expected_and_quiet",
+                event_sheet.cell(
+                    row=2,
+                    column=event_headers["settlement_reason"],
+                ).value,
+            )
             evidence_sheet = workbook["Evidence Catalogue"]
             evidence_headers = {
                 cell.value: cell.column for cell in evidence_sheet[1]
@@ -1004,6 +1030,25 @@ class PipelineTests(unittest.TestCase):
         requirement(data)["occurrence_evidence"]["event_indexes"] = [13]
         self.assert_invalid(data, "occurrence event index exceeds settled_final_event")
 
+    def test_completed_interaction_requires_independent_completion_signal(self) -> None:
+        data = fixture()
+        requirement(data)["action_boundary"].pop("completion_signal")
+        self.assert_invalid(
+            data,
+            "completed interaction requires an independent completion_signal",
+        )
+
+    def test_failed_interaction_cannot_prove_expected_event_absence(self) -> None:
+        data = fixture()
+        req = configure_absent_event(data)
+        req["action_boundary"]["interaction_outcome"] = "failed"
+        req["action_boundary"]["completion_signal"] = "Overlay intercepted the click"
+        req["action_boundary"]["settlement_reason"] = "interaction_failed"
+        self.assert_invalid(
+            data,
+            "failed or uncertain interaction cannot prove expected-event absence",
+        )
+
     def test_reviewed_attempt_still_requires_action_boundary(self) -> None:
         data = fixture()
         req = requirement(data)
@@ -1344,6 +1389,50 @@ class PipelineTests(unittest.TestCase):
                 str(ledger),
                 "--action-id",
                 "ACT-001",
+                "--settled-final-event",
+                "10",
+                "--expected-seen",
+                "false",
+                "--preview-connected-after",
+                "true",
+                "--interaction-outcome",
+                "failed",
+                "--completion-signal",
+                "Overlay intercepted the click",
+                "--stream-settled",
+                "true",
+                "--settlement-reason",
+                "interaction_failed",
+            )
+            run(
+                "begin-action",
+                str(ledger),
+                "--action-id",
+                "ACT-002",
+                "--retry-of-action-id",
+                "ACT-001",
+                "--requirement-id",
+                "REQ-001",
+                "--url",
+                "https://shop.example.test/product",
+                "--element",
+                "Add to cart",
+                "--action",
+                "click",
+                "--last-event-before",
+                "10",
+                "--consent-state",
+                "analytics_storage=granted",
+                "--quiet-window-ms",
+                "3000",
+                "--timeout-ms",
+                "20000",
+            )
+            run(
+                "settle-action",
+                str(ledger),
+                "--action-id",
+                "ACT-002",
                 "--first-event-after",
                 "11",
                 "--settled-final-event",
@@ -1352,10 +1441,73 @@ class PipelineTests(unittest.TestCase):
                 "true",
                 "--preview-connected-after",
                 "true",
+                "--interaction-outcome",
+                "completed",
+                "--completion-signal",
+                "Basket count changed from 0 to 1",
+                "--stream-settled",
+                "true",
+                "--settlement-reason",
+                "expected_and_quiet",
             )
             state = json.loads(run("status", str(ledger)).stdout)
             self.assertEqual("SETTLED", state["actions"][0]["state"])
-            self.assertTrue(state["actions"][0]["preview_connected_after"])
+            self.assertEqual("failed", state["actions"][0]["interaction_outcome"])
+            self.assertEqual("ACT-001", state["actions"][1]["retry_of_action_id"])
+            self.assertEqual("completed", state["actions"][1]["interaction_outcome"])
+            self.assertEqual(
+                "Basket count changed from 0 to 1",
+                state["actions"][1]["completion_signal"],
+            )
+            self.assertTrue(state["actions"][1]["preview_connected_after"])
+            self.assertTrue(state["actions"][1]["stream_settled"])
+            run(
+                "begin-action",
+                str(ledger),
+                "--action-id",
+                "ACT-003",
+                "--retry-of-action-id",
+                "ACT-002",
+                "--requirement-id",
+                "REQ-001",
+                "--url",
+                "https://shop.example.test/product",
+                "--element",
+                "Add to cart",
+                "--action",
+                "click",
+                "--last-event-before",
+                "12",
+                "--consent-state",
+                "analytics_storage=granted",
+            )
+            invalid = subprocess.run(
+                [
+                    sys.executable,
+                    script,
+                    "settle-action",
+                    str(ledger),
+                    "--action-id",
+                    "ACT-003",
+                    "--settled-final-event",
+                    "12",
+                    "--expected-seen",
+                    "false",
+                    "--preview-connected-after",
+                    "true",
+                    "--interaction-outcome",
+                    "completed",
+                    "--stream-settled",
+                    "true",
+                    "--settlement-reason",
+                    "quiet_without_expected",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(0, invalid.returncode)
+            self.assertIn("requires an independent --completion-signal", invalid.stderr)
 
 
 if __name__ == "__main__":
