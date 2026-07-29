@@ -129,9 +129,12 @@ Apply these outcomes:
   checks;
 - use `FAIL` only when the evidenced discrepancy itself contradicts a confirmed
   acceptance requirement; otherwise state the unavailable authoritative
-  evidence as `BLOCKED` or unresolved semantics as `REVIEW`;
+  evidence as `BLOCKED`, or use `REVIEW` only for a precise unresolved plan
+  meaning;
 - when the first journal-only observation does not reproduce, retain it as an
-  isolated `REVIEW` observation rather than silently deleting it.
+  isolated supplemental observation rather than silently deleting it. It
+  cannot become direct acceptance evidence; block an affected required layer
+  if authoritative evidence remains unavailable.
 
 A browser request, console object, or journal call cannot be relabelled as a
 Tag Assistant API Call.

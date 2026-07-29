@@ -210,11 +210,7 @@ def _compact(value: Any, path_hint: str | None = None) -> Any:
     if value is MISSING:
         return "<absent>"
     if isinstance(value, str):
-        key_hint = (
-            re.sub(r"[^a-zA-Z0-9_]+", "_", path_hint.rsplit(".", 1)[-1])
-            if path_hint
-            else ""
-        )
+        key_hint = re.sub(r"[^a-zA-Z0-9_]+", "_", path_hint.rsplit(".", 1)[-1]) if path_hint else ""
         scan_value: Any = {key_hint: value} if key_hint else value
         findings = scan_sensitive_value(
             scan_value,
@@ -332,11 +328,7 @@ def evaluate_business_rule(
         right = path_value(payload, right_path)
         actual, expected = left, right
         actual_path_hint, expected_path_hint = left_path, right_path
-        passed = (
-            left is not MISSING
-            and right is not MISSING
-            and _strict_equal(left, right)
-        )
+        passed = left is not MISSING and right is not MISSING and _strict_equal(left, right)
 
     elif operator == "sum_product_equals":
         target_path = str(rule.get("target_path", ""))
@@ -383,21 +375,14 @@ def evaluate_business_rule(
             and bool(items)
             and all(isinstance(item, dict) for item in items)
         )
-        values = (
-            [item.get(item_field, MISSING) for item in items]
-            if valid_items
-            else []
-        )
+        values = [item.get(item_field, MISSING) for item in items] if valid_items else []
         actual = values
         actual_path_hint = str(rule.get("item_field", ""))
         expected_path_hint = str(rule.get("expected_path", ""))
         passed = (
             valid_items
             and expected is not MISSING
-            and all(
-                value is not MISSING and _strict_equal(value, expected)
-                for value in values
-            )
+            and all(value is not MISSING and _strict_equal(value, expected) for value in values)
         )
 
     elif operator == "implies":
@@ -410,7 +395,9 @@ def evaluate_business_rule(
         then_result = _condition(payload, consequent)
         actual = {"if": if_result, "then": then_result}
         expected = {"if_true_requires_then": True}
-        passed = None if if_result is None or then_result is None else (not if_result or then_result)
+        passed = (
+            None if if_result is None or then_result is None else (not if_result or then_result)
+        )
 
     elif operator == "unique_across_requirements":
         path = str(rule.get("path", ""))
@@ -422,10 +409,7 @@ def evaluate_business_rule(
         actual = {"value_count": len(values), "unique_count": len(set(map(_stable_key, values)))}
         expected = {"all_values_unique": True}
         current = path_value(payload, path)
-        passed = (
-            current is not MISSING
-            and len(values) == len(set(map(_stable_key, values)))
-        )
+        passed = current is not MISSING and len(values) == len(set(map(_stable_key, values)))
 
     elif operator == "range":
         actual_path_hint = str(rule.get("path", ""))
@@ -436,9 +420,8 @@ def evaluate_business_rule(
         if actual is MISSING or not _is_number(actual):
             passed = False
         else:
-            passed = (
-                (minimum is None or (_is_number(minimum) and actual >= minimum))
-                and (maximum is None or (_is_number(maximum) and actual <= maximum))
+            passed = (minimum is None or (_is_number(minimum) and actual >= minimum)) and (
+                maximum is None or (_is_number(maximum) and actual <= maximum)
             )
 
     elif operator == "format":
@@ -584,9 +567,7 @@ def scan_sensitive_value(
         for item in policy.get("forbidden_categories", DEFAULT_FORBIDDEN_CATEGORIES)
         if str(item)
     }
-    allowlisted_paths = {
-        str(item) for item in policy.get("allowlisted_paths", []) if str(item)
-    }
+    allowlisted_paths = {str(item) for item in policy.get("allowlisted_paths", []) if str(item)}
     custom_patterns = policy.get("custom_patterns", [])
     findings: list[dict[str, Any]] = []
 
@@ -659,9 +640,7 @@ def scan_sensitive_value(
 
         if item.startswith(("http://", "https://")):
             for query_key, query_value in parse_qsl(urlsplit(item).query, keep_blank_values=True):
-                normalized_query = re.sub(
-                    r"[^a-z0-9]+", "_", query_key.lower()
-                ).strip("_")
+                normalized_query = re.sub(r"[^a-z0-9]+", "_", query_key.lower()).strip("_")
                 if normalized_query in SENSITIVE_QUERY_KEYS and query_value:
                     add(
                         f"{path}?{query_key}",

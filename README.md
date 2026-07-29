@@ -6,20 +6,19 @@
 
 ## Current release
 
-[v1.1.1](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v1.1.1) is
+[v1.2.0](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v1.2.0) is
 the current supported release. Download the validated package:
-[gtm-preview-recette-v1.1.1.zip](https://github.com/haiqigeng/gtm-preview-recette/releases/download/v1.1.1/gtm-preview-recette-v1.1.1.zip).
+[gtm-preview-recette-v1.2.0.zip](https://github.com/haiqigeng/gtm-preview-recette/releases/download/v1.2.0/gtm-preview-recette-v1.2.0.zip).
 
-v1.1.1 is the verdict-safety and progressive-loading patch. It proves each
-website interaction through a non-tracking completion signal before judging
-event absence, retains bounded retries as linked action windows, settles the
-acceptance-relevant event stream adaptively, and defines the exact outcome when
-the supplemental journal shows a push missing from Tag Assistant. The session
-ledger and Event Evidence sheet retain these fields. Detailed references now
-load at their execution stage instead of all 12 being preloaded. The release
-keeps schema version 2, one recette workflow, and the existing client-side
-scope; legacy schema-v2 rows remain valid because the new action fields are
-compatible and conditionally validated.
+v1.2.0 is the execution-completeness release. It registers every applicable
+interaction case and material variant, retains bounded retries as distinct
+action windows, classifies and counts every observed business push, and closes
+every applicable client-side evidence layer before certification. Direct
+evidence is linked to the exact action, Preview event, container, tag, and
+browser request. Immediate feedback now includes case counts, layer results,
+precise reasons, and exact retest interactions. Ordinary gated journeys use
+ephemeral synthetic data under reusable run authorizations, while protected
+checkpoints and exceptional CMP overrides remain explicitly controlled.
 
 An expert-only workflow for testing an existing client-side Google Tag Manager
 implementation against a tracking plan. It coordinates Playwright, GTM Preview,
@@ -55,8 +54,10 @@ Strict validation reconciles destination IDs, vendor event names, and tested
 parameters with their raw browser-request paths. It also rejects omitted
 applicable verdicts, inconsistent trigger/consent/client-check claims,
 incomplete privacy scans, provenance-free evidence, and unreconciled
-baseline comparisons. Literal vendor keys such as `ep.value` are supported
-through quoted request paths.
+baseline comparisons. Final certification additionally cross-checks the
+normalized result against the session's interaction cases, attempts, layer
+results, classified push counts, and direct evidence linkage. Literal vendor
+keys such as `ep.value` are supported through quoted request paths.
 
 There is one operational recette workflow, not separate dataLayer-only,
 analytics-only, or media-only run types. Each confirmed tracking-plan
@@ -93,9 +94,12 @@ journey, then reproduces an anomaly only when useful.
 
 An encountered ordinary form, sign-up, login, lead, or account gate remains
 part of the journey. Confirmed non-production lead, registration, and
-conversion submissions use synthetic data by default. Credentials, MFA,
-CAPTCHA, verification links/codes, real payment, and irreversible actions stay
-under analyst control.
+conversion submissions use synthetic data by default. Synthetic credentials
+may be used ephemerally in the same controlled run and reused for login, but
+are never stored or shown in chat. Run-wide authorization avoids repeated
+prompts for equivalent safe actions. Protected credentials, MFA, CAPTCHA,
+verification links/codes, real payment, and irreversible actions stay under
+analyst control.
 
 ## Inputs And Outputs
 
@@ -105,9 +109,10 @@ an internal test matrix without forcing a new template. XLSX hyperlinks,
 comments, merged/hidden structure, and embedded images are retained during
 inspection so supplied journey guidance is not lost.
 
-The required output is a concise XLSX validation matrix backed by 17 validated
-worksheets. Each row shows the tracking-plan value, raw/resolved client signal,
-GTM/tag configuration, runtime and outbound values, component verdicts, exact
+The required output is a concise XLSX validation matrix backed by 19 validated
+worksheets, including interaction cases and the observed business-push stream.
+Each row shows the tracking-plan value, raw/resolved client signal, GTM/tag
+configuration, runtime and outbound values, component verdicts, exact
 mismatch, and evidence.
 
 ## Boundaries
@@ -131,7 +136,9 @@ python -m pip install -e ".[dev]"
 Build a workbook from normalized evidence:
 
 ```powershell
-python -B scripts/build_recette_report.py normalized-results.json gtm-recette-results.xlsx --strict
+python -B scripts/build_recette_report.py normalized-results.json gtm-recette-results.xlsx `
+  --strict `
+  --session-ledger session.json
 ```
 
 Inspect a plan, decode safe browser-request captures, and validate results
@@ -140,8 +147,11 @@ event by event:
 ```powershell
 python -B scripts/inspect_tracking_plan.py tracking-plan.xlsx plan-inspection.json
 python -B scripts/decode_browser_requests.py requests.json decoded-requests.json
-python -B scripts/incremental_recette.py status normalized-results.json
-python -B scripts/incremental_recette.py validate-event normalized-results.json --event-group-id EVG-001
+python -B scripts/incremental_recette.py status normalized-results.json `
+  --session-ledger session.json
+python -B scripts/incremental_recette.py validate-event normalized-results.json `
+  --event-group-id EVG-001 `
+  --session-ledger session.json
 ```
 
 Evaluate declared client-side rules, scan for redacted sensitive-data findings,

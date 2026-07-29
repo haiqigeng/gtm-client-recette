@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Maintain resumable GTM, Tag Assistant, website, and action-boundary state."""
+"""Maintain resumable browser surfaces, interaction cases, and action evidence."""
 
 from __future__ import annotations
 
@@ -9,6 +9,18 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+
+from execution_contract import (
+    AUTHORIZATION_SCOPES,
+    CASE_EXECUTION_STATUSES,
+    DISCOVERY_SOURCES,
+    LAYER_RESULT_STATUSES,
+    PROTECTED_AUTHORIZATION_EXCLUSIONS,
+    PUSH_CLASSIFICATIONS,
+    SESSION_SCHEMA_VERSION,
+    validate_session,
+)
+from layer_contract import CANONICAL_LAYERS, applicable_layers
 
 ROLES = {
     "gtm_workspace",
@@ -33,6 +45,13 @@ def load(path: Path) -> dict[str, Any]:
     return value
 
 
+def load_results(path: Path) -> dict[str, Any]:
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise SystemExit("Normalized results must be a JSON object.")
+    return value
+
+
 def save(path: Path, value: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -45,9 +64,26 @@ def origin(url: str) -> str:
     return f"{parsed.scheme}://{parsed.netloc}"
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
-    subparsers = parser.add_subparsers(dest="command", required=True)
+def parse_variant(values: list[str]) -> dict[str, Any]:
+    output: dict[str, Any] = {}
+    for value in values:
+        key, separator, raw = value.partition("=")
+        key = key.strip()
+        if not separator or not key:
+            raise SystemExit("--variant must use KEY=JSON_VALUE or KEY=text.")
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            parsed = raw
+        if key in output:
+            raise SystemExit(f"Duplicate material variant key: {key}")
+        output[key] = parsed
+    return output
+
+
+def parser() -> argparse.ArgumentParser:
+    root = argparse.ArgumentParser(description=__doc__)
+    subparsers = root.add_subparsers(dest="command", required=True)
 
     init = subparsers.add_parser("init")
     init.add_argument("ledger", type=Path)
@@ -66,13 +102,72 @@ def parse_args() -> argparse.Namespace:
     )
     register.add_argument("--container-id")
 
+    authorize = subparsers.add_parser("authorize")
+    authorize.add_argument("ledger", type=Path)
+    authorize.add_argument("--authorization-id", required=True)
+    authorize.add_argument(
+        "--scope",
+        choices=tuple(sorted(AUTHORIZATION_SCOPES)),
+        required=True,
+    )
+    authorize.add_argument("--description", required=True)
+    authorize.add_argument(
+        "--environment-class",
+        choices=("test", "preprod", "staging", "production"),
+        required=True,
+    )
+    authorize.add_argument("--exact-method")
+
+    register_case = subparsers.add_parser("register-case")
+    register_case.add_argument("ledger", type=Path)
+    register_case.add_argument("--results", type=Path, required=True)
+    register_case.add_argument("--case-id", required=True)
+    register_case.add_argument("--event-group-id", required=True)
+    register_case.add_argument("--url", required=True)
+    register_case.add_argument("--element", required=True)
+    register_case.add_argument("--placement", required=True)
+    register_case.add_argument("--action", required=True)
+    register_case.add_argument("--variant", action="append", default=[])
+    register_case.add_argument(
+        "--discovered-from",
+        choices=tuple(sorted(DISCOVERY_SOURCES)),
+        required=True,
+    )
+    register_case.add_argument(
+        "--scope-status",
+        choices=("IN_SCOPE", "OUT_OF_SCOPE"),
+        default="IN_SCOPE",
+    )
+    register_case.add_argument("--reason")
+    register_case.add_argument("--authorization-id", action="append", default=[])
+    register_case.add_argument(
+        "--include-layer",
+        action="append",
+        default=[],
+        choices=CANONICAL_LAYERS,
+    )
+    register_case.add_argument(
+        "--exclude-layer",
+        action="append",
+        default=[],
+        choices=CANONICAL_LAYERS,
+    )
+
+    close_case = subparsers.add_parser("close-case")
+    close_case.add_argument("ledger", type=Path)
+    close_case.add_argument("--case-id", required=True)
+    close_case.add_argument(
+        "--execution-status",
+        choices=("BLOCKED", "NOT_TESTED"),
+        required=True,
+    )
+    close_case.add_argument("--reason", required=True)
+    close_case.add_argument("--blocker-id")
+
     begin = subparsers.add_parser("begin-action")
     begin.add_argument("ledger", type=Path)
     begin.add_argument("--action-id", required=True)
-    begin.add_argument("--requirement-id", action="append", required=True)
-    begin.add_argument("--url", required=True)
-    begin.add_argument("--element", required=True)
-    begin.add_argument("--action", required=True)
+    begin.add_argument("--case-id", required=True)
     begin.add_argument("--last-event-before", type=int, required=True)
     begin.add_argument("--consent-state", required=True)
     begin.add_argument("--browser-context-id")
@@ -81,8 +176,41 @@ def parse_args() -> argparse.Namespace:
     begin.add_argument("--timeout-ms", type=int, default=15000)
     begin.add_argument(
         "--retry-of-action-id",
-        help="Settled earlier action retained as the reason for this bounded retry.",
+        help="Settled immediately prior attempt retained as the reason for this retry.",
     )
+
+    push = subparsers.add_parser("record-push")
+    push.add_argument("ledger", type=Path)
+    push.add_argument("--push-id", required=True)
+    push.add_argument("--action-id", required=True)
+    push.add_argument("--event-index", type=int, required=True)
+    push.add_argument("--event-name", required=True)
+    push.add_argument(
+        "--classification",
+        choices=tuple(sorted(PUSH_CLASSIFICATIONS)),
+        required=True,
+    )
+    push.add_argument("--classification-reason", required=True)
+    push.add_argument("--event-group-id")
+    push.add_argument("--url")
+    push.add_argument("--page-state", required=True)
+    push.add_argument("--evidence-id", required=True)
+    push.add_argument("--container-id", required=True)
+    push.add_argument("--stream-id", default="tag_assistant")
+
+    layer = subparsers.add_parser("record-layer")
+    layer.add_argument("ledger", type=Path)
+    layer.add_argument("--action-id", required=True)
+    layer.add_argument("--layer", choices=CANONICAL_LAYERS, required=True)
+    layer.add_argument(
+        "--status",
+        choices=tuple(sorted(LAYER_RESULT_STATUSES)),
+        required=True,
+    )
+    layer.add_argument("--reason", required=True)
+    layer.add_argument("--evidence-id", action="append", required=True)
+    layer.add_argument("--semantic-ambiguity")
+    layer.add_argument("--blocker-id")
 
     settle = subparsers.add_parser("settle-action")
     settle.add_argument("ledger", type=Path)
@@ -94,13 +222,15 @@ def parse_args() -> argparse.Namespace:
     settle.add_argument(
         "--interaction-outcome",
         choices=("completed", "failed", "uncertain"),
-        help="Whether the real website interaction itself completed independently of tracking.",
+        required=True,
+        help="Whether the website interaction completed independently of tracking.",
     )
     settle.add_argument(
         "--completion-signal",
-        help="Safe non-tracking proof such as URL, visible state, or control-value change.",
+        required=True,
+        help="Safe non-tracking proof of the completion, failure, or uncertainty.",
     )
-    settle.add_argument("--stream-settled", choices=("true", "false"))
+    settle.add_argument("--stream-settled", choices=("true", "false"), required=True)
     settle.add_argument(
         "--settlement-reason",
         choices=(
@@ -110,24 +240,36 @@ def parse_args() -> argparse.Namespace:
             "interaction_failed",
             "preview_disconnected",
         ),
+        required=True,
+    )
+    settle.add_argument(
+        "--observed-business-push-count",
+        type=int,
+        required=True,
+        help="Total business pushes visible in the complete action window.",
     )
 
     checkpoint = subparsers.add_parser("checkpoint")
     checkpoint.add_argument("ledger", type=Path)
     checkpoint.add_argument("--label", required=True)
 
+    validate = subparsers.add_parser("validate")
+    validate.add_argument("ledger", type=Path)
+    validate.add_argument("--results", type=Path)
+    validate.add_argument("--final", action="store_true")
+
     status = subparsers.add_parser("status")
     status.add_argument("ledger", type=Path)
-    return parser.parse_args()
+    return root
+
+
+def parse_args() -> argparse.Namespace:
+    return parser().parse_args()
 
 
 def require_surfaces(ledger: dict[str, Any]) -> None:
     surfaces = ledger.get("surfaces", {})
-    roles = {
-        str(surface.get("role"))
-        for surface in surfaces.values()
-        if isinstance(surface, dict)
-    }
+    roles = {str(surface.get("role")) for surface in surfaces.values() if isinstance(surface, dict)}
     missing = sorted(REQUIRED_ROLES - roles)
     if missing:
         raise SystemExit("Register all browser surfaces before an action: " + ", ".join(missing))
@@ -140,153 +282,408 @@ def require_surfaces(ledger: dict[str, Any]) -> None:
         raise SystemExit("Tag Assistant is not recorded as connected.")
 
 
+def find_unique(rows: list[dict[str, Any]], field: str, value: str) -> dict[str, Any]:
+    matches = [row for row in rows if row.get(field) == value]
+    if len(matches) != 1:
+        raise SystemExit(f"Unknown or duplicate {field}: {value}")
+    return matches[0]
+
+
+def register_case(ledger: dict[str, Any], args: argparse.Namespace) -> None:
+    if any(row.get("case_id") == args.case_id for row in ledger.get("cases", [])):
+        raise SystemExit(f"Duplicate case_id: {args.case_id}")
+    if origin(args.url) not in ledger.get("approved_origins", []):
+        raise SystemExit(f"Case origin is not approved: {origin(args.url)}")
+    results = load_results(args.results)
+    group_requirements = [
+        row
+        for row in results.get("requirements", [])
+        if isinstance(row, dict) and row.get("event_group_id") == args.event_group_id
+    ]
+    if not group_requirements:
+        raise SystemExit(f"Unknown event_group_id: {args.event_group_id}")
+    if args.scope_status == "OUT_OF_SCOPE" and not str(args.reason or "").strip():
+        raise SystemExit("OUT_OF_SCOPE cases require --reason.")
+    unknown_authorizations = sorted(
+        value
+        for value in args.authorization_id
+        if not any(row.get("authorization_id") == value for row in ledger.get("authorizations", []))
+    )
+    if unknown_authorizations:
+        raise SystemExit("Unknown authorization IDs: " + ", ".join(unknown_authorizations))
+    containers = [
+        row for row in results.get("run", {}).get("containers", []) if isinstance(row, dict)
+    ]
+    layers = applicable_layers(
+        group_requirements,
+        container_count=len(containers) or 1,
+    )
+    layers = [
+        layer
+        for layer in CANONICAL_LAYERS
+        if (layer in layers or layer in args.include_layer) and layer not in args.exclude_layer
+    ]
+    container_ids = sorted(
+        {
+            str(
+                requirement.get("container_id") or results.get("run", {}).get("container_id", "")
+            ).strip()
+            for requirement in group_requirements
+            if str(
+                requirement.get("container_id") or results.get("run", {}).get("container_id", "")
+            ).strip()
+        }
+    )
+    ledger.setdefault("cases", []).append(
+        {
+            "case_id": args.case_id,
+            "event_group_id": args.event_group_id,
+            "requirement_ids": [str(row.get("requirement_id")) for row in group_requirements],
+            "url": args.url,
+            "element": args.element,
+            "placement": args.placement,
+            "action": args.action,
+            "material_variant": parse_variant(args.variant),
+            "discovered_from": args.discovered_from,
+            "scope_status": args.scope_status,
+            "execution_status": (
+                "NOT_TESTED" if args.scope_status == "OUT_OF_SCOPE" else "PENDING"
+            ),
+            "reason": str(args.reason or "").strip() or None,
+            "authorization_ids": list(dict.fromkeys(args.authorization_id)),
+            "applicable_layers": layers,
+            "container_ids": container_ids,
+            "registered_at": now(),
+            "final_action_id": None,
+        }
+    )
+
+
+def begin_action(ledger: dict[str, Any], args: argparse.Namespace) -> None:
+    require_surfaces(ledger)
+    if any(row.get("action_id") == args.action_id for row in ledger.get("actions", [])):
+        raise SystemExit(f"Duplicate action_id: {args.action_id}")
+    case = find_unique(ledger.get("cases", []), "case_id", args.case_id)
+    if case.get("scope_status") != "IN_SCOPE" or case.get("execution_status") == "BLOCKED":
+        raise SystemExit("Actions can start only for an applicable, unblocked case.")
+    if args.quiet_window_ms <= 0 or args.timeout_ms <= 0:
+        raise SystemExit("Quiet window and timeout must be positive.")
+    previous = sorted(
+        [row for row in ledger.get("actions", []) if row.get("case_id") == args.case_id],
+        key=lambda row: row.get("attempt_number", 0),
+    )
+    if previous:
+        expected_retry = previous[-1]
+        if expected_retry.get(
+            "state"
+        ) != "SETTLED" or args.retry_of_action_id != expected_retry.get("action_id"):
+            raise SystemExit(
+                "A repeated case must retry the retained immediately prior settled action."
+            )
+    elif args.retry_of_action_id:
+        raise SystemExit("The first case attempt cannot use --retry-of-action-id.")
+    container_ids = args.container_id or case.get("container_ids", [])
+    if not container_ids:
+        raise SystemExit("The action requires at least one client-side container ID.")
+    action = {
+        "action_id": args.action_id,
+        "case_id": args.case_id,
+        "event_group_id": case.get("event_group_id"),
+        "requirement_ids": case.get("requirement_ids"),
+        "url": case.get("url"),
+        "element": case.get("element"),
+        "placement": case.get("placement"),
+        "material_variant": case.get("material_variant"),
+        "action": case.get("action"),
+        "attempt_number": len(previous) + 1,
+        "retry_of_action_id": args.retry_of_action_id,
+        "preview_connected_before": True,
+        "target_ready_before": True,
+        "last_event_before": args.last_event_before,
+        "consent_state_before": args.consent_state,
+        "browser_context_id": args.browser_context_id,
+        "container_ids": list(dict.fromkeys(container_ids)),
+        "action_timestamp": now(),
+        "quiet_window_ms": args.quiet_window_ms,
+        "timeout_ms": args.timeout_ms,
+        "layer_results": [],
+        "state": "OPEN",
+    }
+    ledger.setdefault("actions", []).append(action)
+
+
+def record_push(ledger: dict[str, Any], args: argparse.Namespace) -> None:
+    if any(row.get("push_id") == args.push_id for row in ledger.get("business_pushes", [])):
+        raise SystemExit(f"Duplicate push_id: {args.push_id}")
+    action = find_unique(ledger.get("actions", []), "action_id", args.action_id)
+    if args.event_index <= action.get("last_event_before", -1):
+        raise SystemExit("Business push event_index must follow last_event_before.")
+    group_id = args.event_group_id
+    if group_id is None and args.classification != "unplanned_relevant":
+        group_id = action.get("event_group_id")
+    ledger.setdefault("business_pushes", []).append(
+        {
+            "push_id": args.push_id,
+            "stream_id": args.stream_id,
+            "action_id": args.action_id,
+            "case_id": action.get("case_id"),
+            "event_group_id": group_id,
+            "event_name": args.event_name,
+            "event_index": args.event_index,
+            "captured_at": now(),
+            "url": args.url or action.get("url"),
+            "page_state": args.page_state,
+            "classification": args.classification,
+            "classification_reason": args.classification_reason,
+            "evidence_id": args.evidence_id,
+            "container_id": args.container_id,
+        }
+    )
+
+
+def record_layer(ledger: dict[str, Any], args: argparse.Namespace) -> None:
+    action = find_unique(ledger.get("actions", []), "action_id", args.action_id)
+    if args.layer not in find_unique(
+        ledger.get("cases", []),
+        "case_id",
+        str(action.get("case_id")),
+    ).get("applicable_layers", []):
+        raise SystemExit(f"Layer is not applicable to this case: {args.layer}")
+    if any(
+        row.get("layer") == args.layer
+        for row in action.get("layer_results", [])
+        if isinstance(row, dict)
+    ):
+        raise SystemExit(f"Layer already recorded for action {args.action_id}: {args.layer}")
+    if args.status == "REVIEW" and not str(args.semantic_ambiguity or "").strip():
+        raise SystemExit("REVIEW requires --semantic-ambiguity.")
+    if args.status == "BLOCKED" and not str(args.blocker_id or "").strip():
+        raise SystemExit("BLOCKED layer evidence requires --blocker-id.")
+    action.setdefault("layer_results", []).append(
+        {
+            "layer": args.layer,
+            "status": args.status,
+            "reason": args.reason,
+            "evidence_ids": list(dict.fromkeys(args.evidence_id)),
+            "semantic_ambiguity": (
+                str(args.semantic_ambiguity).strip() if args.semantic_ambiguity else None
+            ),
+            "blocker_id": str(args.blocker_id).strip() if args.blocker_id else None,
+            "recorded_at": now(),
+        }
+    )
+
+
+def settle_action(ledger: dict[str, Any], args: argparse.Namespace) -> None:
+    action = find_unique(ledger.get("actions", []), "action_id", args.action_id)
+    if action.get("state") != "OPEN":
+        raise SystemExit(f"Action is already settled: {args.action_id}")
+    completion_signal = str(args.completion_signal).strip()
+    if not completion_signal:
+        raise SystemExit("A safe independent --completion-signal is required.")
+    preview_connected_after = args.preview_connected_after == "true"
+    stream_settled = args.stream_settled == "true"
+    if not stream_settled and args.settlement_reason in {
+        "expected_and_quiet",
+        "quiet_without_expected",
+    }:
+        raise SystemExit("An unsettled stream cannot use a quiet settlement reason.")
+    if not preview_connected_after and args.settlement_reason != "preview_disconnected":
+        raise SystemExit("A disconnected Preview session requires preview_disconnected.")
+    recorded_pushes = sum(
+        row.get("action_id") == args.action_id
+        for row in ledger.get("business_pushes", [])
+        if isinstance(row, dict)
+    )
+    if args.observed_business_push_count < 0:
+        raise SystemExit("Observed business push count must be non-negative.")
+    if recorded_pushes != args.observed_business_push_count:
+        raise SystemExit(
+            "Record and classify every observed business push before settlement; "
+            f"ledger has {recorded_pushes}, action window has "
+            f"{args.observed_business_push_count}."
+        )
+    if args.first_event_after is not None and args.first_event_after <= action.get(
+        "last_event_before", -1
+    ):
+        raise SystemExit("first_event_after must follow last_event_before.")
+    if args.settled_final_event < action.get("last_event_before", -1):
+        raise SystemExit("settled_final_event cannot precede last_event_before.")
+    action.update(
+        {
+            "first_event_after": args.first_event_after,
+            "settled_final_event": args.settled_final_event,
+            "expected_seen": args.expected_seen == "true",
+            "preview_connected_after": preview_connected_after,
+            "interaction_outcome": args.interaction_outcome,
+            "completion_signal": completion_signal,
+            "stream_settled": stream_settled,
+            "settlement_reason": args.settlement_reason,
+            "observed_business_push_count": args.observed_business_push_count,
+            "settled_at": now(),
+            "state": "SETTLED",
+        }
+    )
+    if args.interaction_outcome == "completed" and preview_connected_after and stream_settled:
+        case = find_unique(
+            ledger.get("cases", []),
+            "case_id",
+            str(action.get("case_id")),
+        )
+        case["execution_status"] = "EXECUTED"
+        case["final_action_id"] = args.action_id
+
+
+def init_command(args: argparse.Namespace) -> None:
+    timestamp = now()
+    save(
+        args.ledger,
+        {
+            "schema_version": SESSION_SCHEMA_VERSION,
+            "created_at": timestamp,
+            "updated_at": timestamp,
+            "profile_path": args.profile_path,
+            "approved_origins": sorted({origin(item) for item in args.approved_origin}),
+            "surfaces": {},
+            "authorizations": [],
+            "cases": [],
+            "actions": [],
+            "business_pushes": [],
+            "checkpoints": [],
+        },
+    )
+
+
+def register_surface(ledger: dict[str, Any], args: argparse.Namespace) -> None:
+    surface_origin = origin(args.url)
+    if args.role == "website" and surface_origin not in ledger.get("approved_origins", []):
+        raise SystemExit(f"Website origin is not approved: {surface_origin}")
+    surface = {
+        "role": args.role,
+        "url": args.url,
+        "origin": surface_origin,
+        "title": args.title,
+        "registered_at": now(),
+    }
+    if args.connected is not None:
+        surface["connected"] = args.connected == "true"
+    if args.container_id:
+        surface["container_id"] = args.container_id
+    ledger.setdefault("surfaces", {})[args.surface_id or args.role] = surface
+
+
+def authorize(ledger: dict[str, Any], args: argparse.Namespace) -> None:
+    if any(
+        row.get("authorization_id") == args.authorization_id
+        for row in ledger.get("authorizations", [])
+    ):
+        raise SystemExit(f"Duplicate authorization_id: {args.authorization_id}")
+    if args.scope == "production_cmp_session_override" and args.environment_class != "production":
+        raise SystemExit("Production CMP authorization requires production environment.")
+    if args.scope == "production_cmp_session_override" and not str(args.exact_method or "").strip():
+        raise SystemExit("Production CMP authorization requires --exact-method.")
+    ledger.setdefault("authorizations", []).append(
+        {
+            "authorization_id": args.authorization_id,
+            "scope": args.scope,
+            "description": args.description,
+            "environment_class": args.environment_class,
+            "exact_method": str(args.exact_method or "").strip() or None,
+            "session_only": True,
+            "protected_exclusions": list(PROTECTED_AUTHORIZATION_EXCLUSIONS),
+            "approved_at": now(),
+        }
+    )
+
+
+def close_case(ledger: dict[str, Any], args: argparse.Namespace) -> None:
+    if args.execution_status not in CASE_EXECUTION_STATUSES:
+        raise SystemExit("Invalid execution status.")
+    case = find_unique(ledger.get("cases", []), "case_id", args.case_id)
+    if args.execution_status == "BLOCKED" and not str(args.blocker_id or "").strip():
+        raise SystemExit("BLOCKED cases require --blocker-id.")
+    if args.execution_status == "NOT_TESTED":
+        case["scope_status"] = "OUT_OF_SCOPE"
+    case.update(
+        {
+            "execution_status": args.execution_status,
+            "reason": args.reason,
+            "blocker_id": str(args.blocker_id or "").strip() or None,
+            "closed_at": now(),
+        }
+    )
+
+
+def checkpoint(ledger: dict[str, Any], args: argparse.Namespace) -> None:
+    ledger.setdefault("checkpoints", []).append(
+        {
+            "label": args.label,
+            "captured_at": now(),
+            "surface_roles": sorted(
+                str(row.get("role"))
+                for row in ledger.get("surfaces", {}).values()
+                if isinstance(row, dict)
+            ),
+            "registered_cases": len(ledger.get("cases", [])),
+            "settled_actions": sum(
+                row.get("state") == "SETTLED" for row in ledger.get("actions", [])
+            ),
+            "classified_business_pushes": len(ledger.get("business_pushes", [])),
+        }
+    )
+
+
+def validate_command(ledger: dict[str, Any], args: argparse.Namespace) -> None:
+    results = load_results(args.results) if args.results else None
+    errors = validate_session(ledger, results=results, final=args.final)
+    if errors:
+        raise SystemExit("\n".join(errors))
+    print(
+        json.dumps(
+            {
+                "validated": True,
+                "final": args.final,
+                "cases": len(ledger.get("cases", [])),
+                "actions": len(ledger.get("actions", [])),
+                "business_pushes": len(ledger.get("business_pushes", [])),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+
+
+MUTATING_COMMANDS = {
+    "register-surface": register_surface,
+    "authorize": authorize,
+    "register-case": register_case,
+    "close-case": close_case,
+    "begin-action": begin_action,
+    "record-push": record_push,
+    "record-layer": record_layer,
+    "settle-action": settle_action,
+    "checkpoint": checkpoint,
+}
+
+
 def main() -> int:
     args = parse_args()
     if args.command == "init":
-        approved = sorted({origin(item) for item in args.approved_origin})
-        ledger = {
-            "schema_version": 1,
-            "created_at": now(),
-            "updated_at": now(),
-            "profile_path": args.profile_path,
-            "approved_origins": approved,
-            "surfaces": {},
-            "actions": [],
-            "checkpoints": [],
-        }
-        save(args.ledger, ledger)
+        init_command(args)
         print(f"Created {args.ledger.resolve()}")
         return 0
 
     ledger = load(args.ledger)
-    if args.command == "register-surface":
-        surface_origin = origin(args.url)
-        if args.role == "website" and surface_origin not in ledger.get("approved_origins", []):
-            raise SystemExit(f"Website origin is not approved: {surface_origin}")
-        surface = {
-            "role": args.role,
-            "url": args.url,
-            "origin": surface_origin,
-            "title": args.title,
-            "registered_at": now(),
-        }
-        if args.connected is not None:
-            surface["connected"] = args.connected == "true"
-        if args.container_id:
-            surface["container_id"] = args.container_id
-        surface_id = args.surface_id or args.role
-        ledger.setdefault("surfaces", {})[surface_id] = surface
-    elif args.command == "begin-action":
-        require_surfaces(ledger)
-        if origin(args.url) not in ledger.get("approved_origins", []):
-            raise SystemExit(f"Action origin is not approved: {origin(args.url)}")
-        if any(row.get("action_id") == args.action_id for row in ledger.get("actions", [])):
-            raise SystemExit(f"Duplicate action_id: {args.action_id}")
-        if args.quiet_window_ms <= 0 or args.timeout_ms <= 0:
-            raise SystemExit("Quiet window and timeout must be positive.")
-        if args.retry_of_action_id:
-            prior = [
-                row
-                for row in ledger.get("actions", [])
-                if row.get("action_id") == args.retry_of_action_id
-            ]
-            if len(prior) != 1 or prior[0].get("state") != "SETTLED":
-                raise SystemExit(
-                    "retry_of_action_id must identify one retained settled action"
-                )
-        action = {
-            "action_id": args.action_id,
-            "requirement_ids": args.requirement_id,
-            "url": args.url,
-            "element": args.element,
-            "action": args.action,
-            "preview_connected_before": True,
-            "target_ready_before": True,
-            "last_event_before": args.last_event_before,
-            "consent_state_before": args.consent_state,
-            "browser_context_id": args.browser_context_id,
-            "container_ids": args.container_id,
-            "action_timestamp": now(),
-            "quiet_window_ms": args.quiet_window_ms,
-            "timeout_ms": args.timeout_ms,
-            "state": "OPEN",
-        }
-        if args.retry_of_action_id:
-            action["retry_of_action_id"] = args.retry_of_action_id
-        ledger.setdefault("actions", []).append(action)
-    elif args.command == "settle-action":
-        matches = [
-            row for row in ledger.get("actions", []) if row.get("action_id") == args.action_id
-        ]
-        if len(matches) != 1:
-            raise SystemExit(f"Unknown or duplicate action_id: {args.action_id}")
-        action = matches[0]
-        if action.get("state") != "OPEN":
-            raise SystemExit(f"Action is already settled: {args.action_id}")
-        interaction_outcome = args.interaction_outcome
-        completion_signal = str(args.completion_signal or "").strip()
-        if interaction_outcome == "completed" and not completion_signal:
-            raise SystemExit(
-                "A completed interaction requires an independent --completion-signal"
-            )
-        preview_connected_after = args.preview_connected_after == "true"
-        stream_settled = (
-            args.stream_settled == "true"
-            if args.stream_settled is not None
-            else preview_connected_after
-        )
-        settlement_reason = args.settlement_reason
-        if settlement_reason is None:
-            if interaction_outcome == "failed":
-                settlement_reason = "interaction_failed"
-            elif not preview_connected_after:
-                settlement_reason = "preview_disconnected"
-            elif not stream_settled:
-                settlement_reason = "timeout"
-            elif args.expected_seen == "true":
-                settlement_reason = "expected_and_quiet"
-            else:
-                settlement_reason = "quiet_without_expected"
-        if not stream_settled and settlement_reason in {
-            "expected_and_quiet",
-            "quiet_without_expected",
-        }:
-            raise SystemExit(
-                "An unsettled stream cannot use a quiet settlement reason"
-            )
-        if not preview_connected_after and settlement_reason != "preview_disconnected":
-            raise SystemExit(
-                "A disconnected Preview session requires preview_disconnected"
-            )
-        action.update(
-            {
-                "first_event_after": args.first_event_after,
-                "settled_final_event": args.settled_final_event,
-                "expected_seen": args.expected_seen == "true",
-                "preview_connected_after": preview_connected_after,
-                "interaction_outcome": interaction_outcome,
-                "completion_signal": completion_signal or None,
-                "stream_settled": stream_settled,
-                "settlement_reason": settlement_reason,
-                "settled_at": now(),
-                "state": "SETTLED",
-            }
-        )
-    elif args.command == "checkpoint":
-        ledger.setdefault("checkpoints", []).append(
-            {
-                "label": args.label,
-                "captured_at": now(),
-                "surface_roles": sorted(ledger.get("surfaces", {})),
-                "settled_actions": sum(
-                    row.get("state") == "SETTLED" for row in ledger.get("actions", [])
-                ),
-            }
-        )
-    elif args.command == "status":
+    if ledger.get("schema_version") != SESSION_SCHEMA_VERSION:
+        raise SystemExit("Unsupported session ledger. Recreate it with the current init command.")
+    if args.command == "validate":
+        validate_command(ledger, args)
+        return 0
+    if args.command == "status":
         print(json.dumps(ledger, ensure_ascii=False, indent=2))
         return 0
 
+    MUTATING_COMMANDS[args.command](ledger, args)
     ledger["updated_at"] = now()
     save(args.ledger, ledger)
     print(f"Updated {args.ledger.resolve()}")

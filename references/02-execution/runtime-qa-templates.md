@@ -23,9 +23,12 @@ Known limitations:
 ## Action boundary
 
 ```text
+Event group / case ID:
+Element / placement / material variant:
+Discovery source / scope / applicable layers:
 Action ID:
 Retry of action ID:
-Case / instance ID:
+Attempt number:
 Requirement IDs:
 Page / placement / element / state:
 Action value / type / source:
@@ -42,6 +45,8 @@ Settled final event:
 Quiet window / timeout:
 Relevant stream settled:
 Settlement reason:
+Observed business-push count:
+Per-layer results / evidence IDs:
 Action-boundary evidence ID:
 ```
 
@@ -52,7 +57,8 @@ Action window / event-index range:
 Event index / event name:
 Plan-event mapping:
 Page / action / state / trigger result:
-Classification: expected | companion | duplicate | mistimed | wrong_context | unplanned_relevant
+Classification: expected | companion | duplicate | premature | delayed | wrong_order | wrong_context | unplanned_relevant
+Classification reason / observed push ID:
 Occurrence verdict / evidence IDs:
 ```
 
@@ -61,9 +67,12 @@ Occurrence verdict / evidence IDs:
 ```text
 Event <plan order> — <event name>: <status>
 - Cases executed / applicable / limited:
-- <failed layer or concise confirmation>
+- Raw push / resolved state / GTM variable:
+- Tag configuration / firing count / runtime parameters:
+- Browser request / destination identity / decoded parameters:
 - <affected placement/value and expected versus observed result>
 - <destination/trigger/consent/business/privacy/client/regression result when applicable>
+- Exact retest URL / placement / element / interaction / variant for non-PASS:
 ```
 
 ## Destination evidence
@@ -72,7 +81,7 @@ Event <plan order> — <event name>: <status>
 Vendor / destination / owning container:
 Expected vendor event / conversion name:
 Expected request behaviour / endpoint:
-Observed request count / method / URL:
+Observed request count / request ID / method / URL:
 Raw request paths for destination ID / event / tested parameter:
 Decoded outbound parameter / state / value / type:
 Primary browser-network evidence:
@@ -102,6 +111,7 @@ Deterministic results / evidence:
 ## Protected checkpoint
 
 ```text
+Run-wide safe authorization ID / scope, if applicable:
 Checkpoint:
 Journey reached:
 Safe preceding steps completed:
@@ -116,12 +126,14 @@ Evidence IDs:
 
 ```text
 Natural CMP blocker:
-Non-production environment:
+Environment / production exception authorization if applicable:
 Exact temporary method and values:
 Requirements to unblock:
 Not validated by this override:
 Reversal/session scope:
-Approval evidence:
+Native CMP status / native acceptance in scope:
+Approval evidence / production approval evidence:
+Restoration confirmation:
 ```
 
 Do not execute the override until explicit approval is recorded.

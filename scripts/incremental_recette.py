@@ -9,7 +9,9 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-from recette_schema import STATUS_PRIORITY, validate
+from event_feedback import event_feedback, feedback_for_event
+from execution_contract import validate_session
+from recette_schema import STATUS_PRIORITY, status_of, validate
 
 
 def load_object(path: Path) -> dict[str, Any]:
@@ -58,9 +60,7 @@ def _row_applies(
     if str(row.get("requirement_id", "")) in requirement_ids:
         return True
     affected = row.get("affected_requirement_ids")
-    return isinstance(affected, list) and bool(
-        requirement_ids & {str(item) for item in affected}
-    )
+    return isinstance(affected, list) and bool(requirement_ids & {str(item) for item in affected})
 
 
 def event_view(data: dict[str, Any], event_group_id: str) -> dict[str, Any]:
@@ -72,9 +72,7 @@ def event_view(data: dict[str, Any], event_group_id: str) -> dict[str, Any]:
     if not isinstance(run, dict):
         raise ValueError("run must be an object.")
     run["requirement_inventory"] = [
-        item
-        for item in run.get("requirement_inventory", [])
-        if str(item) in requirement_ids
+        item for item in run.get("requirement_inventory", []) if str(item) in requirement_ids
     ]
     run["event_inventory"] = [
         row
@@ -95,10 +93,7 @@ def event_view(data: dict[str, Any], event_group_id: str) -> dict[str, Any]:
 
 
 def _status(requirements: list[dict[str, Any]]) -> str:
-    if any(
-        row.get("journey", {}).get("execution_status") == "PENDING"
-        for row in requirements
-    ):
+    if any(row.get("journey", {}).get("execution_status") == "PENDING" for row in requirements):
         return "PENDING"
     statuses = [
         str(row.get("verdict", {}).get("overall"))
@@ -110,11 +105,50 @@ def _status(requirements: list[dict[str, Any]]) -> str:
     return min(statuses, key=STATUS_PRIORITY.index)
 
 
-def validate_event(data: dict[str, Any], event_group_id: str) -> dict[str, Any]:
+def _session_event_view(
+    session: dict[str, Any],
+    event_group_id: str,
+) -> dict[str, Any]:
+    view = deepcopy(session)
+    cases = [
+        row
+        for row in session.get("cases", [])
+        if isinstance(row, dict) and str(row.get("event_group_id")) == event_group_id
+    ]
+    case_ids = {str(row.get("case_id")) for row in cases}
+    actions = [
+        row
+        for row in session.get("actions", [])
+        if isinstance(row, dict) and str(row.get("case_id")) in case_ids
+    ]
+    action_ids = {str(row.get("action_id")) for row in actions}
+    view["cases"] = cases
+    view["actions"] = actions
+    view["business_pushes"] = [
+        row
+        for row in session.get("business_pushes", [])
+        if isinstance(row, dict) and str(row.get("action_id")) in action_ids
+    ]
+    return view
+
+
+def validate_event(
+    data: dict[str, Any],
+    event_group_id: str,
+    session: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     view = event_view(data, event_group_id)
     errors = validate(view, strict=True)
     if errors:
         raise ValueError("\n".join(errors))
+    if session is not None:
+        execution_errors = validate_session(
+            _session_event_view(session, event_group_id),
+            results=view,
+            final=True,
+        )
+        if execution_errors:
+            raise ValueError("\n".join(execution_errors))
     selected = event_requirements(view, event_group_id)
     event_name = next(
         (
@@ -124,13 +158,16 @@ def validate_event(data: dict[str, Any], event_group_id: str) -> dict[str, Any]:
         ),
         selected[0].get("expectation", {}).get("event_name"),
     )
-    return {
+    output = {
         "event_group_id": event_group_id,
         "event_name": event_name,
         "status": _status(selected),
         "requirement_count": len(selected),
         "validated": True,
     }
+    if session is not None:
+        output["feedback"] = feedback_for_event(view, event_group_id, session)
+    return output
 
 
 def _merge_event_rows(
@@ -140,9 +177,7 @@ def _merge_event_rows(
     requirement_ids: set[str],
 ) -> list[dict[str, Any]]:
     return [
-        row
-        for row in current
-        if not _row_applies(row, event_group_id, requirement_ids)
+        row for row in current if not _row_applies(row, event_group_id, requirement_ids)
     ] + deepcopy(patch)
 
 
@@ -158,9 +193,7 @@ def apply_event(
     patch_rows = rows(patch.get("requirements"), "patch.requirements")
     patch_ids = {str(row.get("requirement_id")) for row in patch_rows}
     if patch_ids != current_ids or len(patch_rows) != len(current_rows):
-        raise ValueError(
-            "Event patch requirement IDs must exactly match the ledger event group."
-        )
+        raise ValueError("Event patch requirement IDs must exactly match the ledger event group.")
     if any(str(row.get("event_group_id")) != event_group_id for row in patch_rows):
         raise ValueError("Every patched requirement must use the patch event_group_id.")
 
@@ -185,9 +218,7 @@ def apply_event(
     }
     conflicts = sorted(existing_ids & set(patch_evidence_ids))
     if conflicts:
-        raise ValueError(
-            "Event patch evidence IDs already exist: " + ", ".join(conflicts)
-        )
+        raise ValueError("Event patch evidence IDs already exist: " + ", ".join(conflicts))
     updated["evidence"] = current_evidence + deepcopy(patch_evidence)
 
     for collection in ("unexpected", "blockers"):
@@ -230,17 +261,21 @@ def parse_args() -> argparse.Namespace:
     validate_event_parser = subparsers.add_parser("validate-event")
     validate_event_parser.add_argument("ledger", type=Path)
     validate_event_parser.add_argument("--event-group-id", required=True)
+    validate_event_parser.add_argument("--session-ledger", type=Path)
 
     apply_parser = subparsers.add_parser("apply-event")
     apply_parser.add_argument("ledger", type=Path)
     apply_parser.add_argument("event_patch", type=Path)
     apply_parser.add_argument("--output", type=Path)
+    apply_parser.add_argument("--session-ledger", type=Path)
 
     status_parser = subparsers.add_parser("status")
     status_parser.add_argument("ledger", type=Path)
+    status_parser.add_argument("--session-ledger", type=Path)
 
     final_parser = subparsers.add_parser("final-validate")
     final_parser.add_argument("ledger", type=Path)
+    final_parser.add_argument("--session-ledger", type=Path, required=True)
     return parser.parse_args()
 
 
@@ -248,25 +283,48 @@ def main() -> int:
     args = parse_args()
     try:
         data = load_object(args.ledger)
+        session = (
+            load_object(args.session_ledger) if getattr(args, "session_ledger", None) else None
+        )
         if args.command == "validate-event":
-            output = validate_event(data, args.event_group_id)
+            output = validate_event(data, args.event_group_id, session)
         elif args.command == "apply-event":
             patch = load_object(args.event_patch)
             updated, event_group_id = apply_event(data, patch)
             destination = args.output or args.ledger
             save_atomic(destination, updated)
-            output = validate_event(updated, event_group_id)
+            output = validate_event(updated, event_group_id, session)
             output["output"] = str(destination.resolve())
         elif args.command == "status":
-            output = {"events": status_rows(data)}
+            output = {
+                "events": (
+                    event_feedback(data, session) if session is not None else status_rows(data)
+                )
+            }
         else:
             errors = validate(data, strict=True)
             if errors:
                 raise ValueError("\n".join(errors))
+            execution_errors = validate_session(session or {}, results=data, final=True)
+            if execution_errors:
+                raise ValueError("\n".join(execution_errors))
+            feedback = event_feedback(data, session)
             output = {
                 "validated": True,
-                "event_count": len(status_rows(data)),
-                "status": "PASS",
+                "event_count": len(feedback),
+                "validation_status": "PASS",
+                "overall_status": min(
+                    (
+                        [row["status"] for row in feedback]
+                        + [
+                            status_of(row)
+                            for row in rows(data.get("unexpected"), "unexpected")
+                            if status_of(row) in STATUS_PRIORITY
+                        ]
+                    ),
+                    key=STATUS_PRIORITY.index,
+                ),
+                "events": feedback,
             }
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc

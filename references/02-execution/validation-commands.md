@@ -5,13 +5,18 @@ Run from the skill root. Python 3.11+ and `openpyxl` are required.
 Validate normalized data without writing a workbook:
 
 ```powershell
-python -B scripts/build_recette_report.py normalized-results.json --strict --validate-only
+python -B scripts/build_recette_report.py normalized-results.json `
+  --strict `
+  --validate-only `
+  --session-ledger session.json
 ```
 
 Build and reload-check the report:
 
 ```powershell
-python -B scripts/build_recette_report.py normalized-results.json gtm-recette-results.xlsx --strict
+python -B scripts/build_recette_report.py normalized-results.json gtm-recette-results.xlsx `
+  --strict `
+  --session-ledger session.json
 ```
 
 Evaluate declared cross-field rules:
@@ -41,7 +46,7 @@ python -m unittest discover -s tests -v
 Validate skill metadata:
 
 ```powershell
-python C:\Users\<user>\.codex\skills\.system\skill-creator\scripts\quick_validate.py <skill-path>
+python -X utf8 C:\Users\<user>\.codex\skills\.system\skill-creator\scripts\quick_validate.py <skill-path>
 ```
 
 Inspect a source workbook:
@@ -56,20 +61,31 @@ Decode browser-request captures:
 python -B scripts/decode_browser_requests.py requests.json decoded-requests.json
 ```
 
-Inspect the resumable session ledger, including interaction outcome, completion
-signal, retry lineage, and settlement reason:
+Inspect and validate the resumable session ledger, including case census,
+interaction outcome, completion signal, retry lineage, classified push count,
+applicable layers, and settlement reason:
 
 ```powershell
 python -B scripts/preview_session_ledger.py status session.json
+python -B scripts/preview_session_ledger.py validate session.json `
+  --results normalized-results.json `
+  --final
 ```
 
 Validate one completed event, inspect progress, and validate the final ledger:
 
 ```powershell
-python -B scripts/incremental_recette.py apply-event working-results.json event-001-patch.json
-python -B scripts/incremental_recette.py validate-event working-results.json --event-group-id EVG-001
-python -B scripts/incremental_recette.py status working-results.json
-python -B scripts/incremental_recette.py final-validate working-results.json
+python -B scripts/incremental_recette.py apply-event `
+  working-results.json event-001-patch.json `
+  --session-ledger session.json
+python -B scripts/incremental_recette.py validate-event `
+  working-results.json `
+  --event-group-id EVG-001 `
+  --session-ledger session.json
+python -B scripts/incremental_recette.py status working-results.json `
+  --session-ledger session.json
+python -B scripts/incremental_recette.py final-validate working-results.json `
+  --session-ledger session.json
 ```
 
 For changes to either browser helper, serve the repository locally, open
@@ -78,6 +94,8 @@ For changes to either browser helper, serve the repository locally, open
 two-argument push record, numeric `29.9`, an explicit `undefined` marker, and
 three discovered controls.
 
-The report validator can prove schema completeness and semantic consistency. It
-cannot prove that captured browser evidence is truthful; the agent and analyst
-remain responsible for authentic evidence.
+Strict final validation cross-checks normalized action boundaries against the
+session ledger, case/layer completion, classified push counts, and direct
+evidence linkage. It cannot independently prove that a captured browser
+artifact is truthful; the agent and analyst remain responsible for authentic
+capture.

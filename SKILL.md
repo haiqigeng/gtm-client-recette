@@ -136,6 +136,13 @@ parameter, destination/vendor ID, and applicable browser request path.
 Represent separate destinations as separate requirements. Ask only when an
 ambiguity could materially change a verdict.
 
+For every concerned tag, declare `tag_delivery` before execution:
+
+- `browser_request` for analytics or media tags that send from the browser;
+  require exact tag configuration, firing/count, runtime value/type,
+  destination/event identity, request count, endpoint, and decoded parameters;
+- `local_only` only for a genuinely local tag; do not invent a network layer.
+
 Initialize the coverage ledger with the evidence layers derived from these
 requirements:
 
@@ -177,6 +184,11 @@ product count representative of the family.
   `PASS`.
 - Explore relevant alternative routes before declaring an event unavailable.
 
+Register each discovered case in the session ledger before acting. Give it the
+event group, element, placement, material variant, discovery source, and
+derived applicable layers. Do not collapse multiple placements or values into
+one representative case.
+
 ### 3. Establish the controlled browser and Preview session
 
 Use either an analyst-approved attached browser session or a dedicated
@@ -193,6 +205,15 @@ Before verdict work, confirm:
 - the natural initial consent state; and
 - stable identities for the website, GTM, Tag Assistant, and any applicable
   vendor-helper surfaces.
+
+Initialize one resumable session ledger, register the controlled surfaces, and
+reuse it for the whole run:
+
+```powershell
+python scripts/preview_session_ledger.py init session.json `
+  --profile-path <controlled-profile> `
+  --approved-origin https://example.test
+```
 
 Keep separate cursors and evidence when multiple containers must be tested
 sequentially. Never merge their event histories.
@@ -234,11 +255,13 @@ Test refusal, partial choice, change of choice, or Advanced Consent Mode v2 only
 when required by the tracking plan. A banner click is not proof of event-level
 consent state.
 
-Never inject consent values as routine setup. If a defective or missing CMP on
-a non-production environment blocks the recette, show the blocker and ask the
-analyst before applying any temporary browser-session override. State the exact
-values, scope, and limitations, and keep natural-CMP evidence separate from the
-override. An override cannot pass the CMP implementation.
+Never inject consent values as routine setup. If a defective or missing CMP
+blocks the recette, show the blocker and ask the analyst before applying any
+temporary browser-session override. State the exact values, method, scope,
+limitations, and reversal, and keep natural-CMP evidence separate from the
+override. A production exception requires explicit production-specific
+authorization and restoration confirmation. An override can exercise
+downstream tags but can never pass the native CMP implementation.
 
 ### 5. Run every event group in original order
 
@@ -262,6 +285,19 @@ For each case:
 10. assign independent component verdicts; and
 11. validate and deliver the event verdict after all its cases, then continue
     automatically.
+
+Use the ledger commands to enforce this sequence:
+
+1. `register-case` before the first attempt;
+2. `begin-action` with the case ID and prior Preview cursor;
+3. `record-push` once for every observed business push, including companion
+   and anomalous pushes;
+4. `settle-action` with the independently counted business-push total;
+5. `record-layer` for every layer declared applicable to the completed case.
+
+Final validation rejects a pending case, an unclassified or omitted push, an
+open action, a missing applicable layer, or a normalized action boundary that
+does not exactly match the retained attempt.
 
 Never use the expected tracking event as proof that the website interaction
 completed. If an overlay, stale locator, animation, validation error, or other
@@ -287,11 +323,16 @@ premature, delayed, wrong-order, and wrong-context events, including planned
 event names firing where they do not belong.
 
 Treat an encountered form or authentication gate as part of the journey. Use
-unique synthetic data and submit ordinary non-production lead, registration,
-and conversion steps. Leave optional marketing and profiling choices unchecked
-unless they are the tested interaction. At a protected checkpoint, prepare the
-journey, ask the analyst to complete only that step, and resume. Never silently
-skip the remainder.
+unique synthetic data and submit ordinary forms, registrations, and explicitly
+authorized lead/conversion steps. Synthetic credentials may be created and
+used ephemerally inside the controlled browser run; never put them in chat,
+the ledger, evidence, or workbook. Reuse a safely created synthetic account for
+its login case. A run-wide authorization remains valid for its stated safe
+scope, origin, and environment, so do not ask again for each equivalent case.
+It never covers protected credentials, MFA, CAPTCHA, verification, real
+payment, or irreversible action. At such a checkpoint, prepare the journey,
+ask the analyst to complete only that step, and resume. Never silently skip the
+remainder.
 
 ### 6. Reconcile the independent evidence chain
 
@@ -322,12 +363,17 @@ This chain is non-substitutive:
   wrong outbound request.
 - A fired tag does not prove correct configuration or runtime parameters.
 - A correct runtime value does not prove the correct configured source.
+- A browser-sending tag requires first-party browser-network evidence tied to
+  the same action and container. GA4 “send ecommerce data” and Custom
+  JavaScript inputs still require their exact resolved runtime values plus the
+  decoded outbound request.
 - A correct event name at a time when its trigger condition is false is
   `FAIL`.
 - A duplicate beyond the allowed count, wrong action window, or wrong order is
   `FAIL`.
-- An unplanned business push is `REVIEW` unless it contradicts a confirmed
-  expectation, in which case it is `FAIL`.
+- An unplanned relevant business push is classified and retained. Use `FAIL`
+  when it contradicts a confirmed expectation; use `REVIEW` only when the
+  tracking-plan meaning itself is genuinely ambiguous.
 
 When no push is expected, replace only the raw-push link with exact
 `source_signal` evidence for the native GTM event, DOM/auto-event, enhanced
@@ -347,11 +393,15 @@ evidenced, write:
 Use `PASS`, `FAIL`, `BLOCKED`, `REVIEW`, or `NOT_TESTED`.
 
 - `PASS`: the confirmed expectation is satisfied with exact evidence.
-- `FAIL`: observed implementation contradicts it.
+- `FAIL`: a completed, settled action or directly observed passive occurrence
+  contradicts a confirmed expectation.
 - `BLOCKED`: a documented external, protected, or upstream blocker prevented an
-  attempted check.
-- `REVIEW`: evidence exists but confirmed semantics require analyst judgement.
+  attempted execution or made an applicable evidence layer unavailable.
+- `REVIEW`: direct evidence exists, but a precise semantic question requires
+  analyst judgement. Missing execution or evidence is not `REVIEW`.
 - `NOT_TESTED`: deliberately outside the confirmed acceptance scope.
+
+Use `PENDING` only inside the working ledger. It is never a final verdict.
 
 The requirement and event status is the worst applicable component status.
 Never allow a successful journey or upstream component to hide a downstream
@@ -361,14 +411,19 @@ Before announcing an event result, validate its complete atomic patch and then
 apply it:
 
 ```powershell
-python scripts/incremental_recette.py apply-event normalized-results.json event-001-patch.json
-python scripts/incremental_recette.py validate-event normalized-results.json --event-group-id EVG-001
+python scripts/incremental_recette.py apply-event normalized-results.json event-001-patch.json `
+  --session-ledger session.json
+python scripts/incremental_recette.py validate-event normalized-results.json `
+  --event-group-id EVG-001 `
+  --session-ledger session.json
 ```
 
 Give one immediate evidence-backed verdict and precise reason per event. Group
 homogeneous successful cases compactly, but name every distinct failed,
-blocked, or review variant and placement. Do not wait until the final workbook
-to reveal failures.
+blocked, or review variant and placement. Include cases executed/applicable,
+raw push, resolved state, GTM variable, tag configuration/firing/runtime,
+browser request, aggregate reason, and the exact website retest interaction for
+non-PASS results. Do not wait until the final workbook to reveal failures.
 
 ### 8. Close coverage and build the workbook
 
@@ -388,10 +443,13 @@ Before completion, confirm that:
 Run the final deterministic checks and workbook build:
 
 ```powershell
-python scripts/incremental_recette.py final-validate normalized-results.json
+python scripts/incremental_recette.py final-validate normalized-results.json `
+  --session-ledger session.json
 python scripts/validate_business_rules.py normalized-results.json
 python scripts/scan_sensitive_data.py normalized-results.json
-python scripts/build_recette_report.py normalized-results.json gtm-recette-results.xlsx --strict
+python scripts/build_recette_report.py normalized-results.json gtm-recette-results.xlsx `
+  --strict `
+  --session-ledger session.json
 ```
 
 Reload the workbook and verify sheets, row counts, filters, hyperlinks,

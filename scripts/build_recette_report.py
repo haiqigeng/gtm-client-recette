@@ -18,11 +18,16 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from client_side_rules import evaluate_report_business_rules
+from event_feedback import event_feedback
+from execution_contract import (
+    business_push_rows,
+    case_action_rows,
+    validate_session,
+)
 from recette_schema import (
     ReportValidationError,
     as_rows,
     dumps_structured,
-    event_rollup,
     status_of,
     validate,
     worst_status,
@@ -43,11 +48,7 @@ UNSAFE_EVIDENCE_MARKERS = (
 
 
 def refuse_unsafe_evidence(errors: Iterable[str]) -> None:
-    if any(
-        marker in error
-        for error in errors
-        for marker in UNSAFE_EVIDENCE_MARKERS
-    ):
+    if any(marker in error for error in errors for marker in UNSAFE_EVIDENCE_MARKERS):
         raise ReportValidationError(
             "Workbook generation refused because normalized evidence contains "
             "unsafe sensitive content. Use the redacted scanner output, quarantine "
@@ -65,7 +66,9 @@ REQUIRED_SHEETS = [
     "Client Summary",
     "Requirement Matrix",
     "Journey Coverage",
+    "Interaction Cases",
     "Event Evidence",
+    "Observed Push Stream",
     "Tag Evidence",
     "Destination Evidence",
     "Trigger & Sequence",
@@ -125,6 +128,7 @@ REQUIREMENT_HEADERS = [
     "gtm_variable_value",
     "gtm_variable_type",
     "tag_name",
+    "tag_delivery",
     "vendor_family",
     "destination_id",
     "tag_relevance",
@@ -139,6 +143,7 @@ REQUIREMENT_HEADERS = [
     "runtime_type",
     "request_behavior",
     "request_count",
+    "request_id",
     "destination_parameter_path",
     "destination_parameter_value",
     "consent_scenario",
@@ -187,6 +192,32 @@ JOURNEY_HEADERS = [
     "notes",
 ]
 
+CASE_HEADERS = [
+    "event_group_id",
+    "case_id",
+    "scope_status",
+    "execution_status",
+    "url",
+    "element",
+    "placement",
+    "action",
+    "material_variant",
+    "discovered_from",
+    "applicable_layers",
+    "blocker_id",
+    "case_reason",
+    "final_action_id",
+    "action_id",
+    "attempt_number",
+    "retry_of_action_id",
+    "interaction_outcome",
+    "completion_signal",
+    "stream_settled",
+    "settlement_reason",
+    "observed_business_push_count",
+    "layer_results",
+]
+
 EVENT_HEADERS = [
     "plan_order",
     "event_group_id",
@@ -232,6 +263,23 @@ EVENT_HEADERS = [
     "resolved_evidence_id",
     "status",
     "notes",
+]
+
+PUSH_HEADERS = [
+    "stream_id",
+    "event_index",
+    "captured_at",
+    "push_id",
+    "action_id",
+    "case_id",
+    "event_group_id",
+    "event_name",
+    "url",
+    "page_state",
+    "classification",
+    "classification_reason",
+    "container_id",
+    "evidence_id",
 ]
 
 TAG_HEADERS = [
@@ -282,6 +330,12 @@ CONSENT_HEADERS = [
     "tag_consent_checks",
     "override_approved",
     "override_method",
+    "override_scope",
+    "native_cmp_status",
+    "native_cmp_acceptance_in_scope",
+    "production_exception_approved",
+    "production_approval_evidence_id",
+    "restoration_confirmed",
     "blocker_id",
     "approval_evidence_id",
     "evidence_id",
@@ -304,6 +358,7 @@ DESTINATION_HEADERS = [
     "expected_request_behavior",
     "request_behavior",
     "request_count",
+    "request_id",
     "request_method",
     "request_url",
     "expected_endpoint_pattern",
@@ -418,12 +473,22 @@ CONTAINER_HEADERS = [
 
 UNEXPECTED_HEADERS = [
     "unexpected_id",
+    "observed_push_id",
     "event_group_id",
+    "action_id",
+    "case_id",
+    "event_index",
+    "url",
+    "page_state",
     "kind",
+    "classification",
+    "classification_reason",
     "event_name",
     "tag_name",
     "actual",
     "status",
+    "review_basis",
+    "review_question",
     "evidence_ids",
     "notes",
 ]
@@ -447,6 +512,13 @@ EVIDENCE_HEADERS = [
     "evidence_id",
     "kind",
     "source",
+    "capture_mode",
+    "action_id",
+    "event_index",
+    "container_id",
+    "request_id",
+    "tag_name",
+    "configuration_field",
     "source_detail",
     "path_or_url",
     "captured_at",
@@ -459,6 +531,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("input", help="Schema-v2 normalized JSON path, or - for stdin.")
     parser.add_argument("output", nargs="?", help="Destination .xlsx path.")
     parser.add_argument("--strict", action="store_true", help="Reject every semantic error.")
+    parser.add_argument(
+        "--session-ledger",
+        type=Path,
+        help="Case/action/push ledger required for strict final certification.",
+    )
     parser.add_argument(
         "--validate-only",
         action="store_true",
@@ -630,9 +707,7 @@ def requirement_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
                 "scenario_id": scenario.get("scenario_id"),
                 "scenario_kind": scenario.get("kind"),
                 "event_name": expectation.get("event_name"),
-                "source_mechanism": expectation.get(
-                    "source_mechanism", "data_layer_push"
-                ),
+                "source_mechanism": expectation.get("source_mechanism", "data_layer_push"),
                 "field_path": expectation.get("field_path"),
                 "match_rule": expectation.get("match_rule"),
                 "expected_value": expectation.get("expected_value"),
@@ -651,28 +726,24 @@ def requirement_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
                 "gtm_variable_value": _observation_value(variable, "field_value"),
                 "gtm_variable_type": variable.get("field_type"),
                 "tag_name": tag.get("name"),
-                "vendor_family": expectation.get("vendor_family")
-                or tag.get("vendor_family"),
-                "destination_id": expectation.get("destination_id")
-                or tag.get("destination_id"),
+                "tag_delivery": expectation.get("tag_delivery"),
+                "vendor_family": expectation.get("vendor_family") or tag.get("vendor_family"),
+                "destination_id": expectation.get("destination_id") or tag.get("destination_id"),
                 "tag_relevance": tag.get("relevance"),
                 "expected_firing": tag.get("expected_firing"),
                 "actual_firing": tag.get("actual_firing"),
                 "fire_count": tag.get("fire_count"),
                 "tag_configuration_field": tag.get("configuration_field"),
-                "expected_tag_configuration": expectation.get(
-                    "expected_tag_configuration"
-                ),
+                "expected_tag_configuration": expectation.get("expected_tag_configuration"),
                 "configured_value": tag.get("configured_value"),
                 "runtime_state": tag.get("runtime_state"),
                 "runtime_value": _observation_value(tag, "runtime_value"),
                 "runtime_type": tag.get("runtime_type"),
                 "request_behavior": destination.get("request_behavior"),
                 "request_count": destination.get("request_count"),
+                "request_id": destination.get("request_id"),
                 "destination_parameter_path": destination.get("parameter_path"),
-                "destination_parameter_value": _observation_value(
-                    destination, "field_value"
-                ),
+                "destination_parameter_value": _observation_value(destination, "field_value"),
                 "consent_scenario": consent.get("scenario"),
                 "consent_source": consent.get("source"),
                 "consent_state": consent.get("state_at_event"),
@@ -683,9 +754,7 @@ def requirement_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
                 "tag_firing_verdict": verdict.get("tag_firing"),
                 "tag_parameter_verdict": verdict.get("tag_parameter"),
                 "destination_request_verdict": verdict.get("destination_request"),
-                "destination_parameter_verdict": verdict.get(
-                    "destination_parameter"
-                ),
+                "destination_parameter_verdict": verdict.get("destination_parameter"),
                 "trigger_logic_verdict": verdict.get("trigger_logic"),
                 "tag_sequence_verdict": verdict.get("tag_sequence"),
                 "consent_verdict": verdict.get("consent"),
@@ -756,9 +825,7 @@ def event_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
                 "anchor_event_name": occurrence.get("anchor_event_name"),
                 "anchor_event_index": occurrence.get("anchor_event_index"),
                 "occurrence_evidence_id": occurrence.get("evidence_id"),
-                "source_mechanism": expectation.get(
-                    "source_mechanism", "data_layer_push"
-                ),
+                "source_mechanism": expectation.get("source_mechanism", "data_layer_push"),
                 "source_signal_capture_source": signal.get("capture_source"),
                 "source_signal_observed": signal.get("observed"),
                 "source_signal_evidence_id": signal.get("evidence_id"),
@@ -815,10 +882,8 @@ def tag_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
                 "container_id": tag.get("container_id")
                 or req.get("container_id")
                 or data.get("run", {}).get("container_id"),
-                "vendor_family": tag.get("vendor_family")
-                or expectation.get("vendor_family"),
-                "destination_id": tag.get("destination_id")
-                or expectation.get("destination_id"),
+                "vendor_family": tag.get("vendor_family") or expectation.get("vendor_family"),
+                "destination_id": tag.get("destination_id") or expectation.get("destination_id"),
                 "template_type": tag.get("template_type"),
                 "tag_name": tag.get("name"),
                 "relevance": tag.get("relevance"),
@@ -871,6 +936,12 @@ def consent_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
                 "tag_consent_checks": consent.get("tag_consent_checks"),
                 "override_approved": consent.get("override_approved"),
                 "override_method": consent.get("override_method"),
+                "override_scope": consent.get("override_scope"),
+                "native_cmp_status": consent.get("native_cmp_status"),
+                "native_cmp_acceptance_in_scope": consent.get("native_cmp_acceptance_in_scope"),
+                "production_exception_approved": consent.get("production_exception_approved"),
+                "production_approval_evidence_id": consent.get("production_approval_evidence_id"),
+                "restoration_confirmed": consent.get("restoration_confirmed"),
                 "blocker_id": consent.get("blocker_id"),
                 "approval_evidence_id": consent.get("approval_evidence_id"),
                 "evidence_id": consent.get("evidence_id"),
@@ -901,29 +972,20 @@ def destination_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
                 or data.get("run", {}).get("container_id"),
                 "vendor_family": destination.get("vendor_family"),
                 "destination_id": destination.get("destination_id"),
-                "destination_id_parameter_path": expectation.get(
-                    "destination_id_parameter_path"
-                ),
-                "expected_destination_event_name": expectation.get(
-                    "destination_event_name"
-                ),
+                "destination_id_parameter_path": expectation.get("destination_id_parameter_path"),
+                "expected_destination_event_name": expectation.get("destination_event_name"),
                 "actual_destination_event_name": destination.get("event_name"),
                 "destination_event_parameter_path": expectation.get(
                     "destination_event_parameter_path"
                 ),
-                "expected_request_behavior": expectation.get(
-                    "expected_request_behavior"
-                ),
+                "expected_request_behavior": expectation.get("expected_request_behavior"),
                 "request_behavior": destination.get("request_behavior"),
                 "request_count": destination.get("request_count"),
+                "request_id": destination.get("request_id"),
                 "request_method": destination.get("method"),
                 "request_url": destination.get("request_url"),
-                "expected_endpoint_pattern": expectation.get(
-                    "expected_endpoint_pattern"
-                ),
-                "expected_parameter_path": expectation.get(
-                    "destination_parameter_path"
-                ),
+                "expected_endpoint_pattern": expectation.get("expected_endpoint_pattern"),
+                "expected_parameter_path": expectation.get("destination_parameter_path"),
                 "actual_parameter_path": destination.get("parameter_path"),
                 "field_state": destination.get("field_state"),
                 "field_value": _observation_value(destination, "field_value"),
@@ -933,9 +995,7 @@ def destination_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
                 "capture_source": destination.get("capture_source"),
                 "vendor_helper_status": destination.get("vendor_helper_status"),
                 "evidence_id": destination.get("evidence_id"),
-                "vendor_helper_evidence_id": destination.get(
-                    "vendor_helper_evidence_id"
-                ),
+                "vendor_helper_evidence_id": destination.get("vendor_helper_evidence_id"),
                 "notes": req.get("notes"),
             }
         )
@@ -1072,8 +1132,7 @@ def client_check_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
                     "event_name": expectation.get("event_name"),
                     "check_id": check.get("check_id"),
                     "category": check.get("category"),
-                    "browser_context_id": check.get("context_id")
-                    or req.get("browser_context_id"),
+                    "browser_context_id": check.get("context_id") or req.get("browser_context_id"),
                     "comparison": check.get("comparison"),
                     "expected": check.get("expected"),
                     "actual": check.get("actual"),
@@ -1133,12 +1192,14 @@ def container_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
 
 def client_category(req: dict[str, Any]) -> str:
     status = status_of(req.get("verdict", {}).get("overall"))
-    if status == "PASS":
-        return "tested and correct"
-    if status == "BLOCKED":
-        return "blocked journey or unavailable element"
-    if status in {"REVIEW", "NOT_TESTED"}:
-        return "review or outside scope"
+    status_categories = {
+        "PASS": "tested and correct",
+        "BLOCKED": "blocked journey or unavailable element",
+        "REVIEW": "review or outside scope",
+        "NOT_TESTED": "review or outside scope",
+    }
+    if status in status_categories:
+        return status_categories[status]
     if req.get("event_observed") is False:
         return "expected event not triggered"
     verdict = req.get("verdict", {})
@@ -1147,41 +1208,55 @@ def client_category(req: dict[str, Any]) -> str:
     tag = req.get("tag") or {}
     if raw.get("field_state") == "absent":
         return "raw dataLayer field missing"
-    if layer in {"raw_payload", "raw_value", "raw_type"}:
-        return "wrong raw value/type"
-    if layer in {"resolved_data_layer", "gtm_variable"}:
-        return "resolved Data Layer or GTM variable mismatch"
-    if layer in {"tag_firing", "tag_not_fired"}:
-        return "tag not fired"
     if tag.get("fire_count", 0) > 1 or layer in {"duplicate_tag", "unexpected_tag"}:
         return "tag fired unexpectedly or duplicated"
-    if layer in {"tag_configuration", "configuration"}:
-        return "tag configuration mismatch"
-    if layer in {"tag_parameter", "runtime_parameter"}:
-        return "runtime tag parameter mismatch"
-    if layer in {"destination_request", "destination_parameter"}:
-        return "client-side destination request mismatch"
-    if layer in {"trigger_logic", "tag_sequence"}:
-        return "trigger or tag-sequencing mismatch"
-    if layer in {"business_rule", "cross_field"}:
-        return "cross-field business-rule mismatch"
-    if layer in {"sensitive_data", "pii"}:
-        return "sensitive-data exposure or review"
-    if layer in {"client_checks", "spa", "cross_domain", "responsive"}:
-        return "client-side browser-context mismatch"
-    if layer == "regression":
-        return "regression from a previously passing requirement"
-    if layer in {"consent", "timing"}:
-        return "consent/timing issue"
+    category_by_layer = {
+        "raw_payload": "wrong raw value/type",
+        "raw_value": "wrong raw value/type",
+        "raw_type": "wrong raw value/type",
+        "resolved_data_layer": "resolved Data Layer or GTM variable mismatch",
+        "gtm_variable": "resolved Data Layer or GTM variable mismatch",
+        "tag_firing": "tag not fired",
+        "tag_not_fired": "tag not fired",
+        "tag_configuration": "tag configuration mismatch",
+        "configuration": "tag configuration mismatch",
+        "tag_parameter": "runtime tag parameter mismatch",
+        "runtime_parameter": "runtime tag parameter mismatch",
+        "destination_request": "client-side destination request mismatch",
+        "destination_parameter": "client-side destination request mismatch",
+        "trigger_logic": "trigger or tag-sequencing mismatch",
+        "tag_sequence": "trigger or tag-sequencing mismatch",
+        "business_rule": "cross-field business-rule mismatch",
+        "cross_field": "cross-field business-rule mismatch",
+        "sensitive_data": "sensitive-data exposure or review",
+        "pii": "sensitive-data exposure or review",
+        "client_checks": "client-side browser-context mismatch",
+        "spa": "client-side browser-context mismatch",
+        "cross_domain": "client-side browser-context mismatch",
+        "responsive": "client-side browser-context mismatch",
+        "regression": "regression from a previously passing requirement",
+        "consent": "consent/timing issue",
+        "timing": "consent/timing issue",
+    }
+    if layer in category_by_layer:
+        return category_by_layer[layer]
     return "other confirmed mismatch"
 
 
-def add_client_summary(wb: Workbook, data: dict[str, Any], warnings: list[str]) -> None:
+def add_client_summary(
+    wb: Workbook,
+    data: dict[str, Any],
+    warnings: list[str],
+    session: dict[str, Any] | None = None,
+) -> None:
     ws = wb.active
     ws.title = "Client Summary"
     run = data.get("run", {})
-    rollup = event_rollup(data)
-    overall = worst_status(item["status"] for item in rollup)
+    rollup = event_feedback(data, session)
+    overall = worst_status(
+        [item["status"] for item in rollup]
+        + [status_of(item) for item in as_rows(data.get("unexpected"), "unexpected")]
+    )
     counts = Counter(item["status"] for item in rollup)
 
     ws["A1"] = run.get("report_title", "GTM Preview Recette")
@@ -1194,8 +1269,7 @@ def add_client_summary(wb: Workbook, data: dict[str, Any], warnings: list[str]) 
         ("Target URL", run.get("site_url")),
         (
             "Container(s) / workspace(s)",
-            run.get("containers")
-            or f"{run.get('container_id')} / {run.get('workspace')}",
+            run.get("containers") or f"{run.get('container_id')} / {run.get('workspace')}",
         ),
         ("Tracking plan", run.get("tracking_plan_source")),
         ("Generated at", datetime.now(UTC).isoformat(timespec="seconds")),
@@ -1215,7 +1289,10 @@ def add_client_summary(wb: Workbook, data: dict[str, Any], warnings: list[str]) 
         "event_name",
         "status",
         "requirement_count",
+        "case_counts",
+        "verified_layers",
         "reason",
+        "retest",
         "evidence_ids",
     ]
     for column, header in enumerate(event_headers, start=1):
@@ -1254,8 +1331,11 @@ def add_client_summary(wb: Workbook, data: dict[str, Any], warnings: list[str]) 
     ws.column_dimensions["B"].width = 42
     ws.column_dimensions["C"].width = 16
     ws.column_dimensions["D"].width = 20
-    ws.column_dimensions["E"].width = 80
+    ws.column_dimensions["E"].width = 28
     ws.column_dimensions["F"].width = 50
+    ws.column_dimensions["G"].width = 80
+    ws.column_dimensions["H"].width = 80
+    ws.column_dimensions["I"].width = 50
     ws.freeze_panes = "A3"
 
 
@@ -1275,14 +1355,31 @@ def build_workbook(
     data: dict[str, Any],
     output: Path,
     warnings: list[str] | None = None,
+    session: dict[str, Any] | None = None,
 ) -> None:
     warnings = warnings or []
     refuse_unsafe_evidence(validate(data, strict=False))
+    if session is not None:
+        execution_errors = validate_session(session, results=data, final=True)
+        if execution_errors:
+            raise ReportValidationError("\n".join(execution_errors))
     wb = Workbook()
-    add_client_summary(wb, data, warnings)
+    add_client_summary(wb, data, warnings, session)
     add_table_sheet(wb, "Requirement Matrix", REQUIREMENT_HEADERS, requirement_rows(data))
     add_table_sheet(wb, "Journey Coverage", JOURNEY_HEADERS, journey_rows(data))
+    add_table_sheet(
+        wb,
+        "Interaction Cases",
+        CASE_HEADERS,
+        _generic_rows(case_action_rows(session or {}), CASE_HEADERS),
+    )
     add_table_sheet(wb, "Event Evidence", EVENT_HEADERS, event_rows(data))
+    add_table_sheet(
+        wb,
+        "Observed Push Stream",
+        PUSH_HEADERS,
+        _generic_rows(business_push_rows(session or {}), PUSH_HEADERS),
+    )
     add_table_sheet(wb, "Tag Evidence", TAG_HEADERS, tag_rows(data))
     add_table_sheet(
         wb,
@@ -1362,10 +1459,14 @@ def build_workbook(
 
     output.parent.mkdir(parents=True, exist_ok=True)
     wb.save(output)
-    validate_workbook(output, data)
+    validate_workbook(output, data, session)
 
 
-def validate_workbook(path: Path, data: dict[str, Any]) -> None:
+def validate_workbook(
+    path: Path,
+    data: dict[str, Any],
+    session: dict[str, Any] | None = None,
+) -> None:
     workbook = load_workbook(path, read_only=False, data_only=False)
     try:
         missing = [title for title in REQUIRED_SHEETS if title not in workbook.sheetnames]
@@ -1378,7 +1479,9 @@ def validate_workbook(path: Path, data: dict[str, Any]) -> None:
         expected_rows = {
             "Requirement Matrix": len(as_rows(data.get("requirements"), "requirements")) + 1,
             "Journey Coverage": len(as_rows(data.get("requirements"), "requirements")) + 1,
+            "Interaction Cases": len(case_action_rows(session or {})) + 1,
             "Event Evidence": len(as_rows(data.get("requirements"), "requirements")) + 1,
+            "Observed Push Stream": len(business_push_rows(session or {})) + 1,
             "Tag Evidence": len(tag_rows(data)) + 1,
             "Destination Evidence": len(destination_rows(data)) + 1,
             "Trigger & Sequence": len(trigger_sequence_rows(data)) + 1,
@@ -1412,17 +1515,31 @@ def main() -> int:
         data = load_data(args.input)
         warnings = validate(data, strict=args.strict)
         refuse_unsafe_evidence(warnings)
+        if args.strict and args.session_ledger is None:
+            raise ReportValidationError("--strict final certification requires --session-ledger.")
+        session = load_data(str(args.session_ledger)) if args.session_ledger is not None else None
+        if session is not None:
+            execution_errors = validate_session(
+                session,
+                results=data,
+                final=args.strict,
+            )
+            if args.strict and execution_errors:
+                raise ReportValidationError("\n".join(execution_errors))
+            warnings.extend(execution_errors)
         if args.validate_only:
             print("Schema-v2 recette results are valid.")
             if warnings:
                 print(f"Completed with {len(warnings)} validation warning(s).")
             return 0
         if not args.output:
-            raise ReportValidationError("An output .xlsx path is required unless --validate-only is used.")
+            raise ReportValidationError(
+                "An output .xlsx path is required unless --validate-only is used."
+            )
         output = Path(args.output)
         if output.suffix.lower() != ".xlsx":
             raise ReportValidationError("Output path must use the .xlsx extension.")
-        build_workbook(data, output, warnings)
+        build_workbook(data, output, warnings, session)
     except (OSError, json.JSONDecodeError, ReportValidationError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2

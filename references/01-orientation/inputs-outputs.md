@@ -41,8 +41,8 @@ order when normalizing.
 After all applicable cases for each tested event, return one concise `PASS`,
 `FAIL`, `BLOCKED`, `REVIEW`, or `NOT_TESTED` verdict. Group homogeneous
 successes by tested count and identify each distinct non-pass case with its
-precise evidence-backed reason. Continue automatically unless analyst action
-is required.
+precise evidence-backed reason, verified layer statuses, and exact website
+retest interaction. Continue automatically unless analyst action is required.
 
 ## Final outputs
 
@@ -51,10 +51,13 @@ Return:
 - one complete event-status list in original plan order;
 - a schema-v2 normalized evidence file retaining action outcome, independent
   completion signal, linked retry attempts, and adaptive settlement evidence;
+- a session ledger retaining every interaction case, attempt, applicable layer
+  result, safe run authorization, and classified chronological business push;
 - a validated `.xlsx` with client summary, requirement matrix, journey
-  coverage, event, tag, destination, trigger/sequence, consent, business-rule,
-  sensitive-data, client-check, regression, container, unexpected-item,
-  blocker, evidence, and run-context sheets.
+  coverage, interaction-case, event, observed-push-stream, tag, destination,
+  trigger/sequence, consent, business-rule, sensitive-data, client-check,
+  regression, container, unexpected-item, blocker, evidence, and run-context
+  sheets.
 
 The recette is achieved by complete operational coverage and trustworthy
 comparison. The workbook is its durable delivery artifact.

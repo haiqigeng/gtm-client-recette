@@ -43,10 +43,7 @@ def _multi_value(pairs: list[tuple[str, str]]) -> dict[str, Any]:
     grouped: dict[str, list[str]] = defaultdict(list)
     for key, value in pairs:
         grouped[key].append(value)
-    return {
-        key: values[0] if len(values) == 1 else values
-        for key, values in grouped.items()
-    }
+    return {key: values[0] if len(values) == 1 else values for key, values in grouped.items()}
 
 
 def _headers(value: Any) -> dict[str, str]:
@@ -121,9 +118,7 @@ def _post_data(row: dict[str, Any]) -> str | None:
     value = row.get("post_data")
     if value is None and row.get("post_data_base64") is not None:
         try:
-            return base64.b64decode(str(row["post_data_base64"])).decode(
-                "utf-8", errors="replace"
-            )
+            return base64.b64decode(str(row["post_data_base64"])).decode("utf-8", errors="replace")
         except (ValueError, TypeError):
             return None
     if value is None:
@@ -146,12 +141,9 @@ def decode_request(
     forbidden_requested = sorted(allowed & FORBIDDEN_HEADERS)
     if forbidden_requested:
         raise ValueError(
-            "Secret-bearing headers cannot be retained: "
-            + ", ".join(forbidden_requested)
+            "Secret-bearing headers cannot be retained: " + ", ".join(forbidden_requested)
         )
-    retained_headers = {
-        key: value for key, value in headers.items() if key in allowed
-    }
+    retained_headers = {key: value for key, value in headers.items() if key in allowed}
     body = _decode_body(
         _post_data(row),
         headers.get("content-type", ""),
@@ -167,9 +159,7 @@ def decode_request(
         "endpoint": f"{parsed.scheme}://{parsed.netloc}{parsed.path}",
         "query": _multi_value(parse_qsl(parsed.query, keep_blank_values=True)),
         "headers": retained_headers,
-        "excluded_header_names": sorted(
-            key for key in headers if key not in retained_headers
-        ),
+        "excluded_header_names": sorted(key for key in headers if key not in retained_headers),
         "body": body,
     }
 
@@ -204,9 +194,7 @@ def decode_requests(
 def main() -> int:
     args = parse_args()
     value = json.loads(args.input.read_text(encoding="utf-8"))
-    included_headers = DEFAULT_HEADERS | {
-        str(item).lower() for item in args.include_header
-    }
+    included_headers = DEFAULT_HEADERS | {str(item).lower() for item in args.include_header}
     try:
         output = decode_requests(
             value,

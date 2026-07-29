@@ -49,9 +49,7 @@ def main() -> int:
             continue
         expectation = requirement.get("expectation")
         declared_policy = (
-            expectation.get("sensitive_data_policy")
-            if isinstance(expectation, dict)
-            else None
+            expectation.get("sensitive_data_policy") if isinstance(expectation, dict) else None
         )
         policy = policy_override or (
             declared_policy

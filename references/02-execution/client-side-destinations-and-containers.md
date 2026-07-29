@@ -24,6 +24,16 @@ When one event must reach two GA4 measurement IDs, two pixels, or an analytics
 and media destination, keep separate rows under the same event group. This
 makes a partial delivery visible.
 
+Declare `tag_delivery` before execution:
+
+- `browser_request` for a tag whose accepted client-side effect is an
+  analytics/media request;
+- `local_only` for a genuinely local tag whose accepted effect has no browser
+  send.
+
+Do not infer local-only merely because Preview hides a value. A fired
+browser-sending tag always requires a same-action first-party network check.
+
 For each destination normalize:
 
 - vendor family and tag/template type;
@@ -38,6 +48,8 @@ For each destination normalize:
 - raw browser-request paths for the destination ID, vendor event name, and
   tested outbound parameter, plus the decoded value and type;
 - expected request count when duplication matters.
+- stable browser `request_id` or capture-record ID tied to the action and
+  owning client container.
 
 Common vendor identifiers and names are only decoding hints:
 
@@ -74,7 +86,7 @@ deduplication, attribution, reporting, or audience membership. Those need a
 separate acceptance source and appropriate vendor-side access.
 
 Normalize request evidence in `destination_request` with
-`capture_source: browser_network`. A `PASS` request cannot rely solely on
+`capture_source: browser_network` and a stable `request_id`. A `PASS` request cannot rely solely on
 `vendor_helper`. Use paths rooted at `query.`, `body.`, or `headers.` so the
 validator can reconcile each decoded claim with the retained browser request:
 
@@ -170,3 +182,17 @@ semantics:
 For multiple GA4 destinations, validate the actual destination ID or `send_to`
 for each atomic row. DebugView is supplementary and must not replace Preview
 and browser-request evidence.
+
+When a GA4 tag uses **Send ecommerce data** from the Data Layer, the option may
+not expose individual values in static tag configuration. Validate the layers
+separately:
+
+1. exact configured ecommerce source/option;
+2. raw ecommerce API Call and resolved ecommerce state at that event;
+3. each applicable GTM or Custom JavaScript input and exact type;
+4. fired tag count and runtime event/ecommerce values;
+5. decoded GA4 request event name, destination ID, and applicable event/item
+   parameters.
+
+The option being configured does not prove the resolved ecommerce values; the
+request being correct does not repair a wrong raw or runtime value.

@@ -214,3 +214,64 @@ The agent must stop the affected verdict, verify container/origin/page-node/
 iframe-or-SPA ownership and connection, inspect the complete index window, and
 repeat once when safe. It must retain the discrepancy and never relabel the
 journal as Tag Assistant evidence or pass unavailable Preview-dependent layers.
+
+## Sending tag versus local-only tag
+
+```text
+Use $gtm-preview-recette at <skill path>. One concerned GA4 ecommerce tag uses
+the Data Layer ecommerce option and a Custom JavaScript variable; another
+concerned tag only updates local page state and makes no request.
+```
+
+The agent must declare the first `browser_request`, inspect configured source,
+resolved ecommerce/CJS values, tag runtime, and decoded network request. It
+must declare the second `local_only` and not invent network evidence.
+
+## Omitted second push in an action window
+
+```text
+Use $gtm-preview-recette at <skill path>. The browser action window visibly
+contains two business pushes, but the session ledger contains one classified
+push row and the expected event row itself is valid.
+```
+
+Final validation must reject the independent push-count mismatch. A valid
+planned row cannot hide the omitted companion or anomalous occurrence.
+
+## Reconstructed tag and request evidence
+
+```text
+Use $gtm-preview-recette at <skill path>. The normalized record claims tag
+configuration and browser-send PASS from tag naming patterns and a generic GA
+request near the same timestamp; no action/event/container/request linkage is
+present.
+```
+
+Strict validation must reject the evidence as non-direct. A screenshot or
+prose explanation cannot repair it.
+
+## Run-wide safe authorization and ephemeral signup credentials
+
+```text
+Use $gtm-preview-recette at <skill path>. A controlled preprod run contains
+sign-up and login cases. The analyst authorizes ordinary synthetic forms for
+the whole run. The account can be created with synthetic credentials.
+```
+
+The agent must record one safe authorization, avoid asking again per case,
+reuse the synthetic account ephemerally for login, and retain no password,
+email, or credential in chat, the session ledger, evidence, or workbook. MFA,
+CAPTCHA, verification, real payment, and irreversible actions remain analyst
+checkpoints.
+
+## Production CMP test exception
+
+```text
+Use $gtm-preview-recette at <skill path>. On production, the native CMP is
+known defective and blocks an explicitly authorized downstream tag check. The
+analyst approves a precise reversible session-only consent simulation.
+```
+
+The agent must require production-specific authorization, record the exact
+method, blocker, approval evidence, and restoration. It may test downstream
+behaviour under the simulated state but must keep native CMP status non-PASS.

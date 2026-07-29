@@ -45,7 +45,7 @@ and evidence. Do not mechanically promote incomplete v1 rows to schema-v2
 - `requirement_inventory`: every requirement ID in original source order;
 - `event_inventory`: every event group in original plan order.
 
-Schema version remains 2, but every v1.1 run must explicitly prove its
+Schema version remains 2, but every current run must explicitly prove its
 client-side scope:
 
 - `containers`: required non-empty inventory with one primary plus applicable
@@ -164,8 +164,8 @@ Record:
 - `selector_or_element`;
 - `inferred`, `inference_source`, and `confidence`;
 - every `attempted_routes` entry;
-- `execution_status`: `PENDING`, `EXECUTED`, `BLOCKED`, `REVIEW`, or
-  `NOT_TESTED`.
+- `execution_status`: working `PENDING`, then `EXECUTED`, `BLOCKED`, or
+  confirmed `NOT_TESTED`.
 
 Use action-value source `not_applicable`, `synthetic`,
 `analyst_supplied_non_sensitive`, `protected_analyst_entry`, or
@@ -178,6 +178,12 @@ because it has repeated element instances. Roll the normalized requirement up
 from all applicable cases using the worst status, and bind distinct failures
 or unexpected occurrences to their own evidence.
 
+Each session case records stable `case_id`, event group, exact requirement IDs,
+URL, element, placement, action, material variant, discovery source, scope,
+execution status, applicable layers, container IDs, and authorization IDs. Its
+attempts retain contiguous attempt numbers and retry lineage. Final validation
+requires every in-scope case to be `EXECUTED` or explicitly `BLOCKED`.
+
 ### Expectation
 
 Record:
@@ -186,10 +192,9 @@ Record:
   `expected_type`;
 - `expected_occurrence`;
 - `variable_name` when a GTM variable is required;
-- `tag_name`, `expected_firing`, `tag_configuration_field`, and runtime
+- `tag_name`, `tag_delivery`, `expected_firing`,
+  `tag_configuration_field`, exact `expected_tag_configuration`, and runtime
   parameter expectation when a tag is concerned;
-- `expected_tag_configuration` when the plan prescribes an exact variable or
-  configuration mapping;
 - `source_mechanism` when the accepted signal is not an explicit
   `data_layer_push`;
 - `vendor_family`, `destination_id`, `destination_event_name`, expected
@@ -207,6 +212,11 @@ Record:
 - input, rule, and output for a `documented_transform`.
 
 Preserve explicit expected `null`; do not omit `expected_value`.
+Use `tag_delivery: browser_request` for a sending analytics/media tag and
+`tag_delivery: local_only` only for a genuinely local tag. A browser-sending
+tag requires vendor/destination ID, event identity, their exact request paths,
+endpoint pattern, and expected request behaviour. `local_only` cannot retain
+destination fields.
 Quote literal vendor keys that contain path syntax:
 `query["ep.value"]` and `query["cd[value]"]`. Use `[0]` for a numeric index and
 `[]` only for an array wildcard.
@@ -258,10 +268,15 @@ expected event, retain the same negative action evidence. A finalized
 
 Current session-ledger output also retains the stable `action_id`, optional
 `retry_of_action_id`, `interaction_outcome`, independent safe
-`completion_signal`, and `settlement_reason`. These fields are optional for
-legacy schema-v2 input, but when present they are validated. A completed
-interaction requires a non-empty completion signal, and a failed or uncertain
-interaction cannot support an event-occurrence `FAIL`.
+`completion_signal`, and `settlement_reason`. A completed interaction requires
+a non-empty completion signal, and a failed or uncertain interaction cannot
+support a missing-event occurrence `FAIL`. Final certification requires the
+normalized boundary to match the retained session action exactly.
+
+The session action also records `observed_business_push_count` and one
+`layer_results` row for every layer declared applicable to the completed case.
+The explicit count must equal the classified business-push rows assigned to
+the action.
 
 ### Occurrence evidence
 
@@ -368,6 +383,7 @@ For an accepted analytics or media send, record:
 - applicable vendor, container, and destination ID;
 - exact vendor-facing event/conversion name;
 - request behaviour/count, method, URL, and browser-network source;
+- stable `request_id` for the direct network capture;
 - raw request paths for destination ID, vendor event, and tested parameter;
 - decoded parameter state, value, and type;
 - primary evidence ID and optional vendor-helper evidence.
@@ -396,11 +412,17 @@ evidence.
 
 `session_override` additionally requires:
 
-- non-production environment;
 - explicit analyst approval and approval evidence;
-- exact temporary method;
+- exact temporary method and `override_scope: session_only`;
 - before and after state;
-- a referenced `CMP_TEST_ENVIRONMENT` blocker.
+- non-PASS `native_cmp_status` and whether native CMP acceptance is in scope;
+- a referenced `CMP_TEST_ENVIRONMENT` blocker outside production.
+
+A production exception additionally requires
+`production_exception_approved`, `production_approval_evidence_id`,
+`restoration_confirmed`, and a `CMP_PRODUCTION_ENVIRONMENT` blocker. Simulated
+consent can exercise downstream tags but cannot make native CMP acceptance
+`PASS`.
 
 Never merge a natural-CMP and override result into one requirement.
 
@@ -479,7 +501,10 @@ Use component fields:
 ```
 
 Use `null` for a non-applicable component. The overall result is the worst
-applicable component.
+applicable component. `PENDING` is allowed only in the working initializer and
+cannot pass strict validation. `REVIEW` is valid only with
+`review_basis: semantic_ambiguity` and a non-empty `review_question`; missing
+execution or evidence is `BLOCKED`.
 
 ## Blockers and unexpected observations
 
@@ -494,14 +519,27 @@ Keep relevant unplanned, duplicate, premature, delayed, wrong-order, and
 wrong-context business pushes, plus unexpected concerned tags, in `unexpected`.
 Include the case/action identity, event index, page/state context,
 classification, actual observation, status, and evidence IDs in the row or its
-bound evidence. Do not turn every unrelated native `gtm.*` or container event
-into noise.
+bound evidence. An anomalous push row also carries `observed_push_id` so strict
+validation can reconcile it with the chronological session stream. Do not turn
+every unrelated native `gtm.*` or container event into noise.
+
+## Evidence catalogue linkage
+
+Every evidence row includes `capture_mode`: `direct`, `deterministic`,
+`analyst_supplied`, or `supplemental`. Direct evidence additionally includes
+the applicable `action_id`, `event_index`, `container_id`, `request_id`,
+`tag_name`, and `configuration_field`. Naming conventions, reconstructed
+values, and generic request-time correlation cannot claim direct evidence.
 
 ## Validation invariants
 
 Strict mode rejects:
 
 - incomplete or duplicate inventories;
+- missing, pending, or unexecuted session cases and open actions;
+- observed push counts that differ from classified stream rows;
+- missing per-case applicable layer results;
+- normalized action boundaries that differ from session actions;
 - requirements stored out of plan order;
 - missing source references;
 - placeholder raw payloads;
@@ -516,16 +554,20 @@ Strict mode rejects:
 - `PASS` values that contradict fixed expectations;
 - wanted non-fired tags without a reason and source;
 - destination PASS without browser-network evidence or with wrong ID,
-  endpoint, send behaviour, parameter, value, or type;
+  request ID, endpoint, send behaviour, parameter, value, or type;
 - trigger, exception, or tag-sequence false PASSes;
-- advanced consent false PASSes or unapproved session overrides;
+- advanced consent false PASSes or unapproved/unsafe session overrides;
 - cross-field results that contradict deterministic evaluation;
 - unredacted or incomplete sensitive-data findings;
 - client-context and prior-run false PASSes;
 - unrelated tag comparisons;
 - `NOT_TESTED` used for an attempted blocker;
 - protected blockers where analyst help was never requested;
-- unapproved or production consent overrides;
+- production consent overrides without the explicit exception, approval
+  evidence, correct blocker, and restoration;
+- `REVIEW` without a precise semantic question;
+- reconstructed evidence presented as direct capture;
+- credentials or synthetic personal fields retained in the session ledger;
 - unknown or duplicate evidence IDs;
 - an overall status that hides a worse component verdict.
 
@@ -534,5 +576,8 @@ Executable examples are `tests/fixtures/valid_full.json`,
 fixture used by `tests/test_pipeline.py`. Validate normalized results with:
 
 ```powershell
-python scripts/build_recette_report.py normalized-results.json --strict --validate-only
+python scripts/build_recette_report.py normalized-results.json `
+  --strict `
+  --validate-only `
+  --session-ledger session.json
 ```

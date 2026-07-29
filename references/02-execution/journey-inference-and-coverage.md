@@ -56,6 +56,11 @@ share a concise final evidence summary only after every instance was executed.
 A distinct failure, payload shape, placement, or trigger condition remains
 separate.
 
+Register every instance with a stable `case_id`, event group, element,
+placement, material variant, URL, discovery source, and applicable layer list.
+Each attempt then references that case. A retry receives a new action ID and
+retains the failed prior attempt.
+
 Exhaust small finite value domains that can materially change the output. If a
 funnel exposes product counts 1 through 9 and count affects `begin_quote`,
 step-view, or lead payloads, run all nine from a reset state. For genuinely
@@ -111,22 +116,26 @@ authenticated/anonymous, visibility/scroll, and responsive branches. Record
 condition, acquired branch, browser context, acquisition method, and every safe
 attempt.
 
-Test every planned branch when it can be acquired safely. Do not create new
-execution statuses: use `EXECUTED`, `BLOCKED`, `REVIEW`, or confirmed
-`NOT_TESTED`, then assign the standard recette verdict.
+Test every planned branch when it can be acquired safely. Use `PENDING` only
+while working, then `EXECUTED`, `BLOCKED`, or confirmed `NOT_TESTED`. `REVIEW`
+is a verdict for a precise semantic ambiguity, not a substitute for an
+unexecuted case.
 
 For non-deterministic requirements, use bounded attempts derived from the plan.
-Observed behaviour can pass. Unobserved behaviour after attempts is `REVIEW`
-unless the plan defines an expected absence; an external prevented attempt is
-`BLOCKED`.
+Observed behaviour can pass. Judge a completed bounded attempt using the plan's
+declared rule. If the plan does not define what an unobserved result means, use
+`REVIEW` with the exact semantic question; if execution or evidence was
+prevented, use `BLOCKED`.
 
-## Maintain two inventories
+## Maintain three linked inventories
 
 Keep:
 
 1. a source-bound requirement inventory for exact comparisons;
 2. an event inventory for execution, continuous feedback, and the final ordered
-   summary.
+   summary;
+3. a session-ledger case inventory for every placement, value, context, and
+   retry.
 
 Do not let runtime Preview order replace tracking-plan order. Record both.
 
