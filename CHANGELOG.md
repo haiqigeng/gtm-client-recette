@@ -1,5 +1,40 @@
 # Changelog
 
+## Unreleased
+
+## [v1.2.0](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v1.2.0) (2026-07-29)
+
+- Promote the session ledger to the strict completion contract: register every
+  interaction case and material variant, preserve contiguous retry attempts,
+  and reject pending cases, open actions, or normalized boundaries that differ
+  from the retained action.
+- Require a compact chronological row for every observed business push and an
+  explicit per-action push count; classify expected, companion, duplicate,
+  premature, delayed, wrong-order, wrong-context, and unplanned-relevant
+  occurrences, with anomalous rows reconciled to `unexpected`.
+- Derive applicable layers once and require a direct evidence-backed layer
+  result on every completed case. Browser-sending analytics/media tags require
+  exact configuration, firing/count, runtime value/type, request identity,
+  destination/event identity, and decoded parameters; local-only tags do not
+  invent network evidence.
+- Require structured evidence capture modes and action/event/container/request/
+  tag linkage, rejecting reconstructed or inferred evidence as direct proof.
+- Reserve final `REVIEW` for a precise semantic ambiguity, keep `PENDING`
+  internal, and add consistent per-event feedback with case counts, layer
+  results, reasons, and exact non-PASS retest interactions.
+- Allow ephemeral same-run synthetic credentials without retention, support
+  reusable run-wide safe authorizations, preserve protected checkpoints, and
+  permit only explicitly approved/reversed production CMP test exceptions
+  without ever passing the native CMP.
+- Add `Interaction Cases` and `Observed Push Stream` worksheets and make the
+  session ledger mandatory for strict final validation and workbook
+  certification.
+- Decompose the new session and feedback validators by metadata, case, action,
+  layer, push-stream, and final-reconciliation responsibility; make feedback
+  use only the retained final retry layers; standardize formatting; require
+  every new execution module in release checks; and extend CI through Python
+  3.13 with a format gate.
+
 ## [v1.1.1](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v1.1.1) (2026-07-26)
 
 - Require independent, non-tracking proof that a real website interaction

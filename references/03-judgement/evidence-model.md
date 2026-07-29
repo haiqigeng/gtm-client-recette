@@ -55,8 +55,8 @@ and interaction windows. For each explicit business push, record:
 - event index, event name, timestamp, and exact API Call source;
 - action/case identity and current URL, page, user state, and relevant branch;
 - mapped plan event and evaluated occurrence/trigger condition;
-- classification as expected, companion, duplicate, mistimed/wrong-order,
-  wrong-context, or unplanned relevant;
+- classification as expected, companion, duplicate, premature, delayed,
+  wrong-order, wrong-context, or unplanned relevant;
 - evidence IDs for any full comparison or unexpected-item row.
 
 Inspect state-only pushes when they set or clear an acceptance-relevant value.
@@ -89,11 +89,25 @@ Do not convert that observation into an unproved root cause or fix.
 ## Evidence IDs
 
 Assign stable unique IDs. Every normalized result references catalogue entries.
-Every catalogue entry requires its evidence kind, actual source, path or URL,
-timezone-qualified capture time, and concise description. An ID alone is not
-provenance. Nested references are kind-bound: an API Call cannot point to a
-screenshot row, a trigger cannot point to a sequence row, and a privacy scan
-cannot point to generic navigation evidence.
+Every catalogue entry requires its evidence kind, actual source, `capture_mode`,
+path or URL, timezone-qualified capture time, and concise description. An ID
+alone is not provenance.
+
+Use `capture_mode: direct` for browser/Preview capture,
+`deterministic` for validator output, and `analyst_supplied` for an analyst
+decision. A direct row also carries the applicable structured linkage:
+
+- `action_id` for action-bound capture;
+- `event_index` for event-bound capture;
+- `container_id` for GTM evidence;
+- `request_id` for browser-network evidence;
+- `tag_name` and `configuration_field` for tag configuration/runtime evidence.
+
+The values being accepted remain in the normalized requirement and direct
+artifact; do not reconstruct them from a tag name, evidence description, or
+generic request timestamp. Nested references are kind-bound: an API Call
+cannot point to a screenshot row, a trigger cannot point to a sequence row,
+and a privacy scan cannot point to generic navigation evidence.
 
 Use the canonical `source` value accepted for each primary kind:
 
@@ -125,8 +139,9 @@ Capture connection, action boundary, each occurred event, every failure or
 review, every wanted non-fire, every protected blocker, every relevant consent
 transition, and every approved override.
 
-Never place authentication credentials, Preview tokens, real personal data, or
-generated passwords in evidence. Catalogue
+Never place authentication credentials, synthetic credentials, Preview
+tokens, real personal data, or generated passwords in the session ledger or
+evidence. Catalogue
 source/source-detail/path/description metadata is also privacy-scanned; redact
 it rather than copying an identifier into prose.
 

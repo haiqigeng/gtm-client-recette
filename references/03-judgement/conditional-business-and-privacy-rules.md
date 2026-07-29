@@ -32,8 +32,10 @@ condition was acquired and that the branch occurrence rule passed.
 
 Use `non_deterministic` only when the plan itself accepts non-determinism.
 Document every safe reproduction attempt. Observation can pass; absence cannot
-silently pass. Use `REVIEW` when bounded attempts do not establish the outcome,
-or `BLOCKED` when an evidenced external condition prevents the branch.
+silently pass. Apply the plan's declared bounded-attempt result. Use `REVIEW`
+only when the plan does not define how that result should be judged and state
+the exact semantic question; use `BLOCKED` when execution or authoritative
+evidence is unavailable.
 
 ## Declarative business rules
 

@@ -27,7 +27,8 @@
       "tag_configuration",
       "tag_firing",
       "tag_parameter",
-      "consent_when_applicable"
+      "consent_when_applicable",
+      "destination_request_when_applicable"
     ],
     "requirement_inventory": [
       "REQ-001"
@@ -84,9 +85,20 @@
         "expected_occurrence": "once",
         "variable_name": "DLV - ecommerce.value",
         "tag_name": "GA4 - Event - add_to_cart",
+        "tag_delivery": "browser_request",
         "expected_firing": "fired_once",
         "tag_configuration_field": "eventParameters.value",
         "expected_tag_configuration": "{{DLV - ecommerce.value}}",
+        "vendor_family": "ga4",
+        "destination_id": "G-TEST123",
+        "destination_event_name": "add_to_cart",
+        "destination_id_parameter_path": "query.tid",
+        "destination_event_parameter_path": "query.en",
+        "destination_parameter_path": "query[\"ep.value\"]",
+        "expected_destination_value": 29.9,
+        "expected_destination_type": "number",
+        "expected_endpoint_pattern": "^https://www\\.google-analytics\\.com/g/collect",
+        "expected_request_behavior": "sent_once",
         "expected_consent_state": null
       },
       "event_observed": true,
@@ -155,6 +167,11 @@
       "tag": {
         "applicable": true,
         "relevance": "expected_fire",
+        "container_id": "GTM-TEST",
+        "vendor_family": "ga4",
+        "destination_id": "G-TEST123",
+        "event_name": "add_to_cart",
+        "template_type": "GA4 Event",
         "name": "GA4 - Event - add_to_cart",
         "expected_firing": "fired_once",
         "actual_firing": "fired_once",
@@ -166,6 +183,24 @@
         "runtime_type": "number",
         "configuration_evidence_id": "EVD-TAG-CONFIG-011",
         "runtime_evidence_id": "EVD-TAG-RUNTIME-011"
+      },
+      "destination_request": {
+        "applicable": true,
+        "vendor_family": "ga4",
+        "destination_id": "G-TEST123",
+        "event_name": "add_to_cart",
+        "request_behavior": "sent",
+        "request_count": 1,
+        "capture_source": "browser_network",
+        "request_id": "NET-011",
+        "request_url": "https://www.google-analytics.com/g/collect?tid=G-TEST123&en=add_to_cart&ep.value=29.9",
+        "request_body": {},
+        "request_headers": {},
+        "parameter_path": "query[\"ep.value\"]",
+        "field_state": "present",
+        "field_value": 29.9,
+        "field_type": "number",
+        "evidence_id": "EVD-NET-011"
       },
       "consent": {
         "applicable": false,
@@ -179,6 +214,8 @@
         "tag_configuration": "PASS",
         "tag_firing": "PASS",
         "tag_parameter": "PASS",
+        "destination_request": "PASS",
+        "destination_parameter": "PASS",
         "consent": null,
         "overall": "PASS",
         "failure_layer": null,
@@ -191,7 +228,8 @@
         "EVD-DL-011",
         "EVD-VAR-011",
         "EVD-TAG-CONFIG-011",
-        "EVD-TAG-RUNTIME-011"
+        "EVD-TAG-RUNTIME-011",
+        "EVD-NET-011"
       ],
       "notes": "Synthetic validation fixture"
     }
@@ -203,6 +241,8 @@
       "evidence_id": "EVD-ACTION-001",
       "kind": "action_boundary",
       "source": "Playwright",
+      "capture_mode": "direct",
+      "action_id": "ACT-001",
       "path_or_url": "evidence/action-001.json",
       "captured_at": "2026-07-25T10:01:03+00:00",
       "description": "Ready action boundary and settled Preview stream."
@@ -211,6 +251,10 @@
       "evidence_id": "EVD-RAW-011",
       "kind": "api_call",
       "source": "Tag Assistant",
+      "capture_mode": "direct",
+      "action_id": "ACT-001",
+      "event_index": 11,
+      "container_id": "GTM-TEST",
       "path_or_url": "evidence/raw-011.json",
       "captured_at": "2026-07-25T10:01:03+00:00",
       "description": "Exact Tag Assistant API Call object."
@@ -219,6 +263,10 @@
       "evidence_id": "EVD-DL-011",
       "kind": "resolved_data_layer",
       "source": "Tag Assistant",
+      "capture_mode": "direct",
+      "action_id": "ACT-001",
+      "event_index": 11,
+      "container_id": "GTM-TEST",
       "path_or_url": "evidence/data-layer-011.json",
       "captured_at": "2026-07-25T10:01:03+00:00",
       "description": "Resolved Data Layer state."
@@ -227,6 +275,10 @@
       "evidence_id": "EVD-VAR-011",
       "kind": "gtm_variable",
       "source": "Tag Assistant",
+      "capture_mode": "direct",
+      "action_id": "ACT-001",
+      "event_index": 11,
+      "container_id": "GTM-TEST",
       "path_or_url": "evidence/variable-011.json",
       "captured_at": "2026-07-25T10:01:03+00:00",
       "description": "Resolved GTM variable value."
@@ -235,6 +287,12 @@
       "evidence_id": "EVD-TAG-CONFIG-011",
       "kind": "tag_configuration",
       "source": "Tag Assistant",
+      "capture_mode": "direct",
+      "action_id": "ACT-001",
+      "event_index": 11,
+      "container_id": "GTM-TEST",
+      "tag_name": "GA4 - Event - add_to_cart",
+      "configuration_field": "eventParameters.value",
       "path_or_url": "evidence/tag-config-011.json",
       "captured_at": "2026-07-25T10:01:03+00:00",
       "description": "Concerned tag configuration."
@@ -243,9 +301,27 @@
       "evidence_id": "EVD-TAG-RUNTIME-011",
       "kind": "tag_runtime",
       "source": "Tag Assistant",
+      "capture_mode": "direct",
+      "action_id": "ACT-001",
+      "event_index": 11,
+      "container_id": "GTM-TEST",
+      "tag_name": "GA4 - Event - add_to_cart",
+      "configuration_field": "eventParameters.value",
       "path_or_url": "evidence/tag-runtime-011.json",
       "captured_at": "2026-07-25T10:01:03+00:00",
       "description": "Concerned tag firing and runtime parameter."
+    },
+    {
+      "evidence_id": "EVD-NET-011",
+      "kind": "browser_network_request",
+      "source": "Browser Network",
+      "capture_mode": "direct",
+      "action_id": "ACT-001",
+      "request_id": "NET-011",
+      "container_id": "GTM-TEST",
+      "path_or_url": "evidence/network-011.json",
+      "captured_at": "2026-07-25T10:01:03+00:00",
+      "description": "Exact decoded GA4 browser request."
     }
   ]
 }

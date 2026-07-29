@@ -246,9 +246,7 @@ def main() -> int:
         raise SystemExit("--max-rows must be zero or positive")
     suffix = args.input.suffix.lower()
     if suffix == ".xlsx":
-        assets_dir = args.assets_dir or args.output.with_name(
-            f"{args.output.stem}-assets"
-        )
+        assets_dir = args.assets_dir or args.output.with_name(f"{args.output.stem}-assets")
         result = inspect_xlsx(args.input, args.max_rows, assets_dir)
     elif suffix in {".csv", ".tsv"}:
         result = inspect_delimited(args.input, args.max_rows)

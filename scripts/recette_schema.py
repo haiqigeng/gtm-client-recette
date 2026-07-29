@@ -24,6 +24,21 @@ from client_side_rules import (
     scan_requirement_sensitive_data,
     scan_sensitive_value,
 )
+from evidence_contract import (
+    ACTION_BOUND_EVIDENCE_KINDS,
+    ANALYST_CAPTURE_KINDS,
+    CAPTURE_MODES,
+    CONTAINER_BOUND_EVIDENCE_KINDS,
+    DETERMINISTIC_CAPTURE_KINDS,
+    DIRECT_CAPTURE_KINDS,
+    EVENT_INDEX_EVIDENCE_KINDS,
+)
+from layer_contract import (
+    CANONICAL_LAYERS,
+    TAG_DELIVERY_TYPES,
+    applicable_layers,
+    is_browser_sending_tag,
+)
 
 SCHEMA_VERSION = 2
 VALID_STATUSES = {"PASS", "FAIL", "BLOCKED", "REVIEW", "NOT_TESTED"}
@@ -243,18 +258,7 @@ BASE_LAYERS = {
     "tag_parameter",
     "consent_when_applicable",
 }
-CLIENT_SIDE_OPTIONAL_LAYERS = {
-    "source_signal_when_no_data_layer_push",
-    "destination_request_when_applicable",
-    "trigger_logic_when_applicable",
-    "tag_sequence_when_applicable",
-    "business_rules_when_declared",
-    "sensitive_data_scan",
-    "client_checks_when_applicable",
-    "regression_when_baseline_provided",
-    "container_context_when_applicable",
-    "conditional_scenarios_when_applicable",
-}
+CLIENT_SIDE_OPTIONAL_LAYERS = set(CANONICAL_LAYERS) - BASE_LAYERS
 PLACEHOLDER_VALUES = {"...", "…", "<omitted>", "[omitted]", "<placeholder>", "[placeholder]"}
 
 
@@ -398,8 +402,7 @@ def _require_evidence_kind(
     row = evidence_by_id.get(str(evidence_id).strip())
     if row is not None and row.get("kind") not in allowed_kinds:
         errors.append(
-            f"{evidence_label}: evidence kind must be "
-            + " or ".join(sorted(allowed_kinds))
+            f"{evidence_label}: evidence kind must be " + " or ".join(sorted(allowed_kinds))
         )
 
 
@@ -435,9 +438,7 @@ def _validate_requirement_evidence_kinds(
     occurrence = requirement.get("occurrence_evidence")
     if isinstance(occurrence, dict):
         mechanism = str(
-            requirement.get("expectation", {}).get(
-                "source_mechanism", "data_layer_push"
-            )
+            requirement.get("expectation", {}).get("source_mechanism", "data_layer_push")
         )
         if requirement.get("event_observed") is False:
             allowed_occurrence = {"action_boundary"}
@@ -481,6 +482,9 @@ def _validate_requirement_evidence_kinds(
         )
     tag = requirement.get("tag")
     if isinstance(tag, dict):
+        configuration_evidence = evidence_by_id.get(
+            str(tag.get("configuration_evidence_id", "")).strip()
+        )
         _require_evidence_kind(
             evidence_by_id,
             tag.get("configuration_evidence_id"),
@@ -495,6 +499,19 @@ def _validate_requirement_evidence_kinds(
             f"{label}.tag.runtime",
             errors,
         )
+        if configuration_evidence is not None:
+            if configuration_evidence.get("tag_name") != tag.get("name"):
+                errors.append(f"{label}.tag.configuration: evidence tag_name differs from tag")
+            if configuration_evidence.get("configuration_field") != tag.get("configuration_field"):
+                errors.append(
+                    f"{label}.tag.configuration: evidence configuration_field differs from tag"
+                )
+        runtime_evidence = evidence_by_id.get(str(tag.get("runtime_evidence_id", "")).strip())
+        if runtime_evidence is not None:
+            if runtime_evidence.get("tag_name") != tag.get("name"):
+                errors.append(f"{label}.tag.runtime: evidence tag_name differs from tag")
+            if runtime_evidence.get("configuration_field") != tag.get("configuration_field"):
+                errors.append(f"{label}.tag.runtime: evidence configuration_field differs from tag")
     destination = requirement.get("destination_request")
     if isinstance(destination, dict):
         _require_evidence_kind(
@@ -504,6 +521,11 @@ def _validate_requirement_evidence_kinds(
             f"{label}.destination_request",
             errors,
         )
+        request_evidence = evidence_by_id.get(str(destination.get("evidence_id", "")).strip())
+        if request_evidence is not None and (
+            request_evidence.get("request_id") != destination.get("request_id")
+        ):
+            errors.append(f"{label}.destination_request: evidence request_id differs from request")
         _require_evidence_kind(
             evidence_by_id,
             destination.get("vendor_helper_evidence_id"),
@@ -527,9 +549,14 @@ def _validate_requirement_evidence_kinds(
             f"{label}.consent.approval",
             errors,
         )
-    for index, result in enumerate(
-        requirement.get("business_rule_results", []), start=1
-    ):
+        _require_evidence_kind(
+            evidence_by_id,
+            consent.get("production_approval_evidence_id"),
+            {"analyst_approval"},
+            f"{label}.consent.production_approval",
+            errors,
+        )
+    for index, result in enumerate(requirement.get("business_rule_results", []), start=1):
         if isinstance(result, dict):
             _require_evidence_kind(
                 evidence_by_id,
@@ -643,9 +670,11 @@ def _validate_occurrence(
             passed = actual_count == 0
     elif rule == "non_deterministic":
         scenario = requirement.get("scenario")
-        if not isinstance(scenario, dict) or not isinstance(
-            scenario.get("attempts"), list
-        ) or not scenario.get("attempts"):
+        if (
+            not isinstance(scenario, dict)
+            or not isinstance(scenario.get("attempts"), list)
+            or not scenario.get("attempts")
+        ):
             errors.append(
                 f"{label}: non_deterministic occurrence requires documented scenario attempts"
             )
@@ -723,7 +752,11 @@ def _matches_expectation(expectation: dict[str, Any], observation: dict[str, Any
     expected_type = str(expectation.get("expected_type", "")).strip()
 
     if rule == "equals":
-        return state == field_state_for(expected) and actual == expected and actual_type == expected_type
+        return (
+            state == field_state_for(expected)
+            and actual == expected
+            and actual_type == expected_type
+        )
     if rule == "absent":
         return state == "absent"
     if rule == "present":
@@ -814,30 +847,19 @@ def _validate_action_boundary(
     retry_of_action_id = boundary.get("retry_of_action_id")
     if retry_of_action_id not in (None, ""):
         if not _is_nonempty_string(retry_of_action_id):
-            errors.append(
-                f"{label}: retry_of_action_id must be a non-empty string when supplied"
-            )
+            errors.append(f"{label}: retry_of_action_id must be a non-empty string when supplied")
         if not _is_nonempty_string(action_id):
             errors.append(f"{label}: retry_of_action_id requires action_id")
         if retry_of_action_id == action_id:
             errors.append(f"{label}: an action cannot retry itself")
     interaction_outcome = boundary.get("interaction_outcome")
-    if (
-        interaction_outcome is not None
-        and interaction_outcome not in INTERACTION_OUTCOMES
-    ):
+    if interaction_outcome is not None and interaction_outcome not in INTERACTION_OUTCOMES:
         errors.append(f"{label}: invalid interaction_outcome")
     completion_signal = boundary.get("completion_signal")
     if completion_signal is not None and not _is_nonempty_string(completion_signal):
-        errors.append(
-            f"{label}: completion_signal must be a non-empty string when supplied"
-        )
-    if interaction_outcome == "completed" and not _is_nonempty_string(
-        completion_signal
-    ):
-        errors.append(
-            f"{label}: completed interaction requires an independent completion_signal"
-        )
+        errors.append(f"{label}: completion_signal must be a non-empty string when supplied")
+    if interaction_outcome == "completed" and not _is_nonempty_string(completion_signal):
+        errors.append(f"{label}: completed interaction requires an independent completion_signal")
     settlement_reason = boundary.get("settlement_reason")
     if settlement_reason is not None and settlement_reason not in SETTLEMENT_REASONS:
         errors.append(f"{label}: invalid settlement_reason")
@@ -874,9 +896,7 @@ def _validate_action_boundary(
             errors.append(f"{label}: action_timestamp must be ISO 8601 with timezone")
         else:
             if parsed_action_time.tzinfo is None:
-                errors.append(
-                    f"{label}: action_timestamp must be ISO 8601 with timezone"
-                )
+                errors.append(f"{label}: action_timestamp must be ISO 8601 with timezone")
     last_event = boundary.get("last_event_before")
     first_event = boundary.get("first_event_after")
     settled_event = boundary.get("settled_final_event")
@@ -885,18 +905,24 @@ def _validate_action_boundary(
     if not isinstance(settled_event, int) or isinstance(settled_event, bool) or settled_event < 0:
         errors.append(f"{label}: settled_final_event must be a non-negative integer")
     if first_event is not None and (
-        not isinstance(first_event, int)
-        or isinstance(first_event, bool)
-        or first_event < 0
+        not isinstance(first_event, int) or isinstance(first_event, bool) or first_event < 0
     ):
         errors.append(f"{label}: first_event_after must be a non-negative integer or null")
     if observed and not isinstance(first_event, int):
         errors.append(f"{label}: observed event requires first_event_after")
     if isinstance(last_event, int) and isinstance(first_event, int) and first_event <= last_event:
         errors.append(f"{label}: first_event_after must follow last_event_before")
-    if isinstance(last_event, int) and isinstance(settled_event, int) and settled_event < last_event:
+    if (
+        isinstance(last_event, int)
+        and isinstance(settled_event, int)
+        and settled_event < last_event
+    ):
         errors.append(f"{label}: settled_final_event cannot precede last_event_before")
-    if isinstance(first_event, int) and isinstance(settled_event, int) and settled_event < first_event:
+    if (
+        isinstance(first_event, int)
+        and isinstance(settled_event, int)
+        and settled_event < first_event
+    ):
         errors.append(f"{label}: settled_final_event cannot precede first_event_after")
 
 
@@ -934,10 +960,7 @@ def _validate_tag(
     expected_firing = str(tag.get("expected_firing", "")).strip()
     actual_firing = str(tag.get("actual_firing", "")).strip()
     firing_status = status_of(verdict.get("tag_firing"))
-    if (
-        expectation.get("expected_firing") not in (None, "")
-        and firing_status not in VALID_STATUSES
-    ):
+    if expectation.get("expected_firing") not in (None, "") and firing_status not in VALID_STATUSES:
         errors.append(f"{label}: expected tag firing requires tag_firing verdict")
     firing_pass = firing_status == "PASS"
     if firing_pass:
@@ -971,9 +994,7 @@ def _validate_tag(
         expectation.get("tag_configuration_field") not in (None, "")
         and parameter_status not in VALID_STATUSES
     ):
-        errors.append(
-            f"{label}: expected runtime tag parameter requires tag_parameter verdict"
-        )
+        errors.append(f"{label}: expected runtime tag parameter requires tag_parameter verdict")
     if parameter_status in {"PASS", "FAIL", "REVIEW"}:
         for field in ("runtime_state", "runtime_type", "runtime_evidence_id"):
             if field not in tag or tag.get(field) in ("", None):
@@ -989,9 +1010,9 @@ def _validate_tag(
                 errors.append(f"{label}: tag runtime evidence requires runtime_value")
             elif js_value_type(tag.get("runtime_value")) != runtime_type:
                 errors.append(f"{label}: tag runtime_type does not match runtime_value")
-    if (
-        status_of(verdict.get("tag_firing")) == "PASS"
-        and tag.get("execution_error") not in (None, "")
+    if status_of(verdict.get("tag_firing")) == "PASS" and tag.get("execution_error") not in (
+        None,
+        "",
     ):
         errors.append(f"{label}: PASS tag firing contradicts the recorded execution_error")
     vendor_family = expectation.get("vendor_family")
@@ -1004,28 +1025,18 @@ def _validate_tag(
     if destination_id not in (None, "") and tag.get("destination_id") != destination_id:
         errors.append(f"{label}: concerned tag destination_id differs from expectation")
     destination_event_name = expectation.get("destination_event_name")
-    if (
-        destination_event_name not in (None, "")
-        and tag.get("event_name") != destination_event_name
-    ):
+    if destination_event_name not in (None, "") and tag.get("event_name") != destination_event_name:
         errors.append(f"{label}: concerned tag event_name differs from expectation")
     expected_configuration = expectation.get("expected_tag_configuration")
     configuration_status = status_of(verdict.get("tag_configuration"))
-    if (
-        expected_configuration not in (None, "")
-        and configuration_status not in VALID_STATUSES
-    ):
-        errors.append(
-            f"{label}: expected tag configuration requires a configuration verdict"
-        )
+    if tag_expected and configuration_status not in VALID_STATUSES:
+        errors.append(f"{label}: concerned tag requires a configuration verdict")
     if (
         expected_configuration not in (None, "")
         and configuration_status == "PASS"
         and tag.get("configured_value") != expected_configuration
     ):
-        errors.append(
-            f"{label}: PASS tag configuration differs from the tracking-plan expectation"
-        )
+        errors.append(f"{label}: PASS tag configuration differs from the tracking-plan expectation")
 
 
 def _validate_consent_override(
@@ -1038,76 +1049,103 @@ def _validate_consent_override(
     consent = requirement.get("consent")
     if not isinstance(consent, dict) or consent.get("source") != "session_override":
         return
-    if run.get("environment_class") == "production":
-        errors.append(f"{label}: session consent override is forbidden in production")
     if consent.get("override_approved") is not True:
         errors.append(f"{label}: session consent override lacks explicit analyst approval")
     for field in (
         "approval_evidence_id",
         "override_method",
+        "override_scope",
         "before_state",
         "state_at_event",
+        "native_cmp_status",
+        "native_cmp_acceptance_in_scope",
         "blocker_id",
     ):
         if field not in consent or consent.get(field) in ("", None):
             errors.append(f"{label}: session consent override missing '{field}'")
+    if consent.get("override_scope") != "session_only":
+        errors.append(f"{label}: consent override must be session_only")
+    if consent.get("native_cmp_status") not in {"FAIL", "BLOCKED", "REVIEW"}:
+        errors.append(f"{label}: simulated consent can never mark the native CMP as PASS")
+    if (
+        consent.get("native_cmp_acceptance_in_scope") is True
+        and status_of(requirement.get("verdict", {}).get("consent")) == "PASS"
+    ):
+        errors.append(f"{label}: native CMP acceptance cannot PASS from simulated consent")
     blocker = blockers.get(str(consent.get("blocker_id", "")))
-    if not blocker or blocker.get("type") != "CMP_TEST_ENVIRONMENT":
-        errors.append(f"{label}: session consent override must reference a CMP test-environment blocker")
+    if run.get("environment_class") == "production":
+        for field in (
+            "production_exception_approved",
+            "production_approval_evidence_id",
+            "restoration_confirmed",
+        ):
+            if consent.get(field) is not True and field != "production_approval_evidence_id":
+                errors.append(f"{label}: production consent override requires {field}=true")
+            if field == "production_approval_evidence_id" and not _is_nonempty_string(
+                consent.get(field)
+            ):
+                errors.append(
+                    f"{label}: production consent override requires production_approval_evidence_id"
+                )
+        if not blocker or blocker.get("type") != "CMP_PRODUCTION_ENVIRONMENT":
+            errors.append(
+                f"{label}: production consent override must reference a "
+                "CMP_PRODUCTION_ENVIRONMENT blocker"
+            )
+    elif not blocker or blocker.get("type") != "CMP_TEST_ENVIRONMENT":
+        errors.append(
+            f"{label}: session consent override must reference a CMP_TEST_ENVIRONMENT blocker"
+        )
 
 
 def _validate_run_client_context(run: dict[str, Any], errors: list[str]) -> None:
     containers = run.get("containers")
     if not isinstance(containers, list) or not containers:
-        errors.append(
-            "run: containers must be a non-empty client-side web-container array"
-        )
+        errors.append("run: containers must be a non-empty client-side web-container array")
     else:
-            ids: list[str] = []
-            primary_count = 0
-            for index, container in enumerate(containers, start=1):
-                label = f"run.containers row {index}"
-                if not isinstance(container, dict):
-                    errors.append(f"{label}: must be an object")
-                    continue
-                container_id = str(container.get("container_id", "")).strip()
-                if not container_id:
-                    errors.append(f"{label}: missing container_id")
-                ids.append(container_id)
-                if not _is_nonempty_string(container.get("workspace")):
-                    errors.append(f"{label}: missing workspace")
-                if container.get("role") not in CONTAINER_ROLES:
-                    errors.append(f"{label}: invalid role")
-                if container.get("role") == "primary":
-                    primary_count += 1
-                container_type = container.get("container_type")
-                if container_type not in CONTAINER_TYPES:
-                    errors.append(
-                        f"{label}: only client-side web containers are supported; "
-                        "server-side GTM is out of scope"
-                    )
-            if len(set(ids)) != len(ids):
-                errors.append("run: containers contains duplicate container_id values")
-            if primary_count != 1:
-                errors.append("run: containers must identify exactly one primary container")
-            if run.get("container_id") not in ids:
-                errors.append("run: primary container_id is absent from containers")
-            else:
-                primary = next(
-                    (
-                        item
-                        for item in containers
-                        if isinstance(item, dict)
-                        and item.get("container_id") == run.get("container_id")
-                    ),
-                    {},
+        ids: list[str] = []
+        primary_count = 0
+        for index, container in enumerate(containers, start=1):
+            label = f"run.containers row {index}"
+            if not isinstance(container, dict):
+                errors.append(f"{label}: must be an object")
+                continue
+            container_id = str(container.get("container_id", "")).strip()
+            if not container_id:
+                errors.append(f"{label}: missing container_id")
+            ids.append(container_id)
+            if not _is_nonempty_string(container.get("workspace")):
+                errors.append(f"{label}: missing workspace")
+            if container.get("role") not in CONTAINER_ROLES:
+                errors.append(f"{label}: invalid role")
+            if container.get("role") == "primary":
+                primary_count += 1
+            container_type = container.get("container_type")
+            if container_type not in CONTAINER_TYPES:
+                errors.append(
+                    f"{label}: only client-side web containers are supported; "
+                    "server-side GTM is out of scope"
                 )
-                if primary.get("role") != "primary":
-                    errors.append("run: container_id must identify the primary container")
-                if primary.get("workspace") != run.get("workspace"):
-                    errors.append(
-                        "run: primary container workspace differs from run.workspace"
-                    )
+        if len(set(ids)) != len(ids):
+            errors.append("run: containers contains duplicate container_id values")
+        if primary_count != 1:
+            errors.append("run: containers must identify exactly one primary container")
+        if run.get("container_id") not in ids:
+            errors.append("run: primary container_id is absent from containers")
+        else:
+            primary = next(
+                (
+                    item
+                    for item in containers
+                    if isinstance(item, dict)
+                    and item.get("container_id") == run.get("container_id")
+                ),
+                {},
+            )
+            if primary.get("role") != "primary":
+                errors.append("run: container_id must identify the primary container")
+            if primary.get("workspace") != run.get("workspace"):
+                errors.append("run: primary container workspace differs from run.workspace")
 
     contexts = run.get("browser_contexts")
     if contexts is not None:
@@ -1260,17 +1298,7 @@ def _validate_destination(
     expectation = requirement.get("expectation", {})
     verdict = requirement.get("verdict", {})
     expected_behavior = expectation.get("expected_request_behavior")
-    destination_expected = any(
-        expectation.get(field) not in (None, "")
-        for field in (
-            "vendor_family",
-            "destination_id",
-            "destination_event_name",
-            "destination_parameter_path",
-            "expected_endpoint_pattern",
-            "expected_request_behavior",
-        )
-    )
+    destination_expected = is_browser_sending_tag(expectation)
     destination = requirement.get("destination_request")
     if not destination_expected and destination is None:
         return
@@ -1289,6 +1317,7 @@ def _validate_destination(
         "request_count",
         "capture_source",
         "evidence_id",
+        "request_id",
     ):
         if field not in destination or destination.get(field) in ("", None):
             errors.append(f"{label}: destination_request missing '{field}'")
@@ -1310,9 +1339,10 @@ def _validate_destination(
         errors.append(f"{label}: invalid destination capture_source")
     if destination.get("request_behavior") not in REQUEST_BEHAVIOURS:
         errors.append(f"{label}: invalid destination request_behavior")
-    if not isinstance(destination.get("request_count"), int) or destination.get(
-        "request_count"
-    ) < 0:
+    if (
+        not isinstance(destination.get("request_count"), int)
+        or destination.get("request_count") < 0
+    ):
         errors.append(f"{label}: destination request_count must be a non-negative integer")
 
     request_status = status_of(verdict.get("destination_request"))
@@ -1346,21 +1376,13 @@ def _validate_destination(
                 and isinstance(count, int)
                 and count >= 1
             ),
-            "sent_once": (
-                actual_behavior in {"sent", "full", "cookieless"} and count == 1
-            ),
+            "sent_once": (actual_behavior in {"sent", "full", "cookieless"} and count == 1),
             "absent": actual_behavior == "not_observed" and count == 0,
             "blocked": actual_behavior == "blocked" and count == 0,
             "cookieless": (
-                actual_behavior == "cookieless"
-                and isinstance(count, int)
-                and count >= 1
+                actual_behavior == "cookieless" and isinstance(count, int) and count >= 1
             ),
-            "full": (
-                actual_behavior == "full"
-                and isinstance(count, int)
-                and count >= 1
-            ),
+            "full": (actual_behavior == "full" and isinstance(count, int) and count >= 1),
         }.get(str(expected_behavior), False)
         if not behavior_matches:
             errors.append(f"{label}: PASS destination request contradicts expected behavior")
@@ -1384,23 +1406,21 @@ def _validate_destination(
         expected_value = expectation.get(destination_field)
         if expectation_field == "destination_event_parameter_path":
             expected_value = expectation.get("destination_event_name")
-        if expected_value in (None, "") or expected_behavior in {"absent", "blocked"}:
+        if (
+            expected_value in (None, "")
+            or expected_behavior in {"absent", "blocked"}
+            or request_status == "BLOCKED"
+        ):
             continue
         wire_path = expectation.get(expectation_field)
         if not _is_nonempty_string(wire_path):
-            errors.append(
-                f"{label}: {field_label} expectation requires {expectation_field}"
-            )
+            errors.append(f"{label}: {field_label} expectation requires {expectation_field}")
             continue
         wire_value = _wire_value(destination, wire_path)
         if wire_value is MISSING:
-            errors.append(
-                f"{label}: {field_label} was not found at declared browser request path"
-            )
+            errors.append(f"{label}: {field_label} was not found at declared browser request path")
         elif not _strict_equal(wire_value, claimed_value):
-            errors.append(
-                f"{label}: decoded {field_label} differs from browser request evidence"
-            )
+            errors.append(f"{label}: decoded {field_label} differs from browser request evidence")
 
     parameter_path = expectation.get("destination_parameter_path")
     parameter_status = status_of(verdict.get("destination_parameter"))
@@ -1411,6 +1431,8 @@ def _validate_destination(
             )
         if destination.get("parameter_path") != parameter_path:
             errors.append(f"{label}: destination parameter_path differs from expectation")
+        if parameter_status == "BLOCKED":
+            return
         _validate_observation(destination, f"{label}.destination_request", errors)
         wire_value = _wire_value(destination, parameter_path)
         if wire_value is MISSING:
@@ -1464,22 +1486,12 @@ def _trigger_condition_matches(condition: dict[str, Any]) -> bool | None:
             return expected in actual
         return False
     if operator == "does_not_contain":
-        contained = _trigger_condition_matches(
-            {**condition, "operator": "contains"}
-        )
+        contained = _trigger_condition_matches({**condition, "operator": "contains"})
         return None if contained is None else not contained
     if operator == "starts_with":
-        return (
-            isinstance(actual, str)
-            and isinstance(expected, str)
-            and actual.startswith(expected)
-        )
+        return isinstance(actual, str) and isinstance(expected, str) and actual.startswith(expected)
     if operator == "ends_with":
-        return (
-            isinstance(actual, str)
-            and isinstance(expected, str)
-            and actual.endswith(expected)
-        )
+        return isinstance(actual, str) and isinstance(expected, str) and actual.endswith(expected)
     if operator == "regex":
         if not isinstance(actual, str) or not isinstance(expected, str):
             return False
@@ -1539,9 +1551,7 @@ def _validate_trigger_and_sequence(
             contract_by_id: dict[str, dict[str, Any]] = {}
             for index, condition in enumerate(contract_conditions, start=1):
                 if not isinstance(condition, dict):
-                    errors.append(
-                        f"{label}: trigger contract condition {index} must be an object"
-                    )
+                    errors.append(f"{label}: trigger contract condition {index} must be an object")
                     continue
                 condition_id = str(condition.get("condition_id", "")).strip()
                 if not condition_id:
@@ -1579,9 +1589,7 @@ def _validate_trigger_and_sequence(
                     "matched",
                 ):
                     if field not in condition:
-                        errors.append(
-                            f"{label}: trigger condition {index} missing '{field}'"
-                        )
+                        errors.append(f"{label}: trigger condition {index} missing '{field}'")
                 condition_id = str(condition.get("condition_id", "")).strip()
                 if condition_id in actual_by_id:
                     errors.append(
@@ -1615,9 +1623,7 @@ def _validate_trigger_and_sequence(
             exception_matches: list[bool] = []
             for index, exception in enumerate(exceptions, start=1):
                 if not isinstance(exception, dict):
-                    errors.append(
-                        f"{label}: blocking exception {index} must be an object"
-                    )
+                    errors.append(f"{label}: blocking exception {index} must be an object")
                     continue
                 name = str(exception.get("name", "")).strip()
                 matched = exception.get("matched")
@@ -1643,8 +1649,7 @@ def _validate_trigger_and_sequence(
                     computed_result = "matched" if any(condition_matches) else "not_matched"
                 elif trigger.get("mode") in {"ALL", "TRIGGER_GROUP"}:
                     computed_result = (
-                        "matched" if condition_matches and all(condition_matches)
-                        else "not_matched"
+                        "matched" if condition_matches and all(condition_matches) else "not_matched"
                     )
             if computed_result and trigger.get("actual_result") != computed_result:
                 errors.append(
@@ -1672,9 +1677,7 @@ def _validate_trigger_and_sequence(
                             )
                 expected_exceptions = trigger_contract.get("blocking_exceptions", [])
                 if not isinstance(expected_exceptions, list):
-                    errors.append(
-                        f"{label}: trigger_contract blocking_exceptions must be an array"
-                    )
+                    errors.append(f"{label}: trigger_contract blocking_exceptions must be an array")
                     expected_exceptions = []
                 if set(map(str, expected_exceptions)) != set(exception_by_name):
                     errors.append(
@@ -1706,9 +1709,7 @@ def _validate_trigger_and_sequence(
         sequence_matches = (
             sequence_contract["expected_order"] == sequence["actual_order"]
             if exact
-            else _ordered_subset(
-                sequence_contract["expected_order"], sequence["actual_order"]
-            )
+            else _ordered_subset(sequence_contract["expected_order"], sequence["actual_order"])
         )
         if not sequence_matches:
             errors.append(f"{label}: PASS tag sequence contradicts expected order")
@@ -1794,8 +1795,7 @@ def _validate_consent_details(
             errors.append(f"{label}: tag consent check {index} missing consent_type")
         if expected not in CONSENT_VALUES or actual not in CONSENT_VALUES:
             errors.append(
-                f"{label}: tag consent check {consent_type or index} must use "
-                "granted/denied values"
+                f"{label}: tag consent check {consent_type or index} must use granted/denied values"
             )
         computed_status = "PASS" if _strict_equal(actual, expected) else "FAIL"
         if status_of(check.get("status")) != computed_status:
@@ -1808,9 +1808,7 @@ def _validate_consent_details(
     required_check_types = contract.get("required_tag_consent_types")
     if required_check_types is not None:
         if not isinstance(required_check_types, list) or not required_check_types:
-            errors.append(
-                f"{label}: required_tag_consent_types must be a non-empty array"
-            )
+            errors.append(f"{label}: required_tag_consent_types must be a non-empty array")
         elif set(map(str, required_check_types)) != set(check_types):
             errors.append(
                 f"{label}: tag_consent_checks do not exactly match required consent types"
@@ -1868,9 +1866,7 @@ def _validate_business_rule_results(
         }[operator]
         for field in required_fields:
             if field not in rule or rule.get(field) in ("", None):
-                errors.append(
-                    f"{label}: business rule {rule_id or index} missing '{field}'"
-                )
+                errors.append(f"{label}: business rule {rule_id or index} missing '{field}'")
         if operator == "sum_product_equals":
             tolerance = rule.get("tolerance", 0)
             if (
@@ -1885,16 +1881,13 @@ def _validate_business_rule_results(
         if operator == "range":
             bounds = [rule.get(field) for field in ("min", "max") if field in rule]
             if not bounds or any(
-                not isinstance(value, (int, float)) or isinstance(value, bool)
-                for value in bounds
+                not isinstance(value, (int, float)) or isinstance(value, bool) for value in bounds
             ):
                 errors.append(
                     f"{label}: business rule {rule_id or index} range requires numeric bounds"
                 )
         if operator == "format" and rule.get("format") not in FORMATS:
-            errors.append(
-                f"{label}: business rule {rule_id or index} has unsupported format"
-            )
+            errors.append(f"{label}: business rule {rule_id or index} has unsupported format")
         if operator == "regex":
             try:
                 re.compile(str(rule.get("pattern", "")))
@@ -1903,8 +1896,7 @@ def _validate_business_rule_results(
                     f"{label}: business rule {rule_id or index} has invalid regular expression"
                 )
         if operator == "implies" and (
-            not isinstance(rule.get("if"), dict)
-            or not isinstance(rule.get("then"), dict)
+            not isinstance(rule.get("if"), dict) or not isinstance(rule.get("then"), dict)
         ):
             errors.append(
                 f"{label}: business rule {rule_id or index} implies requires object conditions"
@@ -1923,9 +1915,7 @@ def _validate_business_rule_results(
         if not result_id:
             errors.append(f"{label}: business rule result {index} missing rule_id")
         if result_id in result_by_id:
-            errors.append(
-                f"{label}: business_rule_results contains duplicate rule_id values"
-            )
+            errors.append(f"{label}: business_rule_results contains duplicate rule_id values")
         result_by_id[result_id] = result
         if status_of(result.get("status")) not in VALID_STATUSES:
             errors.append(f"{label}: business rule result {result_id or index} invalid status")
@@ -1966,9 +1956,7 @@ def _validate_sensitive_data(
     verdict = requirement.get("verdict", {})
     if policy is None:
         if required:
-            errors.append(
-                f"{label}: sensitive_data_scan layer requires sensitive_data_policy"
-            )
+            errors.append(f"{label}: sensitive_data_scan layer requires sensitive_data_policy")
         return
     if not isinstance(policy, dict):
         errors.append(f"{label}: sensitive_data_policy must be an object")
@@ -1994,9 +1982,7 @@ def _validate_sensitive_data(
                 continue
             for field in ("pattern_id", "pattern", "category", "confidence"):
                 if not _is_nonempty_string(custom.get(field)):
-                    errors.append(
-                        f"{label}: custom pattern {index} missing '{field}'"
-                    )
+                    errors.append(f"{label}: custom pattern {index} missing '{field}'")
             pattern_id = str(custom.get("pattern_id", "")).strip()
             pattern_ids.append(pattern_id)
             if custom.get("category") != "custom":
@@ -2023,9 +2009,10 @@ def _validate_sensitive_data(
         errors.append(f"{label}: sensitive_data_scan requires scanned_targets")
     else:
         expected_targets = set(requirement_sensitive_targets(requirement))
-        if len(scanned_targets) != len(set(map(str, scanned_targets))) or set(
-            map(str, scanned_targets)
-        ) != expected_targets:
+        if (
+            len(scanned_targets) != len(set(map(str, scanned_targets)))
+            or set(map(str, scanned_targets)) != expected_targets
+        ):
             errors.append(
                 f"{label}: sensitive_data_scan.scanned_targets must exactly cover "
                 "client-side sensitive surfaces"
@@ -2041,9 +2028,7 @@ def _validate_sensitive_data(
             errors.append(f"{label}: sensitive finding {index} must be an object")
             continue
         if any(field in finding for field in ("value", "raw_value", "sample")):
-            errors.append(
-                f"{label}: sensitive finding {index} must not retain an unredacted value"
-            )
+            errors.append(f"{label}: sensitive finding {index} must not retain an unredacted value")
         for field in (
             "path",
             "category",
@@ -2167,16 +2152,10 @@ def _validate_client_checks(
             errors.append(f"{label}: client check {check_id or index} missing evidence_id")
         computed_match = _client_check_matches(check)
         expected_status = (
-            "PASS"
-            if computed_match is True
-            else "FAIL"
-            if computed_match is False
-            else "REVIEW"
+            "PASS" if computed_match is True else "FAIL" if computed_match is False else "REVIEW"
         )
         if check_status in VALID_STATUSES and check_status != expected_status:
-            errors.append(
-                f"{label}: client check {check_id or index} status contradicts evidence"
-            )
+            errors.append(f"{label}: client check {check_id or index} status contradicts evidence")
     if len(set(check_ids)) != len(check_ids):
         errors.append(f"{label}: client_checks contains duplicate check_id values")
     component = status_of(verdict.get("client_checks"))
@@ -2215,10 +2194,9 @@ def _validate_regression(
             errors.append(f"{label}: regression missing '{field}'")
     baseline = status_of(regression.get("baseline_status"))
     current = status_of(regression.get("current_status"))
-    if (
-        regression_context is not None
-        and regression.get("baseline_run_id") != regression_context.get("baseline_run_id")
-    ):
+    if regression_context is not None and regression.get(
+        "baseline_run_id"
+    ) != regression_context.get("baseline_run_id"):
         errors.append(f"{label}: regression baseline_run_id differs from run context")
     if baseline not in VALID_STATUSES or current not in VALID_STATUSES:
         errors.append(f"{label}: regression statuses must use recette statuses")
@@ -2310,65 +2288,18 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
     if not evidence:
         errors.append("evidence: at least one evidence row is required")
 
-    declared_client_layers: set[str] = set()
-    for requirement in requirements:
-        if requirement.get("scope_status") == "OUT_OF_SCOPE":
-            continue
-        expectation = requirement.get("expectation")
-        if not isinstance(expectation, dict):
-            continue
-        source_mechanism = expectation.get("source_mechanism", "data_layer_push")
-        if source_mechanism == "data_layer_push":
-            declared_client_layers.add("raw_api_call")
-        else:
-            declared_client_layers.add("source_signal_when_no_data_layer_push")
-        if expectation.get(
-            "resolved_data_layer_applicable",
-            source_mechanism
-            in {"data_layer_push", "gtm_native_event", "gtm_auto_event"},
-        ):
-            declared_client_layers.add("resolved_data_layer")
-        if expectation.get("variable_name"):
-            declared_client_layers.add("gtm_variable")
-        if expectation.get("tag_name"):
-            declared_client_layers.update({"tag_configuration", "tag_firing"})
-        if expectation.get("tag_configuration_field"):
-            declared_client_layers.add("tag_parameter")
-        if (
-            expectation.get("expected_consent_state") not in (None, "")
-            or expectation.get("consent_contract") is not None
-        ):
-            declared_client_layers.add("consent_when_applicable")
-        if requirement.get("destination_request") is not None or any(
-            expectation.get(field) not in (None, "")
-            for field in (
-                "vendor_family",
-                "destination_id",
-                "destination_event_name",
-                "destination_id_parameter_path",
-                "destination_event_parameter_path",
-                "destination_parameter_path",
-                "expected_request_behavior",
-            )
-        ):
-            declared_client_layers.add("destination_request_when_applicable")
-        if expectation.get("trigger_contract") is not None:
-            declared_client_layers.add("trigger_logic_when_applicable")
-        if expectation.get("sequence_contract") is not None:
-            declared_client_layers.add("tag_sequence_when_applicable")
-        if expectation.get("business_rules") is not None:
-            declared_client_layers.add("business_rules_when_declared")
-        if expectation.get("sensitive_data_policy") is not None:
-            declared_client_layers.add("sensitive_data_scan")
-        if requirement.get("client_checks"):
-            declared_client_layers.add("client_checks_when_applicable")
-        if requirement.get("regression") is not None:
-            declared_client_layers.add("regression_when_baseline_provided")
-        occurrence_rule, _ = _occurrence_rule(expectation)
-        if occurrence_rule in {"conditional", "non_deterministic"}:
-            declared_client_layers.add("conditional_scenarios_when_applicable")
-    if isinstance(run.get("containers"), list) and len(run["containers"]) > 1:
-        declared_client_layers.add("container_context_when_applicable")
+    declared_client_layers = set(
+        applicable_layers(
+            requirements,
+            container_count=(
+                len(run["containers"]) if isinstance(run.get("containers"), list) else 1
+            ),
+        )
+    )
+    if any(
+        isinstance(requirement.get("destination_request"), dict) for requirement in requirements
+    ):
+        declared_client_layers.add("destination_request_when_applicable")
     if run.get("regression_context") is not None:
         declared_client_layers.add("regression_when_baseline_provided")
     missing_declared_layers = sorted(declared_client_layers - active_layers)
@@ -2379,43 +2310,83 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
         )
 
     evidence_catalog = [str(row.get("evidence_id", "")).strip() for row in evidence]
-    empty_evidence_rows = [index for index, value in enumerate(evidence_catalog, start=1) if not value]
+    empty_evidence_rows = [
+        index for index, value in enumerate(evidence_catalog, start=1) if not value
+    ]
     for index in empty_evidence_rows:
         errors.append(f"evidence row {index}: missing evidence_id")
     for index, row in enumerate(evidence, start=1):
         evidence_label = str(row.get("evidence_id", "")).strip() or str(index)
         for field in ("kind", "source", "path_or_url", "captured_at", "description"):
             if not _is_nonempty_string(row.get(field)):
-                errors.append(
-                    f"evidence {evidence_label}: missing provenance field '{field}'"
-                )
+                errors.append(f"evidence {evidence_label}: missing provenance field '{field}'")
         kind = row.get("kind")
         source_name = row.get("source")
         if kind not in EVIDENCE_KIND_SOURCES:
             errors.append(f"evidence {evidence_label}: unsupported evidence kind")
         elif source_name not in EVIDENCE_KIND_SOURCES[kind]:
+            errors.append(f"evidence {evidence_label}: source is incompatible with kind '{kind}'")
+        capture_mode = row.get("capture_mode")
+        if capture_mode not in CAPTURE_MODES:
             errors.append(
-                f"evidence {evidence_label}: source is incompatible with kind '{kind}'"
+                f"evidence {evidence_label}: capture_mode must identify direct, "
+                "deterministic, analyst_supplied, or supplemental evidence"
+            )
+        if kind in DIRECT_CAPTURE_KINDS and capture_mode != "direct":
+            errors.append(
+                f"evidence {evidence_label}: browser/Preview evidence must be a "
+                "direct structured capture, not reconstructed or inferred"
+            )
+        if kind in DETERMINISTIC_CAPTURE_KINDS and capture_mode != "deterministic":
+            errors.append(
+                f"evidence {evidence_label}: validator evidence requires capture_mode=deterministic"
+            )
+        if kind in ANALYST_CAPTURE_KINDS and capture_mode not in {
+            "analyst_supplied",
+            "direct",
+        }:
+            errors.append(
+                f"evidence {evidence_label}: analyst evidence requires "
+                "capture_mode=analyst_supplied or direct"
+            )
+        if kind in ACTION_BOUND_EVIDENCE_KINDS and not _is_nonempty_string(row.get("action_id")):
+            errors.append(f"evidence {evidence_label}: direct action evidence requires action_id")
+        if kind in EVENT_INDEX_EVIDENCE_KINDS and (
+            not isinstance(row.get("event_index"), int) or isinstance(row.get("event_index"), bool)
+        ):
+            errors.append(f"evidence {evidence_label}: direct event evidence requires event_index")
+        if kind in CONTAINER_BOUND_EVIDENCE_KINDS and not _is_nonempty_string(
+            row.get("container_id")
+        ):
+            errors.append(f"evidence {evidence_label}: direct GTM evidence requires container_id")
+        if kind in {"tag_configuration", "tag_runtime"}:
+            for link_field in ("tag_name", "configuration_field"):
+                if not _is_nonempty_string(row.get(link_field)):
+                    errors.append(f"evidence {evidence_label}: tag evidence requires {link_field}")
+        if kind == "tag_configuration" and source_name == "Tag Assistant":
+            if not _is_nonempty_string(row.get("action_id")):
+                errors.append(
+                    f"evidence {evidence_label}: Tag Assistant configuration requires action_id"
+                )
+            if not isinstance(row.get("event_index"), int):
+                errors.append(
+                    f"evidence {evidence_label}: Tag Assistant configuration requires event_index"
+                )
+        if kind == "browser_network_request" and not _is_nonempty_string(row.get("request_id")):
+            errors.append(
+                f"evidence {evidence_label}: browser request evidence requires request_id"
             )
         captured_at = row.get("captured_at")
         if _is_nonempty_string(captured_at):
             try:
-                parsed_captured_at = datetime.fromisoformat(
-                    str(captured_at).replace("Z", "+00:00")
-                )
+                parsed_captured_at = datetime.fromisoformat(str(captured_at).replace("Z", "+00:00"))
             except ValueError:
-                errors.append(
-                    f"evidence {evidence_label}: captured_at must be ISO 8601"
-                )
+                errors.append(f"evidence {evidence_label}: captured_at must be ISO 8601")
             else:
                 if parsed_captured_at.tzinfo is None:
-                    errors.append(
-                        f"evidence {evidence_label}: captured_at must include timezone"
-                    )
+                    errors.append(f"evidence {evidence_label}: captured_at must include timezone")
         if _contains_placeholder(row):
-            errors.append(
-                f"evidence {evidence_label}: provenance contains placeholder content"
-            )
+            errors.append(f"evidence {evidence_label}: provenance contains placeholder content")
         provenance_findings = scan_sensitive_value(
             {
                 "source": row.get("source"),
@@ -2435,7 +2406,9 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
                 "retain only a redacted description/path"
             )
     duplicate_evidence = sorted(
-        item for item, count in Counter(item for item in evidence_catalog if item).items() if count > 1
+        item
+        for item, count in Counter(item for item in evidence_catalog if item).items()
+        if count > 1
     )
     if duplicate_evidence:
         errors.append("evidence: duplicate IDs " + ", ".join(duplicate_evidence))
@@ -2455,14 +2428,10 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
                     errors.append(f"run: regression_context missing '{field}'")
             changes = regression_context.get("acceptance_relevant_container_changes", [])
             if not isinstance(changes, list):
-                errors.append(
-                    "run: acceptance_relevant_container_changes must be an array"
-                )
+                errors.append("run: acceptance_relevant_container_changes must be an array")
             for ref in evidence_ids(regression_context.get("evidence_ids")):
                 if ref not in known_evidence:
-                    errors.append(
-                        f"run: regression_context references unknown evidence ID '{ref}'"
-                    )
+                    errors.append(f"run: regression_context references unknown evidence ID '{ref}'")
                 else:
                     _require_evidence_kind(
                         evidence_by_id,
@@ -2492,7 +2461,9 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
             errors.append(f"blocker {blocker_id}: unknown evidence IDs {', '.join(unknown)}")
         if blocker.get("type") in PROTECTED_BLOCKERS:
             if blocker.get("analyst_intervention_required") is not True:
-                errors.append(f"blocker {blocker_id}: protected checkpoint must be analyst-controlled")
+                errors.append(
+                    f"blocker {blocker_id}: protected checkpoint must be analyst-controlled"
+                )
             if blocker_status == "BLOCKED" and blocker.get("analyst_help_requested") is not True:
                 errors.append(
                     f"blocker {blocker_id}: analyst help must be requested before final BLOCKED"
@@ -2500,7 +2471,9 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
 
     requirement_ids = [str(row.get("requirement_id", "")).strip() for row in requirements]
     duplicate_requirements = sorted(
-        item for item, count in Counter(item for item in requirement_ids if item).items() if count > 1
+        item
+        for item, count in Counter(item for item in requirement_ids if item).items()
+        if count > 1
     )
     if duplicate_requirements:
         errors.append("requirements: duplicate IDs " + ", ".join(duplicate_requirements))
@@ -2611,16 +2584,12 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
         elif js_value_type(action_value) != action_value_type:
             errors.append(f"{label}: journey action value/type mismatch")
         if action_value_source == "not_applicable" and action_value is not None:
-            errors.append(
-                f"{label}: not_applicable action value must retain explicit null"
-            )
+            errors.append(f"{label}: not_applicable action value must retain explicit null")
         if (
             action_value_source == "protected_analyst_entry"
             and action_value != "<analyst-entered-protected>"
         ):
-            errors.append(
-                f"{label}: protected action value must use the canonical redacted marker"
-            )
+            errors.append(f"{label}: protected action value must use the canonical redacted marker")
         if journey.get("execution_status") not in EXECUTION_STATUSES:
             errors.append(f"{label}: invalid journey.execution_status")
         if journey.get("inferred") is True and not _is_nonempty_string(
@@ -2629,9 +2598,7 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
             errors.append(f"{label}: inferred journey requires inference_source")
         if not isinstance(journey.get("attempted_routes"), list):
             errors.append(f"{label}: journey.attempted_routes must be an array")
-        requirement_container = str(
-            requirement.get("container_id", run.get("container_id", ""))
-        )
+        requirement_container = str(requirement.get("container_id", run.get("container_id", "")))
         if requirement_container not in container_ids:
             errors.append(f"{label}: unknown client-side container_id")
         context_id = str(requirement.get("browser_context_id", "")).strip()
@@ -2659,7 +2626,9 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
         if expectation.get("match_rule") not in MATCH_RULES:
             errors.append(f"{label}: unsupported match_rule '{expectation.get('match_rule')}'")
         if expectation.get("expected_type") not in VALUE_TYPES:
-            errors.append(f"{label}: unsupported expected_type '{expectation.get('expected_type')}'")
+            errors.append(
+                f"{label}: unsupported expected_type '{expectation.get('expected_type')}'"
+            )
         if expectation.get("match_rule") == "documented_transform":
             transform = expectation.get("transformation")
             if not isinstance(transform, dict) or not all(
@@ -2691,9 +2660,7 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
                 try:
                     re.compile(pattern)
                 except re.error:
-                    errors.append(
-                        f"{label}: anti_pattern requires a valid regular expression"
-                    )
+                    errors.append(f"{label}: anti_pattern requires a valid regular expression")
         if expectation.get("match_rule") == "vendor_equivalent" and not _is_nonempty_string(
             expectation.get("vendor_parameter_name")
         ):
@@ -2706,6 +2673,34 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
             errors.append(f"{label}: unsupported vendor_family")
         if expectation.get("source_mechanism", "data_layer_push") not in SOURCE_MECHANISMS:
             errors.append(f"{label}: unsupported source_mechanism")
+        tag_name = expectation.get("tag_name")
+        tag_delivery = expectation.get("tag_delivery")
+        if _is_nonempty_string(tag_name):
+            if tag_delivery not in TAG_DELIVERY_TYPES:
+                errors.append(
+                    f"{label}: every concerned tag requires tag_delivery="
+                    "browser_request or local_only"
+                )
+            if not _is_nonempty_string(expectation.get("tag_configuration_field")):
+                errors.append(f"{label}: concerned tag requires tag_configuration_field")
+            if expectation.get("expected_tag_configuration") in (None, ""):
+                errors.append(f"{label}: concerned tag requires exact expected_tag_configuration")
+            if tag_delivery == "browser_request":
+                for field in (
+                    "vendor_family",
+                    "destination_id",
+                    "destination_event_name",
+                    "destination_id_parameter_path",
+                    "destination_event_parameter_path",
+                    "expected_endpoint_pattern",
+                    "expected_request_behavior",
+                ):
+                    if not _is_nonempty_string(expectation.get(field)):
+                        errors.append(f"{label}: browser-sending tag requires expectation.{field}")
+            elif tag_delivery == "local_only" and is_browser_sending_tag(expectation):
+                errors.append(f"{label}: local_only tag cannot declare browser destination fields")
+        elif tag_delivery not in (None, ""):
+            errors.append(f"{label}: tag_delivery requires a concerned tag_name")
 
         verdict = requirement.get("verdict")
         if not isinstance(verdict, dict):
@@ -2750,6 +2745,17 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
                 f"{label}: overall status '{overall}' does not equal worst applicable "
                 f"component '{worst_status(components)}'"
             )
+        if "REVIEW" in components or overall == "REVIEW":
+            if verdict.get("review_basis") != "semantic_ambiguity":
+                errors.append(
+                    f"{label}: REVIEW is reserved for semantic ambiguity and requires "
+                    "verdict.review_basis=semantic_ambiguity"
+                )
+            if not _is_nonempty_string(verdict.get("review_question")):
+                errors.append(
+                    f"{label}: REVIEW requires the precise verdict.review_question "
+                    "the analyst must resolve"
+                )
         acceptance_status = worst_status(acceptance_components)
 
         refs = evidence_ids(requirement.get("evidence_ids"))
@@ -2761,10 +2767,10 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
         nested = _nested_ids(requirement)
         if not nested.issubset(set(refs)):
             missing = sorted(nested - set(refs))
-            errors.append(f"{label}: nested evidence IDs absent from evidence_ids: {', '.join(missing)}")
-        _validate_requirement_evidence_kinds(
-            requirement, evidence_by_id, label, errors
-        )
+            errors.append(
+                f"{label}: nested evidence IDs absent from evidence_ids: {', '.join(missing)}"
+            )
+        _validate_requirement_evidence_kinds(requirement, evidence_by_id, label, errors)
 
         blocker_id = str(requirement.get("blocker_id", "")).strip()
         if overall == "BLOCKED":
@@ -2812,16 +2818,14 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
                 and boundary.get("interaction_outcome") in {"failed", "uncertain"}
             ):
                 errors.append(
-                    f"{label}: failed or uncertain interaction cannot prove "
-                    "expected-event absence"
+                    f"{label}: failed or uncertain interaction cannot prove expected-event absence"
                 )
             _validate_occurrence(requirement, label, errors)
             occurrence = requirement.get("occurrence_evidence")
             if isinstance(boundary, dict) and isinstance(occurrence, dict):
                 event_indexes = occurrence.get("event_indexes")
                 if isinstance(event_indexes, list) and all(
-                    isinstance(item, int) and not isinstance(item, bool)
-                    for item in event_indexes
+                    isinstance(item, int) and not isinstance(item, bool) for item in event_indexes
                 ):
                     last_event = boundary.get("last_event_before")
                     first_event = boundary.get("first_event_after")
@@ -2830,15 +2834,12 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
                         item <= last_event for item in event_indexes
                     ):
                         errors.append(
-                            f"{label}: occurrence event index does not follow "
-                            "last_event_before"
+                            f"{label}: occurrence event index does not follow last_event_before"
                         )
                     if isinstance(first_event, int) and any(
                         item < first_event for item in event_indexes
                     ):
-                        errors.append(
-                            f"{label}: occurrence event index precedes first_event_after"
-                        )
+                        errors.append(f"{label}: occurrence event index precedes first_event_after")
                     if isinstance(settled_event, int) and any(
                         item > settled_event for item in event_indexes
                     ):
@@ -2851,25 +2852,16 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
                     and isinstance(boundary.get("settled_final_event"), int)
                     and anchor_index > boundary["settled_final_event"]
                 ):
-                    errors.append(
-                        f"{label}: anchor_event_index exceeds settled_final_event"
-                    )
+                    errors.append(f"{label}: anchor_event_index exceeds settled_final_event")
 
         if observed:
             source_mechanism = expectation.get("source_mechanism", "data_layer_push")
-            raw_required = (
-                source_mechanism == "data_layer_push"
-                and "raw_api_call" in active_layers
-            )
+            raw_required = source_mechanism == "data_layer_push" and "raw_api_call" in active_layers
             resolved_applicable = expectation.get(
                 "resolved_data_layer_applicable",
-                source_mechanism
-                in {"data_layer_push", "gtm_native_event", "gtm_auto_event"},
+                source_mechanism in {"data_layer_push", "gtm_native_event", "gtm_auto_event"},
             )
-            resolved_required = (
-                resolved_applicable
-                and "resolved_data_layer" in active_layers
-            )
+            resolved_required = resolved_applicable and "resolved_data_layer" in active_layers
             raw = requirement.get("raw_api_call")
             resolved = requirement.get("resolved_data_layer")
             if raw_required:
@@ -2899,10 +2891,7 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
                         f"{label}: Preview-dependent evidence requires exact "
                         "Tag Assistant API Call evidence"
                     )
-                if (
-                    isinstance(raw, dict)
-                    and status_of(verdict.get("raw_payload")) == "PASS"
-                ):
+                if isinstance(raw, dict) and status_of(verdict.get("raw_payload")) == "PASS":
                     match = _matches_expectation(expectation, raw)
                     if match is False:
                         errors.append(
@@ -2944,9 +2933,7 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
                 observed=False,
                 require_ready=True,
             )
-            source_mechanism = expectation.get(
-                "source_mechanism", "data_layer_push"
-            )
+            source_mechanism = expectation.get("source_mechanism", "data_layer_push")
             downstream_components: list[str] = []
             if source_mechanism == "data_layer_push":
                 downstream_components.append("raw_payload")
@@ -2954,8 +2941,7 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
                 downstream_components.append("source_signal")
             if expectation.get(
                 "resolved_data_layer_applicable",
-                source_mechanism
-                in {"data_layer_push", "gtm_native_event", "gtm_auto_event"},
+                source_mechanism in {"data_layer_push", "gtm_native_event", "gtm_auto_event"},
             ):
                 downstream_components.append("resolved_data_layer")
             if expectation.get("variable_name"):
@@ -2975,12 +2961,8 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
             if expectation.get("sequence_contract") is not None:
                 downstream_components.append("tag_sequence")
             consent = requirement.get("consent")
-            if (
-                expectation.get("expected_consent_state") not in (None, "")
-                or (
-                    isinstance(consent, dict)
-                    and consent.get("applicable") is True
-                )
+            if expectation.get("expected_consent_state") not in (None, "") or (
+                isinstance(consent, dict) and consent.get("applicable") is True
             ):
                 downstream_components.append("consent")
             if expectation.get("business_rules") is not None:
@@ -2996,9 +2978,7 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
         variable_name = expectation.get("variable_name")
         if variable_name:
             if status_of(verdict.get("gtm_variable")) not in VALID_STATUSES:
-                errors.append(
-                    f"{label}: expected GTM variable requires gtm_variable verdict"
-                )
+                errors.append(f"{label}: expected GTM variable requires gtm_variable verdict")
             variable_blocked_by_absence = (
                 not observed and status_of(verdict.get("gtm_variable")) == "BLOCKED"
             )
@@ -3029,19 +3009,14 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
         _validate_tag(requirement, label, errors)
         tag = requirement.get("tag")
         if isinstance(tag, dict) and tag.get("applicable") is True:
-            tag_container = str(
-                tag.get("container_id", requirement_container)
-            ).strip()
+            tag_container = str(tag.get("container_id", requirement_container)).strip()
             if tag_container not in container_ids:
                 errors.append(f"{label}: concerned tag references unknown container_id")
             if len(container_ids) > 1 and not _is_nonempty_string(tag.get("container_id")):
                 errors.append(
                     f"{label}: multiple containers require explicit tag.container_id ownership"
                 )
-        if (
-            isinstance(tag, dict)
-            and status_of(verdict.get("tag_parameter")) == "PASS"
-        ):
+        if isinstance(tag, dict) and status_of(verdict.get("tag_parameter")) == "PASS":
             comparison_source: dict[str, Any] | None = None
             transform = expectation.get("transformation")
             if expectation.get("match_rule") == "documented_transform" and isinstance(
@@ -3060,13 +3035,19 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
                         comparison_source = candidate
                         break
                 expected_runtime = (
-                    comparison_source.get("field_value") if comparison_source else None
+                    comparison_source.get("field_value")
+                    if comparison_source
+                    else expectation.get("expected_value")
                 )
                 expected_runtime_type = (
-                    comparison_source.get("field_type") if comparison_source else None
+                    comparison_source.get("field_type")
+                    if comparison_source
+                    else expectation.get("expected_type")
                 )
                 expected_runtime_state = (
-                    comparison_source.get("field_state") if comparison_source else None
+                    comparison_source.get("field_state")
+                    if comparison_source
+                    else field_state_for(expectation.get("expected_value"))
                 )
             if (
                 tag.get("runtime_state") != expected_runtime_state
@@ -3090,10 +3071,7 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
 
         consent = requirement.get("consent")
         consent_expected = expectation.get("expected_consent_state") not in (None, "")
-        if (
-            consent_expected
-            and status_of(verdict.get("consent")) not in VALID_STATUSES
-        ):
+        if consent_expected and status_of(verdict.get("consent")) not in VALID_STATUSES:
             errors.append(f"{label}: consent expectation requires consent verdict")
         if consent_expected and (
             not isinstance(consent, dict) or consent.get("applicable") is not True
@@ -3114,9 +3092,7 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
                     errors.append(
                         f"{label}: consent PASS requires event-level consent-state evidence"
                     )
-                expected_state = _parse_consent_state(
-                    expectation.get("expected_consent_state")
-                )
+                expected_state = _parse_consent_state(expectation.get("expected_consent_state"))
                 actual_state = _parse_consent_state(consent.get("state_at_event"))
                 if expected_state is not None and (
                     actual_state is None
@@ -3135,9 +3111,7 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
             requirement,
             label,
             errors,
-            required=(
-                scope_status == "IN_SCOPE" and "sensitive_data_scan" in active_layers
-            ),
+            required=(scope_status == "IN_SCOPE" and "sensitive_data_scan" in active_layers),
         )
         _validate_client_checks(requirement, run, label, errors)
         _validate_regression(
@@ -3157,14 +3131,19 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
         status = status_of(row)
         if status not in VALID_STATUSES:
             errors.append(f"unexpected {unexpected_id}: invalid status '{status}'")
+        if status == "REVIEW":
+            if row.get("review_basis") != "semantic_ambiguity":
+                errors.append(
+                    f"unexpected {unexpected_id}: REVIEW requires review_basis=semantic_ambiguity"
+                )
+            if not _is_nonempty_string(row.get("review_question")):
+                errors.append(f"unexpected {unexpected_id}: REVIEW requires review_question")
         refs = evidence_ids(row.get("evidence_ids"))
         if not refs:
             errors.append(f"unexpected {unexpected_id}: missing evidence_ids")
         unknown = sorted(set(refs) - known_evidence)
         if unknown:
-            errors.append(
-                f"unexpected {unexpected_id}: unknown evidence IDs {', '.join(unknown)}"
-            )
+            errors.append(f"unexpected {unexpected_id}: unknown evidence IDs {', '.join(unknown)}")
 
     return errors
 

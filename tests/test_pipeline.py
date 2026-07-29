@@ -26,8 +26,14 @@ from client_side_rules import (  # noqa: E402
 )
 from decode_browser_requests import decode_requests  # noqa: E402
 from diff_recette_runs import compare as compare_runs  # noqa: E402
+from event_feedback import event_feedback  # noqa: E402
+from execution_contract import (  # noqa: E402
+    PROTECTED_AUTHORIZATION_EXCLUSIONS,
+    validate_session,
+)
 from incremental_recette import apply_event, status_rows, validate_event  # noqa: E402
 from inspect_tracking_plan import inspect_xlsx  # noqa: E402
+from layer_contract import applicable_layers  # noqa: E402
 from recette_schema import ReportValidationError, event_rollup, validate  # noqa: E402
 
 
@@ -70,6 +76,136 @@ def client_side_fixture() -> dict:
     return data
 
 
+def execution_fixture(data: dict | None = None) -> dict:
+    data = data or fixture()
+    req = requirement(data)
+    boundary = req["action_boundary"]
+    applicable = applicable_layers(
+        data["requirements"],
+        container_count=len(data["run"]["containers"]),
+    )
+    evidence_for_layer = {
+        "raw_api_call": ["EVD-RAW-011"],
+        "resolved_data_layer": ["EVD-DL-011"],
+        "gtm_variable": ["EVD-VAR-011"],
+        "tag_configuration": ["EVD-TAG-CONFIG-011"],
+        "tag_firing": ["EVD-TAG-RUNTIME-011"],
+        "tag_parameter": ["EVD-TAG-RUNTIME-011"],
+        "destination_request_when_applicable": ["EVD-NET-011"],
+    }
+    layer_results = [
+        {
+            "layer": layer,
+            "status": "PASS",
+            "reason": f"{layer} matched the exact planned value.",
+            "evidence_ids": evidence_for_layer[layer],
+            "semantic_ambiguity": None,
+            "blocker_id": None,
+            "recorded_at": "2026-07-25T10:01:04+00:00",
+        }
+        for layer in applicable
+    ]
+    return {
+        "schema_version": 2,
+        "created_at": "2026-07-25T09:55:00+00:00",
+        "updated_at": "2026-07-25T10:02:00+00:00",
+        "profile_path": "profiles/run-synthetic-001",
+        "approved_origins": ["https://shop.example.test"],
+        "surfaces": {
+            "gtm": {
+                "role": "gtm_workspace",
+                "url": "https://tagmanager.google.com/",
+            },
+            "preview": {
+                "role": "tag_assistant",
+                "url": "https://tagassistant.google.com/",
+                "connected": True,
+            },
+            "site": {
+                "role": "website",
+                "url": "https://shop.example.test/product",
+            },
+        },
+        "authorizations": [],
+        "cases": [
+            {
+                "case_id": "CASE-001",
+                "event_group_id": "EVG-001",
+                "requirement_ids": ["REQ-001"],
+                "url": "https://shop.example.test/product",
+                "element": "Add to cart",
+                "placement": "product detail",
+                "action": "click",
+                "material_variant": {"quantity": 1},
+                "discovered_from": "tracking_plan",
+                "scope_status": "IN_SCOPE",
+                "execution_status": "EXECUTED",
+                "reason": None,
+                "authorization_ids": [],
+                "applicable_layers": applicable,
+                "container_ids": ["GTM-TEST"],
+                "registered_at": "2026-07-25T09:58:00+00:00",
+                "final_action_id": "ACT-001",
+            }
+        ],
+        "actions": [
+            {
+                "action_id": "ACT-001",
+                "case_id": "CASE-001",
+                "event_group_id": "EVG-001",
+                "requirement_ids": ["REQ-001"],
+                "url": "https://shop.example.test/product",
+                "element": "Add to cart",
+                "placement": "product detail",
+                "material_variant": {"quantity": 1},
+                "action": "click",
+                "attempt_number": 1,
+                "retry_of_action_id": None,
+                "preview_connected_before": True,
+                "target_ready_before": True,
+                "last_event_before": boundary["last_event_before"],
+                "consent_state_before": "analytics_storage=granted",
+                "browser_context_id": "desktop-default",
+                "container_ids": ["GTM-TEST"],
+                "action_timestamp": boundary["action_timestamp"],
+                "quiet_window_ms": boundary["quiet_window_ms"],
+                "timeout_ms": boundary["timeout_ms"],
+                "layer_results": layer_results,
+                "first_event_after": boundary["first_event_after"],
+                "settled_final_event": boundary["settled_final_event"],
+                "expected_seen": True,
+                "preview_connected_after": True,
+                "interaction_outcome": boundary["interaction_outcome"],
+                "completion_signal": boundary["completion_signal"],
+                "stream_settled": boundary["stream_settled"],
+                "settlement_reason": boundary["settlement_reason"],
+                "observed_business_push_count": 1,
+                "settled_at": "2026-07-25T10:01:03+00:00",
+                "state": "SETTLED",
+            }
+        ],
+        "business_pushes": [
+            {
+                "push_id": "PUSH-011",
+                "stream_id": "tag_assistant",
+                "action_id": "ACT-001",
+                "case_id": "CASE-001",
+                "event_group_id": "EVG-001",
+                "event_name": "add_to_cart",
+                "event_index": 11,
+                "captured_at": "2026-07-25T10:01:00+00:00",
+                "url": "https://shop.example.test/product",
+                "page_state": "Basket count is 1",
+                "classification": "expected",
+                "classification_reason": "Expected once after the completed product CTA.",
+                "evidence_id": "EVD-RAW-011",
+                "container_id": "GTM-TEST",
+            }
+        ],
+        "checkpoints": [],
+    }
+
+
 def configure_absent_event(data: dict, blocker_status: str | None = None) -> dict:
     req = requirement(data)
     req["event_observed"] = False
@@ -87,6 +223,11 @@ def configure_absent_event(data: dict, blocker_status: str | None = None) -> dic
     req["tag"] = {
         "applicable": True,
         "relevance": "explains_non_firing",
+        "container_id": "GTM-TEST",
+        "vendor_family": "ga4",
+        "destination_id": "G-TEST123",
+        "event_name": "add_to_cart",
+        "template_type": "GA4 Event",
         "name": "GA4 - Event - add_to_cart",
         "expected_firing": "fired_once",
         "actual_firing": "not_evaluated",
@@ -96,6 +237,20 @@ def configure_absent_event(data: dict, blocker_status: str | None = None) -> dic
         "configuration_evidence_id": "EVD-TAG-CONFIG-011",
         "non_firing_reason": "Expected event did not occur.",
         "reason_source": "preview",
+    }
+    req["destination_request"] = {
+        "applicable": True,
+        "vendor_family": "ga4",
+        "destination_id": "G-TEST123",
+        "event_name": "add_to_cart",
+        "request_behavior": "not_observed",
+        "request_count": 0,
+        "capture_source": "browser_network",
+        "request_id": "NET-011",
+        "parameter_path": 'query["ep.value"]',
+        "field_state": "absent",
+        "field_type": "absent",
+        "evidence_id": "EVD-NET-011",
     }
     component = blocker_status or "BLOCKED"
     req["verdict"].update(
@@ -107,6 +262,8 @@ def configure_absent_event(data: dict, blocker_status: str | None = None) -> dic
             "tag_configuration": component,
             "tag_firing": component,
             "tag_parameter": component,
+            "destination_request": component,
+            "destination_parameter": component,
             "overall": "FAIL" if blocker_status is None else blocker_status,
             "failure_layer": "event_occurrence",
             "mismatch": "Expected event was not observed.",
@@ -129,9 +286,7 @@ def add_blocker(
     req["action_boundary"]["stream_settled"] = settled
     if not settled:
         req["action_boundary"]["settlement_reason"] = (
-            "preview_disconnected"
-            if blocker_type == "PREVIEW_DISCONNECTED"
-            else "timeout"
+            "preview_disconnected" if blocker_type == "PREVIEW_DISCONNECTED" else "timeout"
         )
     data["blockers"] = [
         {
@@ -163,13 +318,19 @@ def add_blocker(
     return req
 
 
-def add_consent_override(data: dict, *, approved: bool, production: bool = False) -> dict:
+def add_consent_override(
+    data: dict,
+    *,
+    approved: bool,
+    production: bool = False,
+    production_approved: bool = False,
+) -> dict:
     req = requirement(data)
     data["run"]["environment_class"] = "production" if production else "preprod"
     data["blockers"] = [
         {
             "blocker_id": "BLK-CMP",
-            "type": "CMP_TEST_ENVIRONMENT",
+            "type": ("CMP_PRODUCTION_ENVIRONMENT" if production else "CMP_TEST_ENVIRONMENT"),
             "checkpoint": "CMP initialization",
             "description": "CMP did not initialize in preprod.",
             "requirement_ids": ["REQ-001"],
@@ -193,9 +354,20 @@ def add_consent_override(data: dict, *, approved: bool, production: bool = False
         "override_approved": approved,
         "approval_evidence_id": "EVD-CMP-APPROVAL-001",
         "override_method": "Session-scoped gtag consent update",
+        "override_scope": "session_only",
+        "native_cmp_status": "FAIL",
+        "native_cmp_acceptance_in_scope": False,
         "blocker_id": "BLK-CMP",
         "evidence_id": "EVD-CONSENT-001",
     }
+    if production:
+        req["consent"].update(
+            {
+                "production_exception_approved": production_approved,
+                "production_approval_evidence_id": "EVD-CMP-PROD-APPROVAL-001",
+                "restoration_confirmed": production_approved,
+            }
+        )
     req["evidence_ids"].append("EVD-CONSENT-001")
     req["evidence_ids"].append("EVD-CMP-APPROVAL-001")
     data["evidence"].append(
@@ -203,6 +375,10 @@ def add_consent_override(data: dict, *, approved: bool, production: bool = False
             "evidence_id": "EVD-CONSENT-001",
             "kind": "consent_state",
             "source": "Tag Assistant",
+            "capture_mode": "direct",
+            "action_id": "ACT-001",
+            "event_index": 11,
+            "container_id": "GTM-TEST",
             "path_or_url": "evidence/consent-001.json",
             "captured_at": "2026-07-25T10:01:03+00:00",
             "description": "Event-level consent after the approved session override.",
@@ -213,11 +389,25 @@ def add_consent_override(data: dict, *, approved: bool, production: bool = False
             "evidence_id": "EVD-CMP-APPROVAL-001",
             "kind": "analyst_approval",
             "source": "Analyst supplied",
+            "capture_mode": "analyst_supplied",
             "path_or_url": "evidence/cmp-approval-001.json",
             "captured_at": "2026-07-25T10:01:03+00:00",
             "description": "Explicit analyst decision for the proposed CMP override.",
         }
     )
+    if production:
+        req["evidence_ids"].append("EVD-CMP-PROD-APPROVAL-001")
+        data["evidence"].append(
+            {
+                "evidence_id": "EVD-CMP-PROD-APPROVAL-001",
+                "kind": "analyst_approval",
+                "source": "Analyst supplied",
+                "capture_mode": "analyst_supplied",
+                "path_or_url": "evidence/cmp-prod-approval-001.json",
+                "captured_at": "2026-07-25T10:01:03+00:00",
+                "description": "Explicit production exception approval.",
+            }
+        )
     req["verdict"]["consent"] = "PASS"
     req["verdict"]["overall"] = "PASS"
     return req
@@ -261,9 +451,7 @@ class PipelineTests(unittest.TestCase):
                 ).value,
             )
             evidence_sheet = workbook["Evidence Catalogue"]
-            evidence_headers = {
-                cell.value: cell.column for cell in evidence_sheet[1]
-            }
+            evidence_headers = {cell.value: cell.column for cell in evidence_sheet[1]}
             self.assertIsNotNone(
                 evidence_sheet.cell(
                     row=2,
@@ -293,9 +481,7 @@ class PipelineTests(unittest.TestCase):
 
     def test_declared_client_layer_cannot_be_omitted_from_run_metadata(self) -> None:
         data = client_side_fixture()
-        data["run"]["included_layers"].remove(
-            "destination_request_when_applicable"
-        )
+        data["run"]["included_layers"].remove("destination_request_when_applicable")
         self.assert_invalid(data, "included_layers omits declared client-side layers")
 
     def test_destination_parameter_mismatch_cannot_pass(self) -> None:
@@ -311,20 +497,16 @@ class PipelineTests(unittest.TestCase):
     def test_destination_claim_must_match_browser_request(self) -> None:
         data = client_side_fixture()
         requirement(data)["destination_request"]["request_url"] = (
-            "https://www.facebook.com/tr/"
-            "?id=META-WRONG&ev=AddToCart&value=29.9"
+            "https://www.facebook.com/tr/?id=META-WRONG&ev=AddToCart&value=29.9"
         )
         self.assert_invalid(data, "decoded destination ID differs from browser request")
 
     def test_destination_value_must_match_browser_request(self) -> None:
         data = client_side_fixture()
         requirement(data)["destination_request"]["request_url"] = (
-            "https://www.facebook.com/tr/"
-            "?id=META-TEST-001&ev=AddToCart&value=999"
+            "https://www.facebook.com/tr/?id=META-TEST-001&ev=AddToCart&value=999"
         )
-        self.assert_invalid(
-            data, "decoded destination parameter differs from browser request"
-        )
+        self.assert_invalid(data, "decoded destination parameter differs from browser request")
 
     def test_literal_vendor_request_keys_are_addressable(self) -> None:
         self.assertEqual(
@@ -345,17 +527,14 @@ class PipelineTests(unittest.TestCase):
         req["expectation"]["destination_parameter_path"] = 'query["cd[value]"]'
         req["destination_request"]["parameter_path"] = 'query["cd[value]"]'
         req["destination_request"]["request_url"] = (
-            "https://www.facebook.com/tr/"
-            "?id=META-TEST-001&ev=AddToCart&cd%5Bvalue%5D=29.9"
+            "https://www.facebook.com/tr/?id=META-TEST-001&ev=AddToCart&cd%5Bvalue%5D=29.9"
         )
         self.assertEqual([], validate(data, strict=True))
 
     def test_destination_verdict_cannot_be_omitted(self) -> None:
         data = client_side_fixture()
         requirement(data)["verdict"].pop("destination_request")
-        self.assert_invalid(
-            data, "destination expectation requires destination_request verdict"
-        )
+        self.assert_invalid(data, "destination expectation requires destination_request verdict")
 
     def test_vendor_helper_alone_cannot_prove_browser_send(self) -> None:
         data = client_side_fixture()
@@ -364,9 +543,7 @@ class PipelineTests(unittest.TestCase):
 
     def test_advanced_consent_v2_requires_all_four_signals(self) -> None:
         data = client_side_fixture()
-        del requirement(data)["expectation"]["consent_contract"]["signals"][
-            "ad_user_data"
-        ]
+        del requirement(data)["expectation"]["consent_contract"]["signals"]["ad_user_data"]
         self.assert_invalid(data, "must declare all four consent signals")
 
     def test_conditional_pass_requires_condition_evidence(self) -> None:
@@ -386,12 +563,8 @@ class PipelineTests(unittest.TestCase):
 
     def test_matched_blocking_exception_cannot_hide_behind_pass(self) -> None:
         data = client_side_fixture()
-        requirement(data)["trigger_evaluation"]["blocking_exceptions"][0][
-            "matched"
-        ] = True
-        self.assert_invalid(
-            data, "trigger actual_result differs from condition/exception evidence"
-        )
+        requirement(data)["trigger_evaluation"]["blocking_exceptions"][0]["matched"] = True
+        self.assert_invalid(data, "trigger actual_result differs from condition/exception evidence")
 
     def test_tag_sequence_false_pass_is_rejected(self) -> None:
         data = client_side_fixture()
@@ -519,9 +692,7 @@ class PipelineTests(unittest.TestCase):
         req["raw_api_call"]["payload"]["contact_email"] = "synthetic.user@example.com"
         req["resolved_data_layer"]["snapshot"] = deepcopy(req["raw_api_call"]["payload"])
         self.assert_invalid(data, "sensitive_data_scan differs from deterministic scan")
-        findings = scan_requirement_sensitive_data(
-            req, req["expectation"]["sensitive_data_policy"]
-        )
+        findings = scan_requirement_sensitive_data(req, req["expectation"]["sensitive_data_policy"])
         self.assertTrue(findings)
         self.assertNotIn("synthetic.user@example.com", json.dumps(findings))
         self.assertTrue(all("value_fingerprint" in item for item in findings))
@@ -531,15 +702,11 @@ class PipelineTests(unittest.TestCase):
         requirement(data)["expectation"].pop("sensitive_data_policy")
         requirement(data).pop("sensitive_data_scan")
         requirement(data)["verdict"].pop("sensitive_data")
-        self.assert_invalid(
-            data, "sensitive_data_scan layer requires sensitive_data_policy"
-        )
+        self.assert_invalid(data, "sensitive_data_scan layer requires sensitive_data_policy")
 
     def test_invalid_custom_sensitive_pattern_is_rejected(self) -> None:
         data = client_side_fixture()
-        requirement(data)["expectation"]["sensitive_data_policy"][
-            "custom_patterns"
-        ] = [
+        requirement(data)["expectation"]["sensitive_data_policy"]["custom_patterns"] = [
             {
                 "pattern_id": "CUSTOM-BAD",
                 "pattern": "[",
@@ -553,15 +720,8 @@ class PipelineTests(unittest.TestCase):
         data = client_side_fixture()
         req = requirement(data)
         req["destination_request"]["field_value"] = "synthetic.user@example.com"
-        findings = scan_requirement_sensitive_data(
-            req, req["expectation"]["sensitive_data_policy"]
-        )
-        self.assertTrue(
-            any(
-                item["path"] == "destination_request.field_value"
-                for item in findings
-            )
-        )
+        findings = scan_requirement_sensitive_data(req, req["expectation"]["sensitive_data_policy"])
+        self.assertTrue(any(item["path"] == "destination_request.field_value" for item in findings))
 
     def test_request_headers_are_sensitive_scan_targets(self) -> None:
         data = client_side_fixture()
@@ -569,14 +729,9 @@ class PipelineTests(unittest.TestCase):
         req["destination_request"]["request_headers"] = {
             "X-Test-Contact": "synthetic.user@example.com"
         }
-        findings = scan_requirement_sensitive_data(
-            req, req["expectation"]["sensitive_data_policy"]
-        )
+        findings = scan_requirement_sensitive_data(req, req["expectation"]["sensitive_data_policy"])
         self.assertTrue(
-            any(
-                item["path"].startswith("destination_request.request_headers")
-                for item in findings
-            )
+            any(item["path"].startswith("destination_request.request_headers") for item in findings)
         )
 
     def test_stored_redaction_cannot_retain_raw_sensitive_value(self) -> None:
@@ -585,9 +740,7 @@ class PipelineTests(unittest.TestCase):
         email = "synthetic.user@example.com"
         req["raw_api_call"]["payload"]["contact_email"] = email
         req["resolved_data_layer"]["snapshot"] = deepcopy(req["raw_api_call"]["payload"])
-        findings = scan_requirement_sensitive_data(
-            req, req["expectation"]["sensitive_data_policy"]
-        )
+        findings = scan_requirement_sensitive_data(req, req["expectation"]["sensitive_data_policy"])
         req["sensitive_data_scan"]["findings"] = findings
         req["sensitive_data_scan"]["status"] = "FAIL"
         req["verdict"]["sensitive_data"] = "FAIL"
@@ -599,12 +752,8 @@ class PipelineTests(unittest.TestCase):
         data = client_side_fixture()
         req = requirement(data)
         req["journey"]["page_title"] = "Account synthetic.user@example.com"
-        findings = scan_requirement_sensitive_data(
-            req, req["expectation"]["sensitive_data_policy"]
-        )
-        self.assertTrue(
-            any(item["path"] == "journey.page_title" for item in findings)
-        )
+        findings = scan_requirement_sensitive_data(req, req["expectation"]["sensitive_data_policy"])
+        self.assertTrue(any(item["path"] == "journey.page_title" for item in findings))
 
     def test_sensitive_data_cli_returns_redacted_failure(self) -> None:
         data = client_side_fixture()
@@ -631,12 +780,8 @@ class PipelineTests(unittest.TestCase):
     def test_workbook_refuses_unquarantined_sensitive_evidence(self) -> None:
         data = client_side_fixture()
         req = requirement(data)
-        req["raw_api_call"]["payload"]["contact_email"] = (
-            "synthetic.user@example.com"
-        )
-        req["resolved_data_layer"]["snapshot"] = deepcopy(
-            req["raw_api_call"]["payload"]
-        )
+        req["raw_api_call"]["payload"]["contact_email"] = "synthetic.user@example.com"
+        req["resolved_data_layer"]["snapshot"] = deepcopy(req["raw_api_call"]["payload"])
         with tempfile.TemporaryDirectory() as tempdir:
             output = Path(tempdir) / "unsafe.xlsx"
             with self.assertRaises(ReportValidationError) as context:
@@ -691,9 +836,7 @@ class PipelineTests(unittest.TestCase):
         data = client_side_fixture()
         requirement(data).pop("regression")
         requirement(data)["verdict"].pop("regression")
-        self.assert_invalid(
-            data, "run regression_context requires requirement regression evidence"
-        )
+        self.assert_invalid(data, "run regression_context requires requirement regression evidence")
 
     def test_evidence_rows_require_provenance_metadata(self) -> None:
         data = client_side_fixture()
@@ -702,9 +845,7 @@ class PipelineTests(unittest.TestCase):
 
     def test_evidence_source_must_match_evidence_kind(self) -> None:
         data = client_side_fixture()
-        raw_evidence = next(
-            row for row in data["evidence"] if row["evidence_id"] == "EVD-RAW-011"
-        )
+        raw_evidence = next(row for row in data["evidence"] if row["evidence_id"] == "EVD-RAW-011")
         raw_evidence["source"] = "Analyst supplied"
         self.assert_invalid(data, "source is incompatible with kind 'api_call'")
 
@@ -719,8 +860,8 @@ class PipelineTests(unittest.TestCase):
             "EVD-RAW-011",
             "EVD-DL-011",
             "EVD-VAR-011",
-            "EVD-TAG-CONFIG-011",
-            "EVD-TAG-RUNTIME-011",
+            "EVD-META-CONFIG-001",
+            "EVD-META-RUNTIME-001",
             "EVD-SCENARIO-001",
             "EVD-TRIGGER-001",
             "EVD-SEQUENCE-001",
@@ -733,9 +874,7 @@ class PipelineTests(unittest.TestCase):
             with self.subTest(evidence_id=evidence_id):
                 data = client_side_fixture()
                 evidence = next(
-                    row
-                    for row in data["evidence"]
-                    if row["evidence_id"] == evidence_id
+                    row for row in data["evidence"] if row["evidence_id"] == evidence_id
                 )
                 evidence["kind"] = "screenshot"
                 self.assert_invalid(data, "evidence kind must be")
@@ -744,9 +883,7 @@ class PipelineTests(unittest.TestCase):
         data = fixture()
         add_consent_override(data, approved=True)
         approval = next(
-            row
-            for row in data["evidence"]
-            if row["evidence_id"] == "EVD-CMP-APPROVAL-001"
+            row for row in data["evidence"] if row["evidence_id"] == "EVD-CMP-APPROVAL-001"
         )
         approval["kind"] = "screenshot"
         self.assert_invalid(data, "consent.approval: evidence kind must be")
@@ -762,13 +899,10 @@ class PipelineTests(unittest.TestCase):
     def test_non_datalayer_client_source_is_supported_without_fabricated_push(self) -> None:
         data = fixture()
         req = requirement(data)
-        data["run"]["included_layers"].append(
-            "source_signal_when_no_data_layer_push"
-        )
+        data["run"]["included_layers"].append("source_signal_when_no_data_layer_push")
         req["expectation"]["source_mechanism"] = "direct_vendor_call"
         req["expectation"]["resolved_data_layer_applicable"] = False
         req["expectation"].pop("variable_name")
-        req["expectation"].pop("tag_configuration_field")
         req["raw_api_call"] = None
         req["resolved_data_layer"] = None
         req["gtm_variable"] = None
@@ -787,7 +921,7 @@ class PipelineTests(unittest.TestCase):
                 "resolved_data_layer": None,
                 "gtm_variable": None,
                 "tag_configuration": "PASS",
-                "tag_parameter": None,
+                "tag_parameter": "PASS",
             }
         )
         req["evidence_ids"].append("EVD-SOURCE-001")
@@ -796,6 +930,9 @@ class PipelineTests(unittest.TestCase):
                 "evidence_id": "EVD-SOURCE-001",
                 "kind": "direct_vendor_call",
                 "source": "Browser Console",
+                "capture_mode": "direct",
+                "action_id": "ACT-001",
+                "event_index": 11,
                 "source_detail": "Observed through Playwright console instrumentation",
                 "path_or_url": "evidence/source-001.json",
                 "captured_at": "2026-07-25T10:01:03+00:00",
@@ -820,9 +957,7 @@ class PipelineTests(unittest.TestCase):
         second["expectation"]["expected_endpoint_pattern"] = (
             "^https://www\\.google-analytics\\.com/g/collect"
         )
-        second["resolved_data_layer"]["snapshot"] = deepcopy(
-            second["raw_api_call"]["payload"]
-        )
+        second["resolved_data_layer"]["snapshot"] = deepcopy(second["raw_api_call"]["payload"])
         second["tag"].update(
             {
                 "container_id": "GTM-TEST",
@@ -830,6 +965,8 @@ class PipelineTests(unittest.TestCase):
                 "destination_id": "G-TEST000001",
                 "event_name": "add_to_cart",
                 "name": "GA4 - Event - add_to_cart",
+                "configuration_evidence_id": "EVD-GA4-CONFIG-002",
+                "runtime_evidence_id": "EVD-GA4-RUNTIME-002",
             }
         )
         second["destination_request"].update(
@@ -838,11 +975,64 @@ class PipelineTests(unittest.TestCase):
                 "vendor_family": "ga4",
                 "destination_id": "G-TEST000001",
                 "event_name": "add_to_cart",
+                "request_id": "NET-GA4-002",
+                "evidence_id": "EVD-GA4-NET-002",
                 "request_url": (
                     "https://www.google-analytics.com/g/collect"
                     "?tid=G-TEST000001&en=add_to_cart&value=29.9"
                 ),
             }
+        )
+        second["evidence_ids"].extend(
+            [
+                "EVD-GA4-CONFIG-002",
+                "EVD-GA4-RUNTIME-002",
+                "EVD-GA4-NET-002",
+            ]
+        )
+        data["evidence"].extend(
+            [
+                {
+                    "evidence_id": "EVD-GA4-CONFIG-002",
+                    "kind": "tag_configuration",
+                    "source": "Tag Assistant",
+                    "capture_mode": "direct",
+                    "action_id": "ACT-001",
+                    "event_index": 11,
+                    "container_id": "GTM-TEST",
+                    "tag_name": "GA4 - Event - add_to_cart",
+                    "configuration_field": "eventParameters.value",
+                    "path_or_url": "evidence/ga4-config-002.json",
+                    "captured_at": "2026-07-25T10:01:03+00:00",
+                    "description": "Exact GA4 tag configuration.",
+                },
+                {
+                    "evidence_id": "EVD-GA4-RUNTIME-002",
+                    "kind": "tag_runtime",
+                    "source": "Tag Assistant",
+                    "capture_mode": "direct",
+                    "action_id": "ACT-001",
+                    "event_index": 11,
+                    "container_id": "GTM-TEST",
+                    "tag_name": "GA4 - Event - add_to_cart",
+                    "configuration_field": "eventParameters.value",
+                    "path_or_url": "evidence/ga4-runtime-002.json",
+                    "captured_at": "2026-07-25T10:01:03+00:00",
+                    "description": "Exact GA4 runtime parameter.",
+                },
+                {
+                    "evidence_id": "EVD-GA4-NET-002",
+                    "kind": "browser_network_request",
+                    "source": "Browser Network",
+                    "capture_mode": "direct",
+                    "action_id": "ACT-001",
+                    "request_id": "NET-GA4-002",
+                    "container_id": "GTM-TEST",
+                    "path_or_url": "evidence/ga4-network-002.json",
+                    "captured_at": "2026-07-25T10:01:03+00:00",
+                    "description": "Exact decoded GA4 browser request.",
+                },
+            ]
         )
         data["requirements"].append(second)
         data["run"]["requirement_inventory"].append("REQ-002")
@@ -1161,10 +1351,20 @@ class PipelineTests(unittest.TestCase):
         add_consent_override(data, approved=True)
         self.assertEqual([], validate(data, strict=True))
 
-    def test_production_cmp_override_is_rejected(self) -> None:
+    def test_production_cmp_override_requires_explicit_exception(self) -> None:
         data = fixture()
         add_consent_override(data, approved=True, production=True)
-        self.assert_invalid(data, "forbidden in production")
+        self.assert_invalid(data, "production_exception_approved=true")
+
+    def test_explicit_production_cmp_override_is_valid_for_downstream_only(self) -> None:
+        data = fixture()
+        add_consent_override(
+            data,
+            approved=True,
+            production=True,
+            production_approved=True,
+        )
+        self.assertEqual([], validate(data, strict=True))
 
     def test_duplicate_evidence_id_is_rejected(self) -> None:
         data = fixture()
@@ -1247,7 +1447,6 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual("EVG-001", event_group_id)
         self.assertEqual("PASS", validate_event(updated, event_group_id)["status"])
 
-
     def test_synthetic_profile_uses_reserved_example_domain(self) -> None:
         result = subprocess.run(
             [
@@ -1312,10 +1511,249 @@ class PipelineTests(unittest.TestCase):
                 "PENDING",
                 ledger["requirements"][0]["journey"]["execution_status"],
             )
+            self.assertEqual(
+                "PENDING",
+                ledger["requirements"][0]["verdict"]["overall"],
+            )
+
+    def test_final_execution_contract_accepts_complete_case_and_push_stream(self) -> None:
+        data = fixture()
+        session = execution_fixture(data)
+        self.assertEqual([], validate_session(session, results=data, final=True))
+
+    def test_run_authorization_is_reusable_but_credentials_remain_ephemeral(self) -> None:
+        data = fixture()
+        session = execution_fixture(data)
+        session["authorizations"] = [
+            {
+                "authorization_id": "AUTH-SAFE-FORMS",
+                "scope": "ordinary_form_submission",
+                "description": "Complete safe synthetic forms for this controlled run.",
+                "environment_class": "preprod",
+                "exact_method": None,
+                "session_only": True,
+                "protected_exclusions": list(PROTECTED_AUTHORIZATION_EXCLUSIONS),
+                "approved_at": "2026-07-25T09:57:00+00:00",
+            }
+        ]
+        session["cases"][0]["authorization_ids"] = ["AUTH-SAFE-FORMS"]
+        self.assertEqual([], validate_session(session, results=data, final=True))
+        session["cases"][0]["material_variant"]["email"] = "user@example.com"
+        errors = validate_session(session, results=data, final=True)
+        self.assertTrue(
+            any("must remain ephemeral" in error for error in errors),
+            errors,
+        )
+
+    def test_final_execution_contract_rejects_an_unexecuted_material_case(self) -> None:
+        data = fixture()
+        session = execution_fixture(data)
+        second = deepcopy(session["cases"][0])
+        second.update(
+            {
+                "case_id": "CASE-002",
+                "material_variant": {"quantity": 2},
+                "execution_status": "PENDING",
+                "final_action_id": None,
+            }
+        )
+        session["cases"].append(second)
+        errors = validate_session(session, results=data, final=True)
+        self.assertTrue(
+            any("applicable case remains PENDING" in error for error in errors),
+            errors,
+        )
+
+    def test_final_execution_contract_rejects_an_unreconciled_business_push(self) -> None:
+        data = fixture()
+        session = execution_fixture(data)
+        session["actions"][0]["observed_business_push_count"] = 2
+        errors = validate_session(session, results=data, final=True)
+        self.assertTrue(
+            any("does not match classified stream rows" in error for error in errors),
+            errors,
+        )
+
+    def test_anomalous_business_push_requires_an_unexpected_finding(self) -> None:
+        data = fixture()
+        session = execution_fixture(data)
+        session["business_pushes"][0]["classification"] = "duplicate"
+        session["business_pushes"][0]["classification_reason"] = (
+            "Duplicate add_to_cart in the same action window."
+        )
+        errors = validate_session(session, results=data, final=True)
+        self.assertTrue(
+            any("anomalous push is absent from unexpected" in error for error in errors),
+            errors,
+        )
+
+    def test_final_execution_contract_rejects_missing_applicable_network_layer(self) -> None:
+        data = fixture()
+        session = execution_fixture(data)
+        session["cases"][0]["applicable_layers"].remove("destination_request_when_applicable")
+        session["actions"][0]["layer_results"] = [
+            row
+            for row in session["actions"][0]["layer_results"]
+            if row["layer"] != "destination_request_when_applicable"
+        ]
+        errors = validate_session(session, results=data, final=True)
+        self.assertTrue(
+            any("applicable_layers omit" in error for error in errors),
+            errors,
+        )
+
+    def test_local_only_tag_does_not_invent_a_network_layer(self) -> None:
+        data = fixture()
+        req = requirement(data)
+        req["expectation"]["tag_delivery"] = "local_only"
+        for field in (
+            "vendor_family",
+            "destination_id",
+            "destination_event_name",
+            "destination_id_parameter_path",
+            "destination_event_parameter_path",
+            "destination_parameter_path",
+            "expected_destination_value",
+            "expected_destination_type",
+            "expected_endpoint_pattern",
+            "expected_request_behavior",
+        ):
+            req["expectation"].pop(field, None)
+        req["destination_request"] = None
+        req["verdict"]["destination_request"] = None
+        req["verdict"]["destination_parameter"] = None
+        data["run"]["included_layers"].remove("destination_request_when_applicable")
+        self.assertNotIn(
+            "destination_request_when_applicable",
+            applicable_layers(data["requirements"]),
+        )
+        self.assertEqual([], validate(data, strict=True))
+
+    def test_reconstructed_evidence_cannot_claim_direct_api_call_proof(self) -> None:
+        data = fixture()
+        raw_evidence = next(row for row in data["evidence"] if row["evidence_id"] == "EVD-RAW-011")
+        raw_evidence["capture_mode"] = "supplemental"
+        self.assert_invalid(data, "not reconstructed or inferred")
+
+    def test_review_is_reserved_for_a_precise_semantic_question(self) -> None:
+        data = fixture()
+        req = requirement(data)
+        req["verdict"]["tag_parameter"] = "REVIEW"
+        req["verdict"]["overall"] = "REVIEW"
+        self.assert_invalid(data, "review_basis=semantic_ambiguity")
+        req["verdict"]["review_basis"] = "semantic_ambiguity"
+        req["verdict"]["review_question"] = (
+            "Does the approved plan intentionally round value to one decimal?"
+        )
+        self.assertEqual([], validate(data, strict=True))
+
+    def test_event_feedback_contains_layer_results_and_exact_retest_location(self) -> None:
+        data = fixture()
+        session = execution_fixture(data)
+        req = requirement(data)
+        req["verdict"]["tag_parameter"] = "FAIL"
+        req["verdict"]["overall"] = "FAIL"
+        req["verdict"]["failure_layer"] = "tag_parameter"
+        req["verdict"]["mismatch"] = "Runtime value is 29 instead of 29.9."
+        layer = next(
+            row for row in session["actions"][0]["layer_results"] if row["layer"] == "tag_parameter"
+        )
+        layer["status"] = "FAIL"
+        layer["reason"] = "Runtime value is 29 instead of 29.9."
+        feedback = event_feedback(data, session)[0]
+        self.assertEqual("FAIL", feedback["status"])
+        self.assertEqual("FAIL", feedback["verified_layers"]["tag_parameter"])
+        self.assertIn("https://shop.example.test/product", feedback["retest"])
+        self.assertIn("Add to cart", feedback["retest"])
+
+    def test_event_feedback_uses_the_final_retry_layers(self) -> None:
+        data = fixture()
+        session = execution_fixture(data)
+        first_attempt = session["actions"][0]
+        first_attempt["interaction_outcome"] = "failed"
+        failed_layer = next(
+            row for row in first_attempt["layer_results"] if row["layer"] == "tag_parameter"
+        )
+        failed_layer["status"] = "FAIL"
+        failed_layer["reason"] = "The first click was intercepted before completion."
+        final_attempt = deepcopy(first_attempt)
+        final_attempt.update(
+            {
+                "action_id": "ACT-002",
+                "attempt_number": 2,
+                "retry_of_action_id": "ACT-001",
+                "interaction_outcome": "completed",
+            }
+        )
+        final_layer = next(
+            row for row in final_attempt["layer_results"] if row["layer"] == "tag_parameter"
+        )
+        final_layer["status"] = "PASS"
+        final_layer["reason"] = "The completed retry matched the planned value."
+        session["actions"].append(final_attempt)
+        session["cases"][0]["final_action_id"] = "ACT-002"
+
+        feedback = event_feedback(data, session)[0]
+
+        self.assertEqual("PASS", feedback["status"])
+        self.assertEqual("PASS", feedback["verified_layers"]["tag_parameter"])
+        self.assertNotIn("first click was intercepted", feedback["reason"])
+
+    def test_workbook_includes_interaction_cases_and_observed_push_stream(self) -> None:
+        data = fixture()
+        session = execution_fixture(data)
+        with tempfile.TemporaryDirectory() as tempdir:
+            output = Path(tempdir) / "complete-recette.xlsx"
+            build_workbook(data, output, session=session)
+            workbook = load_workbook(output, read_only=True)
+            self.assertEqual(2, workbook["Interaction Cases"].max_row)
+            self.assertEqual(2, workbook["Observed Push Stream"].max_row)
+            workbook.close()
+
+    def test_strict_workbook_cli_requires_and_accepts_the_session_ledger(self) -> None:
+        data = fixture()
+        session = execution_fixture(data)
+        with tempfile.TemporaryDirectory() as tempdir:
+            results_path = Path(tempdir) / "results.json"
+            session_path = Path(tempdir) / "session.json"
+            output = Path(tempdir) / "recette.xlsx"
+            results_path.write_text(json.dumps(data), encoding="utf-8")
+            session_path.write_text(json.dumps(session), encoding="utf-8")
+            missing = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "build_recette_report.py"),
+                    str(results_path),
+                    str(output),
+                    "--strict",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            complete = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "build_recette_report.py"),
+                    str(results_path),
+                    str(output),
+                    "--strict",
+                    "--session-ledger",
+                    str(session_path),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        self.assertEqual(2, missing.returncode)
+        self.assertIn("requires --session-ledger", missing.stderr)
+        self.assertEqual(0, complete.returncode, complete.stderr)
 
     def test_preview_session_ledger_supports_checkpointed_action(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             ledger = Path(tempdir) / "session.json"
+            results = Path(tempdir) / "results.json"
+            results.write_text(json.dumps(fixture()), encoding="utf-8")
             script = str(SCRIPTS / "preview_session_ledger.py")
 
             def run(*args: str) -> subprocess.CompletedProcess[str]:
@@ -1367,18 +1805,34 @@ class PipelineTests(unittest.TestCase):
                 "Product",
             )
             run(
-                "begin-action",
+                "register-case",
                 str(ledger),
-                "--action-id",
-                "ACT-001",
-                "--requirement-id",
-                "REQ-001",
+                "--results",
+                str(results),
+                "--case-id",
+                "CASE-ADD-DESKTOP",
+                "--event-group-id",
+                "EVG-001",
                 "--url",
                 "https://shop.example.test/product",
                 "--element",
                 "Add to cart",
+                "--placement",
+                "product detail",
                 "--action",
                 "click",
+                "--variant",
+                "quantity=1",
+                "--discovered-from",
+                "tracking_plan",
+            )
+            run(
+                "begin-action",
+                str(ledger),
+                "--action-id",
+                "ACT-001",
+                "--case-id",
+                "CASE-ADD-DESKTOP",
                 "--last-event-before",
                 "10",
                 "--consent-state",
@@ -1403,6 +1857,8 @@ class PipelineTests(unittest.TestCase):
                 "true",
                 "--settlement-reason",
                 "interaction_failed",
+                "--observed-business-push-count",
+                "0",
             )
             run(
                 "begin-action",
@@ -1411,14 +1867,8 @@ class PipelineTests(unittest.TestCase):
                 "ACT-002",
                 "--retry-of-action-id",
                 "ACT-001",
-                "--requirement-id",
-                "REQ-001",
-                "--url",
-                "https://shop.example.test/product",
-                "--element",
-                "Add to cart",
-                "--action",
-                "click",
+                "--case-id",
+                "CASE-ADD-DESKTOP",
                 "--last-event-before",
                 "10",
                 "--consent-state",
@@ -1427,6 +1877,28 @@ class PipelineTests(unittest.TestCase):
                 "3000",
                 "--timeout-ms",
                 "20000",
+            )
+            run(
+                "record-push",
+                str(ledger),
+                "--push-id",
+                "PUSH-011",
+                "--action-id",
+                "ACT-002",
+                "--event-index",
+                "11",
+                "--event-name",
+                "add_to_cart",
+                "--classification",
+                "expected",
+                "--classification-reason",
+                "Expected add_to_cart for the completed product CTA case.",
+                "--page-state",
+                "Basket count is 1",
+                "--evidence-id",
+                "EVD-RAW-011",
+                "--container-id",
+                "GTM-TEST",
             )
             run(
                 "settle-action",
@@ -1449,7 +1921,32 @@ class PipelineTests(unittest.TestCase):
                 "true",
                 "--settlement-reason",
                 "expected_and_quiet",
+                "--observed-business-push-count",
+                "1",
             )
+            for layer, evidence_id in (
+                ("raw_api_call", "EVD-RAW-011"),
+                ("resolved_data_layer", "EVD-DL-011"),
+                ("gtm_variable", "EVD-VAR-011"),
+                ("tag_configuration", "EVD-TAG-CONFIG-011"),
+                ("tag_firing", "EVD-TAG-RUNTIME-011"),
+                ("tag_parameter", "EVD-TAG-RUNTIME-011"),
+                ("destination_request_when_applicable", "EVD-NET-011"),
+            ):
+                run(
+                    "record-layer",
+                    str(ledger),
+                    "--action-id",
+                    "ACT-002",
+                    "--layer",
+                    layer,
+                    "--status",
+                    "PASS",
+                    "--reason",
+                    f"{layer} matched the tracking-plan expectation.",
+                    "--evidence-id",
+                    evidence_id,
+                )
             state = json.loads(run("status", str(ledger)).stdout)
             self.assertEqual("SETTLED", state["actions"][0]["state"])
             self.assertEqual("failed", state["actions"][0]["interaction_outcome"])
@@ -1468,14 +1965,8 @@ class PipelineTests(unittest.TestCase):
                 "ACT-003",
                 "--retry-of-action-id",
                 "ACT-002",
-                "--requirement-id",
-                "REQ-001",
-                "--url",
-                "https://shop.example.test/product",
-                "--element",
-                "Add to cart",
-                "--action",
-                "click",
+                "--case-id",
+                "CASE-ADD-DESKTOP",
                 "--last-event-before",
                 "12",
                 "--consent-state",
@@ -1501,13 +1992,15 @@ class PipelineTests(unittest.TestCase):
                     "true",
                     "--settlement-reason",
                     "quiet_without_expected",
+                    "--observed-business-push-count",
+                    "0",
                 ],
                 check=False,
                 capture_output=True,
                 text=True,
             )
             self.assertNotEqual(0, invalid.returncode)
-            self.assertIn("requires an independent --completion-signal", invalid.stderr)
+            self.assertIn("--completion-signal", invalid.stderr)
 
 
 if __name__ == "__main__":

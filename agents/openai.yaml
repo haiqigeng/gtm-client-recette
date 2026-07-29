@@ -1,4 +1,4 @@
 interface:
   display_name: "GTM Preview Recette"
   short_description: "Run exhaustive client-side GTM acceptance QA"
-  default_prompt: "Use $gtm-preview-recette to test every applicable tracking-plan interaction in order, prove each website action independently, settle the relevant event stream adaptively, reconcile raw and resolved GTM, tag, runtime, and browser-send evidence, complete safe gated journeys, and deliver one evidence-backed verdict per event plus a validated XLSX."
+  default_prompt: "Use $gtm-preview-recette to register and test every applicable tracking-plan interaction case in order, prove each website action independently, classify and count every business push, close every applicable raw/resolved/GTM/tag/runtime/browser-send layer with direct evidence, complete safe gated journeys, and deliver immediate per-event verdicts plus a strictly validated XLSX."

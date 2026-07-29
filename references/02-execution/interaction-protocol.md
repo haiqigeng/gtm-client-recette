@@ -15,7 +15,10 @@ responsibility label: `Analyst`, `Codex`, or `Shared`.
 
 State which analyst-approved attached or dedicated browser context will be
 used. Authentication outside that controlled context does not carry over.
-Never ask for, copy, store, log, or automate credentials.
+Never ask for, copy, store, log, or automate protected or real credentials.
+Synthetic credentials created for a safe controlled test may be used
+ephemerally in that same browser run, but never shown in chat or retained in
+the session ledger, evidence, or workbook.
 
 List only missing essentials: acceptance specification and target environment.
 Mention supplied journeys, URLs, screenshots, GTM identifiers, and consent
@@ -41,6 +44,11 @@ Use simple replies for checkpoints:
 
 Do not require repeated `continue` or `generate report` replies. Proceed
 automatically through analyst-independent work.
+
+An explicit run-wide authorization covers equivalent safe actions within its
+stated scope, environment, and origin. Record the scope with
+`preview_session_ledger.py authorize` and do not ask again for every form or
+lead. It cannot authorize a protected checkpoint.
 
 ## Progress updates
 
@@ -106,3 +114,6 @@ concise final list in original plan order. Group homogeneous successful cases
 with the tested count, but name each distinct failed, blocked, or review case
 and its placement/value. Do not emit one final verdict after a representative
 click while other applicable cases remain pending.
+
+For every non-PASS event, also state the exact URL, placement, element,
+interaction, and material variant needed to retest it.

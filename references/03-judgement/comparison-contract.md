@@ -53,6 +53,11 @@ Use one event verdict after all of its applicable cases. Aggregate the worst
 case and preserve each distinct failed variant or placement; homogeneous
 successes may be summarized with their executed count.
 
+Derive and store applicable layers before each case executes. Final
+certification requires every one of those layers on the completed action.
+Missing authoritative evidence is `BLOCKED`, not omitted or changed to
+`REVIEW`.
+
 Concerned tags are only:
 
 - expected to fire;
@@ -77,7 +82,9 @@ Unreliable Preview is `BLOCKED`; an evidenced acceptance contradiction is
 Browser network is authoritative for the outbound client send attempt; vendor
 helpers and UIs are supplementary. Reconcile the decoded destination ID,
 vendor event name, and tested value with their explicit raw query/body/header
-paths. Never infer vendor ingestion or reporting.
+paths. A `browser_request` tag requires this layer and a stable request/action/
+container link; an explicitly `local_only` tag does not. Never infer vendor
+ingestion or reporting.
 
 Use a tracking plan or explicit analyst-defined acceptance rule. Unresolved
 meaning is `REVIEW`; missing acceptance criteria blocks the run.

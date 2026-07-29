@@ -3,7 +3,9 @@
 Generate schema-v2 reports with:
 
 ```powershell
-python scripts/build_recette_report.py normalized-results.json gtm-recette-results.xlsx --strict
+python scripts/build_recette_report.py normalized-results.json gtm-recette-results.xlsx `
+  --strict `
+  --session-ledger session.json
 ```
 
 The workbook contains, in order:
@@ -11,23 +13,26 @@ The workbook contains, in order:
 1. `Client Summary`
 2. `Requirement Matrix`
 3. `Journey Coverage`
-4. `Event Evidence`
-5. `Tag Evidence`
-6. `Destination Evidence`
-7. `Trigger & Sequence`
-8. `Consent`
-9. `Business Rules`
-10. `Sensitive Data`
-11. `Client Checks`
-12. `Regression`
-13. `Container Context`
-14. `Unexpected Events-Tags`
-15. `Blockers`
-16. `Evidence Catalogue`
-17. `Run Context`
+4. `Interaction Cases`
+5. `Event Evidence`
+6. `Observed Push Stream`
+7. `Tag Evidence`
+8. `Destination Evidence`
+9. `Trigger & Sequence`
+10. `Consent`
+11. `Business Rules`
+12. `Sensitive Data`
+13. `Client Checks`
+14. `Regression`
+15. `Container Context`
+16. `Unexpected Events-Tags`
+17. `Blockers`
+18. `Evidence Catalogue`
+19. `Run Context`
 
 `Client Summary` includes the complete event list in original plan order,
-status, requirement count, concise reason, and evidence IDs.
+status, requirement and case counts, verified layer statuses, concise reason,
+exact non-PASS retest interaction, and evidence IDs.
 
 `Requirement Matrix` is the atomic technical deliverable. Show source
 expectation, raw value/state/type, resolved value/state/type, GTM variable,
@@ -40,6 +45,12 @@ by side.
 safe action value/type/source, execution status, blockers, and evidence in
 source order. Protected analyst input is represented only by its canonical
 redacted marker.
+
+`Interaction Cases` lists every case and retained attempt with placement,
+material variant, applicable layers, completion signal, push count, retry
+lineage, and layer results. `Observed Push Stream` lists every chronological
+business push, action/case mapping, page/state, classification/reason,
+container, and exact API Call evidence.
 
 `Event Evidence` keeps action and retry IDs, independent interaction outcome
 and completion signal, adaptive quiet/timeout values, stream-settlement reason,
@@ -57,11 +68,12 @@ their declared raw request paths, the expected and actual tested-parameter
 paths, decoded value/type, request behaviour/count, endpoint, and evidence.
 This lets an analyst trace each plan value back to the captured browser send.
 
-`Evidence Catalogue` keeps canonical evidence kind/source separate from
-optional `source_detail`, then path/URL, timezone-qualified capture time, and
-redacted description.
+`Evidence Catalogue` keeps canonical evidence kind/source/capture mode and
+structured action/event/container/request/tag linkage separate from optional
+`source_detail`, then path/URL, timezone-qualified capture time, and redacted
+description.
 
-Keep all 17 sheets even when an optional domain has zero rows. The empty,
+Keep all 19 sheets even when an optional domain has zero rows. The empty,
 filtered sheet makes non-applicability visible and prevents a missing worksheet
 from hiding an omitted layer.
 

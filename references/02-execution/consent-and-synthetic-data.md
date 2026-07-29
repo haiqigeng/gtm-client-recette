@@ -42,12 +42,13 @@ Use current official references when interpreting Google behaviour:
 
 This is technical acceptance evidence, not a legal determination.
 
-## Exceptional test-environment override
+## Exceptional CMP override
 
 Never inject or simulate consent routinely. Consider a browser-session override
 only when all of these are true:
 
-1. the environment is test, preprod, or staging—not production;
+1. the environment is test, preprod, staging, or an explicitly approved
+   production exception;
 2. the natural CMP is demonstrably missing or defective;
 3. that defect blocks otherwise valid downstream tracking checks;
 4. the intended consent setup and temporary values are known;
@@ -69,6 +70,13 @@ event-level result as `session_override`. Keep it separate from `natural_cmp`
 evidence and verdicts. Never convert a natural CMP failure to `PASS` because an
 override enabled a downstream tag.
 
+For production, require a distinct
+`production_cmp_session_override` authorization, the exact temporary method,
+a `CMP_PRODUCTION_ENVIRONMENT` blocker, and restoration confirmation. Keep
+`native_cmp_status` non-PASS. A downstream event may be checked under the
+simulated state, but any in-scope native-CMP acceptance remains failed,
+blocked, or under a precise semantic review.
+
 ## Synthetic form data
 
 For an in-scope journey:
@@ -77,7 +85,8 @@ For an in-scope journey:
 - use unique, obviously synthetic values and reserved example domains;
 - never use a real person's identity, inbox, phone, credentials, or payment
   data;
-- never expose generated passwords in chat evidence or the report;
+- never expose generated passwords in chat, the session ledger, evidence, or
+  the report;
 - accept only required terms, privacy notices, and declarations;
 - leave optional marketing, profiling, partner-sharing, newsletter, and
   communication choices unchecked unless that opt-in is the tested conversion.
@@ -98,12 +107,22 @@ confirmed test, staging, or preproduction environment, execute the ordinary
 final lead, registration, or conversion submission by default. Ask first only
 when the environment is production or unconfirmed, the action mutates a real
 account, the downstream consequence is unresolved, or the effect is
-irreversible. Record any created test account, lead, or subscription and its
-cleanup status.
+irreversible. Record only the non-sensitive outcome and cleanup status of any
+created test account, lead, or subscription.
 
-Never request, inspect, copy, retain, or automate credentials. If an existing
-account is required, prepare the exact login state and ask the analyst to sign
-in inside the dedicated browser.
+Synthetic credentials may be created, entered, and reused ephemerally inside
+the same controlled run so sign-up and subsequent login can both be tested.
+Never send them through chat or store them in JSON, logs, screenshots,
+evidence, or the workbook. If an existing or protected account is required,
+prepare the exact login state and ask the analyst to sign in inside the
+dedicated browser.
+
+One explicit run-wide authorization applies to all equivalent safe actions in
+its declared scope. It does not need to be requested again per event. Supported
+scopes distinguish safe synthetic identity, ordinary form submission,
+non-production leads, explicitly approved reversible production submissions,
+and CMP overrides. Every scope excludes MFA, CAPTCHA, verification, real
+payment, external approval, and irreversible action.
 
 ## Protected journey handoff
 

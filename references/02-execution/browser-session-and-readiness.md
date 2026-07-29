@@ -50,8 +50,9 @@ connection separately with `container_id`. Simultaneous or sequential Preview
 evidence must remain container-specific.
 
 Use `scripts/preview_session_ledger.py` alongside the browser tool when a run
-needs resumable surface and action-boundary state. Do not store authentication or
-Preview tokens in the ledger or user-facing evidence.
+needs resumable surface, case, action-boundary, layer, and push-stream state.
+Do not store authentication, synthetic credentials, or Preview tokens in the
+ledger or user-facing evidence.
 
 ## Readiness gate
 
@@ -80,6 +81,8 @@ Record:
 - settled final index;
 - quiet-window and bounded-timeout values;
 - whether the relevant stream settled and why.
+- the independently observed business-push count and every classified push ID;
+- every applicable layer result and direct evidence ID.
 
 Normalize the action value, JSON-compatible type, and source. Use explicit
 `null`/`not_applicable` for a plain click or load. Preserve safe supplied or
@@ -98,7 +101,7 @@ quiet, or until a bounded timeout expires. Treat event absence as:
 Use a timezone-qualified action timestamp and non-negative integer event
 cursors. The target occurrence must fall after the last pre-action cursor and
 at or before the settled final cursor. A finalized `REVIEW` attempt keeps the
-same boundary and occurrence evidence.
+same boundary and occurrence evidence and names the precise semantic question.
 
 ## Adaptive settlement
 
@@ -156,6 +159,10 @@ classification:
 - premature, delayed, or wrong-order occurrence;
 - wrong-page, wrong-action, wrong-state, or otherwise wrong-context occurrence;
 - unplanned but relevant business occurrence.
+
+Record every classified row before settling the action. The
+`observed_business_push_count` entered at settlement must equal the number of
+retained rows for that action; a mismatch blocks final certification.
 
 Do not inspect only the event name being tested. A correct planned event pushed
 on the wrong page is a defect in occurrence/trigger behaviour. Multiple

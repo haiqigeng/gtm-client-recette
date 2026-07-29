@@ -90,6 +90,12 @@ For Custom JavaScript variables and Custom HTML:
 - never infer that a tag succeeded merely because its container reports
   `Fired`.
 
+When the Custom JavaScript value is absent from the raw API Call, inspect it in
+this order: Tag Assistant Variables at the exact event, the concerned tag's
+resolved runtime parameter, then the decoded browser request field. Record all
+three applicable layers independently. Do not mark the value blocked merely
+because it was not a literal raw-push field.
+
 Represent setup/main/cleanup order in `sequence_contract` and
 `tag_sequence.actual_order`. Represent other prerequisites as
 `tag_dependency` checks.

@@ -145,6 +145,8 @@
       "evidence_id": "EVD-ACTION-001",
       "kind": "action_boundary",
       "source": "Playwright",
+      "capture_mode": "direct",
+      "action_id": "ACT-001",
       "path_or_url": "evidence/action-001.json",
       "captured_at": "2026-07-25T10:01:03+00:00",
       "description": "Stable page-load boundary."
@@ -153,6 +155,9 @@
       "evidence_id": "EVD-BROWSER-001",
       "kind": "browser_interception",
       "source": "Playwright",
+      "capture_mode": "direct",
+      "action_id": "ACT-001",
+      "event_index": 1,
       "path_or_url": "evidence/browser-001.json",
       "captured_at": "2026-07-25T10:01:03+00:00",
       "description": "Deep-cloned dataLayer push observed before cmp_init."

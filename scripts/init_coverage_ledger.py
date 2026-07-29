@@ -9,25 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-CANONICAL_LAYERS = [
-    "raw_api_call",
-    "resolved_data_layer",
-    "gtm_variable",
-    "tag_configuration",
-    "tag_firing",
-    "tag_parameter",
-    "consent_when_applicable",
-    "source_signal_when_no_data_layer_push",
-    "destination_request_when_applicable",
-    "trigger_logic_when_applicable",
-    "tag_sequence_when_applicable",
-    "business_rules_when_declared",
-    "sensitive_data_scan",
-    "client_checks_when_applicable",
-    "regression_when_baseline_provided",
-    "container_context_when_applicable",
-    "conditional_scenarios_when_applicable",
-]
+from layer_contract import CANONICAL_LAYERS, applicable_layers
 
 
 def parse_args() -> argparse.Namespace:
@@ -124,18 +106,7 @@ def initialize_requirement(row: dict[str, Any]) -> dict[str, Any]:
     )
     expectation.setdefault("source_mechanism", "data_layer_push")
     requirement["expectation"] = expectation
-    has_destination = any(
-        expectation.get(field) not in (None, "")
-        for field in (
-            "vendor_family",
-            "destination_id",
-            "destination_event_name",
-            "destination_id_parameter_path",
-            "destination_event_parameter_path",
-            "destination_parameter_path",
-            "expected_request_behavior",
-        )
-    )
+    has_destination = "destination_request_when_applicable" in applicable_layers([requirement])
     requirement.update(
         {
             "browser_context_id": requirement.get("browser_context_id", "desktop-default"),
@@ -174,7 +145,7 @@ def initialize_requirement(row: dict[str, Any]) -> dict[str, Any]:
                     "applicable": True,
                     "scanned_targets": [],
                     "findings": [],
-                    "status": "REVIEW",
+                    "status": "PENDING",
                     "evidence_id": None,
                 }
                 if expectation.get("sensitive_data_policy")
@@ -183,49 +154,37 @@ def initialize_requirement(row: dict[str, Any]) -> dict[str, Any]:
             "client_checks": [],
             "regression": None,
             "verdict": {
-                "event_occurrence": "REVIEW",
+                "event_occurrence": "PENDING",
                 "source_signal": (
-                    "REVIEW"
-                    if expectation.get("source_mechanism") != "data_layer_push"
-                    else None
+                    "PENDING" if expectation.get("source_mechanism") != "data_layer_push" else None
                 ),
-                "raw_payload": "REVIEW",
-                "resolved_data_layer": "REVIEW",
-                "gtm_variable": "REVIEW" if expectation.get("variable_name") else None,
-                "tag_configuration": (
-                    "REVIEW" if expectation.get("tag_name") else None
-                ),
-                "tag_firing": "REVIEW" if expectation.get("tag_name") else None,
+                "raw_payload": "PENDING",
+                "resolved_data_layer": "PENDING",
+                "gtm_variable": "PENDING" if expectation.get("variable_name") else None,
+                "tag_configuration": ("PENDING" if expectation.get("tag_name") else None),
+                "tag_firing": "PENDING" if expectation.get("tag_name") else None,
                 "tag_parameter": (
-                    "REVIEW" if expectation.get("tag_configuration_field") else None
+                    "PENDING" if expectation.get("tag_configuration_field") else None
                 ),
-                "destination_request": "REVIEW" if has_destination else None,
+                "destination_request": "PENDING" if has_destination else None,
                 "destination_parameter": (
-                    "REVIEW" if expectation.get("destination_parameter_path") else None
+                    "PENDING" if expectation.get("destination_parameter_path") else None
                 ),
-                "trigger_logic": (
-                    "REVIEW" if expectation.get("trigger_contract") else None
-                ),
-                "tag_sequence": (
-                    "REVIEW" if expectation.get("sequence_contract") else None
-                ),
+                "trigger_logic": ("PENDING" if expectation.get("trigger_contract") else None),
+                "tag_sequence": ("PENDING" if expectation.get("sequence_contract") else None),
                 "consent": (
-                    "REVIEW"
+                    "PENDING"
                     if (
                         expectation.get("expected_consent_state") not in (None, "")
                         or expectation.get("consent_contract") is not None
                     )
                     else None
                 ),
-                "business_rule": (
-                    "REVIEW" if expectation.get("business_rules") else None
-                ),
-                "sensitive_data": (
-                    "REVIEW" if expectation.get("sensitive_data_policy") else None
-                ),
+                "business_rule": ("PENDING" if expectation.get("business_rules") else None),
+                "sensitive_data": ("PENDING" if expectation.get("sensitive_data_policy") else None),
                 "client_checks": None,
                 "regression": None,
-                "overall": "REVIEW",
+                "overall": "PENDING",
                 "failure_layer": None,
                 "mismatch": "Pending execution",
                 "reason_source": None,
@@ -235,70 +194,6 @@ def initialize_requirement(row: dict[str, Any]) -> dict[str, Any]:
         }
     )
     return requirement
-
-
-def applicable_layers(
-    requirements: list[dict[str, Any]],
-    container_count: int,
-) -> list[str]:
-    layers: set[str] = set()
-    for requirement in requirements:
-        if requirement.get("scope_status") == "OUT_OF_SCOPE":
-            continue
-        expectation = requirement.get("expectation", {})
-        mechanism = expectation.get("source_mechanism", "data_layer_push")
-        if mechanism == "data_layer_push":
-            layers.add("raw_api_call")
-        else:
-            layers.add("source_signal_when_no_data_layer_push")
-        if expectation.get(
-            "resolved_data_layer_applicable",
-            mechanism in {"data_layer_push", "gtm_native_event", "gtm_auto_event"},
-        ):
-            layers.add("resolved_data_layer")
-        if expectation.get("variable_name"):
-            layers.add("gtm_variable")
-        if expectation.get("tag_name"):
-            layers.update({"tag_configuration", "tag_firing"})
-        if expectation.get("tag_configuration_field"):
-            layers.add("tag_parameter")
-        if (
-            expectation.get("expected_consent_state") not in (None, "")
-            or expectation.get("consent_contract") is not None
-        ):
-            layers.add("consent_when_applicable")
-        if any(
-            expectation.get(field) not in (None, "")
-            for field in (
-                "vendor_family",
-                "destination_id",
-                "destination_event_name",
-                "destination_id_parameter_path",
-                "destination_event_parameter_path",
-                "destination_parameter_path",
-                "expected_request_behavior",
-            )
-        ):
-            layers.add("destination_request_when_applicable")
-        if expectation.get("trigger_contract") is not None:
-            layers.add("trigger_logic_when_applicable")
-        if expectation.get("sequence_contract") is not None:
-            layers.add("tag_sequence_when_applicable")
-        if expectation.get("business_rules"):
-            layers.add("business_rules_when_declared")
-        if expectation.get("sensitive_data_policy"):
-            layers.add("sensitive_data_scan")
-        if requirement.get("client_checks"):
-            layers.add("client_checks_when_applicable")
-        if requirement.get("regression") is not None:
-            layers.add("regression_when_baseline_provided")
-        occurrence = expectation.get("expected_occurrence")
-        rule = occurrence.get("rule") if isinstance(occurrence, dict) else occurrence
-        if rule in {"conditional", "non_deterministic"}:
-            layers.add("conditional_scenarios_when_applicable")
-    if container_count > 1:
-        layers.add("container_context_when_applicable")
-    return [layer for layer in CANONICAL_LAYERS if layer in layers]
 
 
 def event_inventory(requirements: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -349,7 +244,10 @@ def main() -> int:
         )
     if args.viewport_width <= 0 or args.viewport_height <= 0:
         raise ValueError("Viewport dimensions must be positive integers.")
-    included_layers = applicable_layers(requirements, len(containers))
+    included_layers = applicable_layers(
+        requirements,
+        container_count=len(containers),
+    )
     for layer in args.included_layer:
         if layer not in included_layers:
             included_layers.append(layer)

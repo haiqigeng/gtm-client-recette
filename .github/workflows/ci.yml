@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.11", "3.12"]
+        python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -23,6 +23,7 @@ jobs:
           cache: pip
       - run: python -m pip install -e ".[dev]"
       - run: python -m ruff check --no-cache .
+      - run: python -m ruff format --check .
       - run: python -m unittest discover -s tests -v
       - run: python -B scripts/check_release.py
       - run: |

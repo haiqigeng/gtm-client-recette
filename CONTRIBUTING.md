@@ -8,9 +8,9 @@ container IDs, screenshots, reports, credentials, emails, or browser traces.
 Use semantic `v` versioning, never calendar-date versioning:
 
 - Store `MAJOR.MINOR.PATCH` in `pyproject.toml`; the current release is
-  `1.1.1`.
-- Prefix Git tags and release archives with `v`, for example `v1.1.1` and
-  `gtm-preview-recette-v1.1.1.zip`.
+  `1.2.0`.
+- Prefix Git tags and release archives with `v`, for example `v1.2.0` and
+  `gtm-preview-recette-v1.2.0.zip`.
 - Increment PATCH for compatible fixes, MINOR for compatible functionality,
   and MAJOR for incompatible changes.
 
@@ -19,8 +19,9 @@ Before opening a pull request, run:
 ```powershell
 python -m pip install -e ".[dev]"
 python -m ruff check --no-cache .
+python -m ruff format --check .
 python -m unittest discover -s tests -v
-python -B scripts/check_release.py --tag v1.1.1
+python -B scripts/check_release.py --tag v1.2.0
 ```
 
 Changes to verdict logic require a regression fixture that fails before the
@@ -38,6 +39,12 @@ behaviour also require an anonymized case in
 `references/02-execution/forward-test-prompts.md`. Keep coverage proportional:
 exhaust practical finite sets, document risk-based large-space coverage, and
 do not add speculative negative crawling.
+
+Changes to final certification must test the normalized result together with a
+schema-v2 session ledger. Cover case closure, retained retries, explicit
+business-push counts/classifications, per-case applicable layers, direct
+evidence linkage, and workbook case/push sheets. Do not weaken strict
+certification to preserve an incomplete legacy run.
 
 Changes to action execution or absence judgement must keep interaction outcome
 independent from tracking, retain failed attempts and retry lineage, and test
