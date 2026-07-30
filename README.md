@@ -6,19 +6,20 @@
 
 ## Current release
 
-[v1.2.0](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v1.2.0) is
+[v1.2.1](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v1.2.1) is
 the current supported release. Download the validated package:
-[gtm-preview-recette-v1.2.0.zip](https://github.com/haiqigeng/gtm-preview-recette/releases/download/v1.2.0/gtm-preview-recette-v1.2.0.zip).
+[gtm-preview-recette-v1.2.1.zip](https://github.com/haiqigeng/gtm-preview-recette/releases/download/v1.2.1/gtm-preview-recette-v1.2.1.zip).
 
-v1.2.0 is the execution-completeness release. It registers every applicable
-interaction case and material variant, retains bounded retries as distinct
-action windows, classifies and counts every observed business push, and closes
-every applicable client-side evidence layer before certification. Direct
-evidence is linked to the exact action, Preview event, container, tag, and
-browser request. Immediate feedback now includes case counts, layer results,
-precise reasons, and exact retest interactions. Ordinary gated journeys use
-ephemeral synthetic data under reusable run authorizations, while protected
-checkpoints and exceptional CMP overrides remain explicitly controlled.
+v1.2.1 is the verdict-safety and browser-hardening release. It prevents
+false-PASS results for malformed rule paths, conditional absence, out-of-scope
+cases, relevant unexpected pushes, non-dataLayer source rules, and Preview
+event-index reuse after reconnection. Event application is now transactional
+across normalized and session validation. The supplemental recorder tolerates
+hostile page objects, dataLayer reassignment, wrapper chains, and custom layer
+names without changing the website's own push result. Encoded sensitive URL
+values are detected without retaining value-derived fingerprints, workbook
+strings are formula-safe, and browser helper behaviour is exercised in
+Playwright CI.
 
 An expert-only workflow for testing an existing client-side Google Tag Manager
 implementation against a tracking plan. It coordinates Playwright, GTM Preview,
@@ -167,6 +168,14 @@ Run regression tests:
 
 ```powershell
 python -m unittest discover -s tests -v
+```
+
+Run the browser-helper regression:
+
+```powershell
+python -m pip install -e ".[browser-test]"
+python -m playwright install chromium
+python -B tests/run_browser_helpers.py
 ```
 
 The full agent workflow starts in `SKILL.md`. It loads the compact interaction

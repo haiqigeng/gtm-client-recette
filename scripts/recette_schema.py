@@ -6,11 +6,15 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
-from collections.abc import Iterable
 from datetime import datetime
 from typing import Any
 from urllib.parse import parse_qsl, urlsplit
 
+from acceptance_contract import (
+    VALID_STATUSES,
+    status_of,
+    worst_status,
+)
 from client_side_rules import (
     BUSINESS_RULE_OPERATORS,
     DEFAULT_FORBIDDEN_CATEGORIES,
@@ -23,6 +27,7 @@ from client_side_rules import (
     requirement_sensitive_targets,
     scan_requirement_sensitive_data,
     scan_sensitive_value,
+    valid_path,
 )
 from evidence_contract import (
     ACTION_BOUND_EVIDENCE_KINDS,
@@ -41,9 +46,6 @@ from layer_contract import (
 )
 
 SCHEMA_VERSION = 2
-VALID_STATUSES = {"PASS", "FAIL", "BLOCKED", "REVIEW", "NOT_TESTED"}
-STATUS_PRIORITY = ("FAIL", "BLOCKED", "REVIEW", "NOT_TESTED", "PASS")
-STATUS_RANK = {status: len(STATUS_PRIORITY) - index for index, status in enumerate(STATUS_PRIORITY)}
 MATCH_RULES = {
     "equals",
     "absent",
@@ -287,21 +289,6 @@ def evidence_ids(value: Any) -> list[str]:
     if isinstance(value, list):
         return [str(item).strip() for item in value if str(item).strip()]
     return [part.strip() for part in str(value).split(",") if part.strip()]
-
-
-def status_of(value: Any) -> str:
-    """Normalize a row or scalar status."""
-    if isinstance(value, dict):
-        value = value.get("status", "")
-    return str(value or "").strip().upper()
-
-
-def worst_status(statuses: Iterable[str]) -> str:
-    """Return the worst applicable status using the recette dependency order."""
-    normalized = [status_of(status) for status in statuses if status_of(status) in VALID_STATUSES]
-    if not normalized:
-        return "NOT_TESTED"
-    return max(normalized, key=lambda item: STATUS_RANK[item])
 
 
 def js_value_type(value: Any) -> str:
@@ -583,6 +570,16 @@ def _occurrence_rule(expectation: dict[str, Any]) -> tuple[str, str | None]:
     if isinstance(configured, dict):
         return str(configured.get("rule", "")), configured.get("anchor_event_name")
     return "", None
+
+
+def _expects_absence(expectation: dict[str, Any]) -> bool:
+    configured = expectation.get("expected_occurrence")
+    rule, _ = _occurrence_rule(expectation)
+    return rule == "absent" or (
+        rule == "conditional"
+        and isinstance(configured, dict)
+        and configured.get("branch_rule") == "absent"
+    )
 
 
 def _validate_occurrence(
@@ -1867,6 +1864,21 @@ def _validate_business_rule_results(
         for field in required_fields:
             if field not in rule or rule.get(field) in ("", None):
                 errors.append(f"{label}: business rule {rule_id or index} missing '{field}'")
+        path_fields = {
+            "equals_path": ("left_path", "right_path"),
+            "sum_product_equals": ("target_path", "items_path"),
+            "all_items_equal": ("items_path", "expected_path"),
+            "unique_across_requirements": ("path",),
+            "range": ("path",),
+            "format": ("path",),
+            "regex": ("path",),
+        }.get(operator, ())
+        for field in path_fields:
+            if rule.get(field) not in ("", None) and not valid_path(rule.get(field)):
+                errors.append(
+                    f"{label}: business rule {rule_id or index} has invalid path syntax "
+                    f"in '{field}'"
+                )
         if operator == "sum_product_equals":
             tolerance = rule.get("tolerance", 0)
             if (
@@ -1901,6 +1913,14 @@ def _validate_business_rule_results(
             errors.append(
                 f"{label}: business rule {rule_id or index} implies requires object conditions"
             )
+        elif operator == "implies":
+            for branch in ("if", "then"):
+                condition = rule[branch]
+                if not valid_path(condition.get("path")):
+                    errors.append(
+                        f"{label}: business rule {rule_id or index} has invalid path syntax "
+                        f"in '{branch}.path'"
+                    )
     if len(set(rule_ids)) != len(rule_ids):
         errors.append(f"{label}: business_rules contains duplicate rule_id values")
     if not isinstance(results, list):
@@ -1934,6 +1954,13 @@ def _validate_business_rule_results(
         elif expected_status != actual_status:
             errors.append(
                 f"{label}: business rule result {rule_id} contradicts deterministic evaluation"
+            )
+        computed_source = computed_by_id.get(rule_id, {}).get("evaluation_source")
+        supplied_source = result.get("evaluation_source")
+        if supplied_source not in (None, "") and supplied_source != computed_source:
+            errors.append(
+                f"{label}: business rule result {rule_id} evaluation_source differs "
+                "from deterministic evaluation"
             )
     component = status_of(verdict.get("business_rule"))
     result_statuses = [status_of(item.get("status")) for item in result_by_id.values()]
@@ -2923,7 +2950,7 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
                     f"{label}: PASS resolved Data Layer differs from raw value without "
                     "a documented transformation"
                 )
-        elif overall == "PASS" and _occurrence_rule(expectation)[0] != "absent":
+        elif overall == "PASS" and not _expects_absence(expectation):
             errors.append(f"{label}: PASS requires an observed event or an expected absence")
         elif status_of(verdict.get("event_occurrence")) == "FAIL":
             _validate_action_boundary(
@@ -3162,19 +3189,34 @@ def event_rollup(data: dict[str, Any]) -> list[dict[str, Any]]:
     by_group: dict[str, list[dict[str, Any]]] = {}
     for requirement in requirements:
         by_group.setdefault(str(requirement.get("event_group_id", "")), []).append(requirement)
+    unexpected_by_group: dict[str, list[dict[str, Any]]] = {}
+    for unexpected in as_rows(data.get("unexpected"), "unexpected"):
+        unexpected_by_group.setdefault(str(unexpected.get("event_group_id", "")), []).append(
+            unexpected
+        )
 
     output: list[dict[str, Any]] = []
     run = data.get("run", {})
     for event in run.get("event_inventory", []):
         group_id = str(event.get("event_group_id", ""))
         rows = by_group.get(group_id, [])
-        statuses = [status_of(row.get("verdict", {}).get("overall")) for row in rows]
+        mapped_unexpected = unexpected_by_group.get(group_id, [])
+        statuses = [status_of(row.get("verdict", {}).get("overall")) for row in rows] + [
+            status_of(row) for row in mapped_unexpected
+        ]
         failures = []
         evidence: set[str] = set()
         for row in rows:
             verdict = row.get("verdict", {})
             mismatch = verdict.get("mismatch") or row.get("notes")
             if status_of(verdict.get("overall")) != "PASS" and mismatch:
+                failures.append(str(mismatch))
+            evidence.update(evidence_ids(row.get("evidence_ids")))
+        for row in mapped_unexpected:
+            mismatch = (
+                row.get("classification_reason") or row.get("review_question") or row.get("notes")
+            )
+            if status_of(row) != "PASS" and mismatch:
                 failures.append(str(mismatch))
             evidence.update(evidence_ids(row.get("evidence_ids")))
         output.append(

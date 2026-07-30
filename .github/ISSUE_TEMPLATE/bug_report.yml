@@ -23,8 +23,8 @@ body:
     id: skill-version
     attributes:
       label: Skill release
-      description: Report the exact release or tag used, for example v1.2.0.
-      placeholder: v1.2.0
+      description: Report the exact release or tag used, for example v1.2.1.
+      placeholder: v1.2.1
     validations:
       required: true
   - type: textarea

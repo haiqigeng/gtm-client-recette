@@ -118,6 +118,10 @@ corresponding Tag Assistant API Call is visible, stop the affected verdict and:
    once with a new action ID after reconnection or reload;
 6. preserve both attempts and their independent event windows.
 
+If reconnection restarts Preview event numbering, advance the session
+`connection_epoch`. The same event index can be valid in a later epoch, but a
+duplicate stream/epoch/index remains invalid.
+
 Apply these outcomes:
 
 - when the exact API Call is found, continue with the normal evidence chain;
@@ -161,10 +165,11 @@ is no longer current:
 2. preserve the last confirmed event/action cursor;
 3. record the disconnect and affected action;
 4. reconnect the same container and origin;
-5. rediscover all registered surfaces;
-6. restore the last safe website checkpoint;
-7. prove readiness and repeat only the affected action;
-8. retain the abandoned and repeated action IDs separately.
+5. advance the connection epoch if Preview numbering restarted;
+6. rediscover all registered surfaces;
+7. restore the last safe website checkpoint;
+8. prove readiness and repeat only the affected action;
+9. retain the abandoned and repeated action IDs separately.
 
 Never call a missing event `FAIL` when the Preview connection was not reliable.
 

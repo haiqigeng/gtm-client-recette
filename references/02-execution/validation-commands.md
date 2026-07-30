@@ -88,11 +88,18 @@ python -B scripts/incremental_recette.py final-validate working-results.json `
   --session-ledger session.json
 ```
 
-For changes to either browser helper, serve the repository locally, open
-`tests/fixtures/browser_helpers_smoke.html` in a Playwright browser, and inspect
-`window.__gtmRecetteSmokeResult`. The expected result includes one immutable
-two-argument push record, numeric `29.9`, an explicit `undefined` marker, and
-three discovered controls.
+For changes to either browser helper, install the optional browser-test
+dependency and Chromium, then run the real-browser regression:
+
+```powershell
+python -m pip install -e ".[browser-test]"
+python -m playwright install chromium
+python -B tests/run_browser_helpers.py
+```
+
+It checks the smoke fixture plus hostile snapshot objects, shared references
+versus cycles, reassignment, wrapper chains, duplicate installation, honest
+detachment reporting, and custom data layers.
 
 Strict final validation cross-checks normalized action boundaries against the
 session ledger, case/layer completion, classified push counts, and direct

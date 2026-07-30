@@ -120,15 +120,19 @@ def initialize_requirement(row: dict[str, Any]) -> dict[str, Any]:
                 "applicable": bool(expectation.get("variable_name")),
                 "name": expectation.get("variable_name"),
             },
-            "tag": {
-                "applicable": bool(expectation.get("tag_name")),
-                "name": expectation.get("tag_name"),
-                "relevance": (
-                    "expected_fire"
-                    if expectation.get("expected_firing") in {"fired", "fired_once"}
-                    else "expected_block"
-                ),
-            },
+            "tag": (
+                {
+                    "applicable": True,
+                    "name": expectation.get("tag_name"),
+                    "relevance": (
+                        "expected_fire"
+                        if expectation.get("expected_firing") in {"fired", "fired_once"}
+                        else "expected_block"
+                    ),
+                }
+                if expectation.get("tag_name")
+                else None
+            ),
             "destination_request": None,
             "trigger_evaluation": None,
             "tag_sequence": None,

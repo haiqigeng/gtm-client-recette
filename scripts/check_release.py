@@ -39,6 +39,7 @@ SAFETY_CONTRACTS = {
 }
 REQUIRED_EXECUTION_FILES = (
     "scripts/recette_schema.py",
+    "scripts/acceptance_contract.py",
     "scripts/layer_contract.py",
     "scripts/evidence_contract.py",
     "scripts/execution_contract.py",
@@ -66,6 +67,7 @@ REQUIRED_EXECUTION_FILES = (
     "references/03-judgement/regression-comparison.md",
     "references/gold-mini-recette.md",
     "tests/fixtures/browser_helpers_smoke.html",
+    "tests/run_browser_helpers.py",
 )
 
 

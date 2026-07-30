@@ -8,7 +8,8 @@ from collections import defaultdict
 from collections.abc import Iterable
 from typing import Any
 
-from execution_contract import case_action_rows, worst_status
+from acceptance_contract import worst_status
+from execution_contract import case_action_rows
 
 VERDICT_TO_LAYER = {
     "event_occurrence": "event_occurrence",
@@ -211,6 +212,7 @@ def event_feedback(
         if isinstance(session, dict)
         else {}
     )
+    unexpected_by_group = _group_rows(data.get("unexpected", []), "event_group_id")
 
     output: list[dict[str, Any]] = []
     for inventory in data.get("run", {}).get("event_inventory", []):
@@ -235,10 +237,38 @@ def event_feedback(
             reasons,
             evidence_ids,
         )
+        mapped_unexpected = unexpected_by_group.get(group_id, [])
+        for unexpected in mapped_unexpected:
+            unexpected_status = status(unexpected.get("status"))
+            if unexpected_status:
+                layer_statuses["unexpected_business_push"].append(unexpected_status)
+            if unexpected_status != "PASS":
+                reason = str(
+                    unexpected.get("classification_reason")
+                    or unexpected.get("review_question")
+                    or unexpected.get("notes")
+                    or ""
+                ).strip()
+                if reason:
+                    reasons.append(reason)
+                case_id = str(unexpected.get("case_id", "")).strip()
+                if case_id:
+                    affected_case_ids.add(case_id)
+            unexpected_evidence = unexpected.get("evidence_ids", [])
+            if not isinstance(unexpected_evidence, list):
+                unexpected_evidence = [unexpected_evidence]
+            evidence_ids.update(
+                str(evidence_id).strip()
+                for evidence_id in unexpected_evidence
+                if str(evidence_id).strip()
+            )
         normalized_status = worst_status(
-            requirement.get("verdict", {}).get("overall")
-            for requirement in requirements
-            if isinstance(requirement.get("verdict"), dict)
+            [
+                requirement.get("verdict", {}).get("overall")
+                for requirement in requirements
+                if isinstance(requirement.get("verdict"), dict)
+            ]
+            + [unexpected.get("status") for unexpected in mapped_unexpected]
         )
         retest_cases = [
             case

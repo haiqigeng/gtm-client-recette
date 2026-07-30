@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from recette_schema import VALID_STATUSES, status_of
+from acceptance_contract import VALID_STATUSES, status_of
 
 
 def parse_args() -> argparse.Namespace:

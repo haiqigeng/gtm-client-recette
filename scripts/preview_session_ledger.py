@@ -197,6 +197,14 @@ def parser() -> argparse.ArgumentParser:
     push.add_argument("--evidence-id", required=True)
     push.add_argument("--container-id", required=True)
     push.add_argument("--stream-id", default="tag_assistant")
+    push.add_argument(
+        "--connection-epoch",
+        type=int,
+        help=(
+            "Preview connection segment. Defaults to 1 plus the number of prior "
+            "preview_disconnected actions."
+        ),
+    )
 
     layer = subparsers.add_parser("record-layer")
     layer.add_argument("ledger", type=Path)
@@ -418,6 +426,27 @@ def record_push(ledger: dict[str, Any], args: argparse.Namespace) -> None:
     action = find_unique(ledger.get("actions", []), "action_id", args.action_id)
     if args.event_index <= action.get("last_event_before", -1):
         raise SystemExit("Business push event_index must follow last_event_before.")
+    connection_epoch = args.connection_epoch
+    if connection_epoch is None:
+        connection_epoch = 1
+        for previous in ledger.get("actions", []):
+            if not isinstance(previous, dict) or previous.get("action_id") == args.action_id:
+                break
+            if previous.get("settlement_reason") == "preview_disconnected":
+                connection_epoch += 1
+    if connection_epoch < 1:
+        raise SystemExit("connection_epoch must be a positive integer.")
+    if any(
+        isinstance(row, dict)
+        and row.get("stream_id", "tag_assistant") == args.stream_id
+        and row.get("connection_epoch", 1) == connection_epoch
+        and row.get("event_index") == args.event_index
+        for row in ledger.get("business_pushes", [])
+    ):
+        raise SystemExit(
+            "Duplicate stream/connection-epoch/event index; use the next "
+            "--connection-epoch after a Preview reconnect."
+        )
     group_id = args.event_group_id
     if group_id is None and args.classification != "unplanned_relevant":
         group_id = action.get("event_group_id")
@@ -425,6 +454,7 @@ def record_push(ledger: dict[str, Any], args: argparse.Namespace) -> None:
         {
             "push_id": args.push_id,
             "stream_id": args.stream_id,
+            "connection_epoch": connection_epoch,
             "action_id": args.action_id,
             "case_id": action.get("case_id"),
             "event_group_id": group_id,

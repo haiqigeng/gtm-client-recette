@@ -8,9 +8,9 @@ container IDs, screenshots, reports, credentials, emails, or browser traces.
 Use semantic `v` versioning, never calendar-date versioning:
 
 - Store `MAJOR.MINOR.PATCH` in `pyproject.toml`; the current release is
-  `1.2.0`.
-- Prefix Git tags and release archives with `v`, for example `v1.2.0` and
-  `gtm-preview-recette-v1.2.0.zip`.
+  `1.2.1`.
+- Prefix Git tags and release archives with `v`, for example `v1.2.1` and
+  `gtm-preview-recette-v1.2.1.zip`.
 - Increment PATCH for compatible fixes, MINOR for compatible functionality,
   and MAJOR for incompatible changes.
 
@@ -21,7 +21,7 @@ python -m pip install -e ".[dev]"
 python -m ruff check --no-cache .
 python -m ruff format --check .
 python -m unittest discover -s tests -v
-python -B scripts/check_release.py --tag v1.2.0
+python -B scripts/check_release.py --tag v1.2.1
 ```
 
 Changes to verdict logic require a regression fixture that fails before the
@@ -52,9 +52,9 @@ adaptive settlement. A supplemental recorder observation may expose a Preview
 gap but cannot pass a required Tag Assistant layer.
 
 Changes to the dataLayer recorder or DOM census require a synthetic browser
-smoke check using `tests/fixtures/browser_helpers_smoke.html`. Changes to plan
-inspection, request decoding, or incremental event handling require focused
-unit tests.
+check with `python -B tests/run_browser_helpers.py`; install the optional
+`browser-test` dependencies and Chromium first. Changes to plan inspection,
+request decoding, or incremental event handling require focused unit tests.
 
 Preserve schema-v2 normalization where possible. If stricter certification
 requires new fields, update the fixtures and document the legacy-row upgrade in

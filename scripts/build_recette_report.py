@@ -17,6 +17,7 @@ from openpyxl.cell import Cell
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
+from acceptance_contract import status_of, worst_status
 from client_side_rules import evaluate_report_business_rules
 from event_feedback import event_feedback
 from execution_contract import (
@@ -28,9 +29,7 @@ from recette_schema import (
     ReportValidationError,
     as_rows,
     dumps_structured,
-    status_of,
     validate,
-    worst_status,
 )
 
 STATUS_FILLS = {
@@ -267,6 +266,7 @@ EVENT_HEADERS = [
 
 PUSH_HEADERS = [
     "stream_id",
+    "connection_epoch",
     "event_index",
     "captured_at",
     "push_id",
@@ -403,6 +403,7 @@ BUSINESS_RULE_HEADERS = [
     "event_name",
     "rule_id",
     "operator",
+    "evaluation_source",
     "declared_rule",
     "actual",
     "expected",
@@ -562,6 +563,24 @@ def serialize(value: Any) -> Any:
     return value
 
 
+def set_safe_cell(cell: Cell, value: Any) -> Cell:
+    """Write a workbook value without allowing untrusted text to become a formula."""
+    serialized = serialize(value)
+    cell.value = serialized
+    if isinstance(serialized, str):
+        cell.data_type = "s"
+    return cell
+
+
+def append_safe_row(ws, values: Iterable[Any]) -> None:
+    """Append one row while forcing every string cell to the literal string type."""
+    serialized = [serialize(value) for value in values]
+    ws.append(serialized)
+    for cell, value in zip(ws[ws.max_row], serialized, strict=False):
+        if isinstance(value, str):
+            cell.data_type = "s"
+
+
 def apply_status_fill(cell: Cell) -> None:
     status = status_of(cell.value)
     colour = STATUS_FILLS.get(status)
@@ -651,9 +670,9 @@ def add_table_sheet(
     rows: Iterable[dict[str, Any]],
 ) -> None:
     ws = wb.create_sheet(title)
-    ws.append(headers)
+    append_safe_row(ws, headers)
     for row in rows:
-        ws.append([serialize(row.get(header)) for header in headers])
+        append_safe_row(ws, [row.get(header) for header in headers])
     style_table(ws)
 
 
@@ -1070,6 +1089,10 @@ def business_rule_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
                     "event_name": expectation.get("event_name"),
                     "rule_id": rule_id,
                     "operator": rule.get("operator"),
+                    "evaluation_source": result.get(
+                        "evaluation_source",
+                        evaluated.get("evaluation_source"),
+                    ),
                     "declared_rule": rule,
                     "actual": result.get("actual", evaluated.get("actual")),
                     "expected": result.get("expected", evaluated.get("expected")),
@@ -1259,7 +1282,7 @@ def add_client_summary(
     )
     counts = Counter(item["status"] for item in rollup)
 
-    ws["A1"] = run.get("report_title", "GTM Preview Recette")
+    set_safe_cell(ws["A1"], run.get("report_title", "GTM Preview Recette"))
     ws["A1"].font = Font(size=18, bold=True, color="1F4E78")
     summary_rows = [
         ("Overall status", overall),
@@ -1276,12 +1299,12 @@ def add_client_summary(
         ("Validation warnings", len(warnings)),
     ]
     for row_index, (label, value) in enumerate(summary_rows, start=3):
-        ws.cell(row=row_index, column=1, value=label)
-        ws.cell(row=row_index, column=2, value=serialize(value))
+        set_safe_cell(ws.cell(row=row_index, column=1), label)
+        set_safe_cell(ws.cell(row=row_index, column=2), value)
     apply_status_fill(ws["B3"])
 
     event_start = 14
-    ws.cell(row=event_start, column=1, value="Plan-ordered event status")
+    set_safe_cell(ws.cell(row=event_start, column=1), "Plan-ordered event status")
     ws.cell(row=event_start, column=1).fill = SECTION_FILL
     ws.cell(row=event_start, column=1).font = Font(bold=True)
     event_headers = [
@@ -1296,33 +1319,36 @@ def add_client_summary(
         "evidence_ids",
     ]
     for column, header in enumerate(event_headers, start=1):
-        cell = ws.cell(row=event_start + 1, column=column, value=header)
+        cell = set_safe_cell(ws.cell(row=event_start + 1, column=column), header)
         cell.fill = HEADER_FILL
         cell.font = HEADER_FONT
     for row_index, item in enumerate(rollup, start=event_start + 2):
         for column, header in enumerate(event_headers, start=1):
-            ws.cell(row=row_index, column=column, value=serialize(item.get(header)))
+            set_safe_cell(ws.cell(row=row_index, column=column), item.get(header))
         apply_status_fill(ws.cell(row=row_index, column=3))
 
     counts_start = event_start + len(rollup) + 4
-    ws.cell(row=counts_start, column=1, value="Event status totals")
+    set_safe_cell(ws.cell(row=counts_start, column=1), "Event status totals")
     ws.cell(row=counts_start, column=1).fill = SECTION_FILL
     ws.cell(row=counts_start, column=1).font = Font(bold=True)
     for offset, status in enumerate(("PASS", "FAIL", "BLOCKED", "REVIEW", "NOT_TESTED"), start=1):
-        ws.cell(row=counts_start + offset, column=1, value=status)
-        ws.cell(row=counts_start + offset, column=2, value=counts.get(status, 0))
+        set_safe_cell(ws.cell(row=counts_start + offset, column=1), status)
+        set_safe_cell(ws.cell(row=counts_start + offset, column=2), counts.get(status, 0))
         apply_status_fill(ws.cell(row=counts_start + offset, column=1))
 
     category_start = counts_start + 7
-    ws.cell(row=category_start, column=1, value="Requirement outcome categories")
+    set_safe_cell(
+        ws.cell(row=category_start, column=1),
+        "Requirement outcome categories",
+    )
     ws.cell(row=category_start, column=1).fill = SECTION_FILL
     ws.cell(row=category_start, column=1).font = Font(bold=True)
     category_counts = Counter(
         client_category(req) for req in as_rows(data.get("requirements"), "requirements")
     )
     for offset, (category, count) in enumerate(sorted(category_counts.items()), start=1):
-        ws.cell(row=category_start + offset, column=1, value=category)
-        ws.cell(row=category_start + offset, column=2, value=count)
+        set_safe_cell(ws.cell(row=category_start + offset, column=1), category)
+        set_safe_cell(ws.cell(row=category_start + offset, column=2), count)
 
     for row in ws.iter_rows():
         for cell in row:
@@ -1341,9 +1367,9 @@ def add_client_summary(
 
 def add_run_context(wb: Workbook, run: dict[str, Any]) -> None:
     ws = wb.create_sheet("Run Context")
-    ws.append(["field", "value"])
+    append_safe_row(ws, ["field", "value"])
     for key, value in run.items():
-        ws.append([key, serialize(value)])
+        append_safe_row(ws, [key, value])
     style_table(ws)
 
 

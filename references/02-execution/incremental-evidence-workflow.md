@@ -83,6 +83,7 @@ python -B scripts/preview_session_ledger.py begin-action session.json `
 python -B scripts/preview_session_ledger.py record-push session.json `
   --push-id PUSH-011 `
   --action-id ACT-001 `
+  --connection-epoch 1 `
   --event-index 11 `
   --event-name add_to_cart `
   --classification expected `
@@ -122,6 +123,13 @@ Repeat `record-layer` for every applicable layer declared on the case. Evidence
 IDs must refer to direct structured capture tied to the same action and, when
 applicable, event index and container. A screenshot is optional and cannot
 replace these records.
+
+`connection_epoch` is `1` for the initial Preview connection and increments
+when a recorded disconnect/reconnect causes event indexes to restart. The
+command derives it from prior `preview_disconnected` settlements when omitted;
+pass it explicitly when the recovery boundary is known. A push identity is the
+combination of stream, connection epoch, and event index, so valid index reuse
+after reconnect does not hide a true duplicate inside one epoch.
 
 For one bounded retry, begin a new action with
 `--retry-of-action-id <retained-action-id>`. Never reuse an action ID or merge
@@ -192,6 +200,10 @@ python -B scripts/incremental_recette.py apply-event `
   working-results.json event-007-patch.json `
   --session-ledger session.json
 ```
+
+The command validates the patched normalized event and its complete session
+reconciliation before replacing the working file. Any failure leaves the
+existing file byte-for-byte unchanged.
 
 Or validate an already populated event:
 
