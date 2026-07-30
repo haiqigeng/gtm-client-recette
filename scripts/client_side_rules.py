@@ -78,8 +78,13 @@ SENSITIVE_KEY_CATEGORIES = {
 SENSITIVE_QUERY_KEYS = {
     "email",
     "email_address",
+    "email_hash",
+    "ep_email",
+    "ep_user_email",
     "mail",
     "phone",
+    "phone_hash",
+    "ep_phone",
     "telephone",
     "mobile",
     "first_name",
@@ -89,14 +94,18 @@ SENSITIVE_QUERY_KEYS = {
     "street",
     "postcode",
     "postal_code",
+    "sha256_email_address",
+    "sha256_phone_number",
+    "user_data_email",
+    "user_data_phone",
     "zip",
 }
 
 
-def _path_tokens(path: str) -> list[str | int | None]:
+def _path_tokens(path: str) -> list[str | int | None] | None:
     """Parse dotted paths plus numeric, wildcard, or quoted literal keys."""
     if not isinstance(path, str) or not path.strip():
-        return []
+        return None
     tokens: list[str | int | None] = []
     value = path.strip()
     index = 0
@@ -104,14 +113,14 @@ def _path_tokens(path: str) -> list[str | int | None]:
     while index < len(value):
         if value[index] == ".":
             if expect_token:
-                return []
+                return None
             expect_token = True
             index += 1
             continue
         if value[index] == "[":
             cursor = index + 1
             if cursor >= len(value):
-                return []
+                return None
             if value[cursor] in {'"', "'"}:
                 quote = value[cursor]
                 cursor += 1
@@ -121,7 +130,7 @@ def _path_tokens(path: str) -> list[str | int | None]:
                     if character == "\\":
                         cursor += 1
                         if cursor >= len(value):
-                            return []
+                            return None
                         escapes = {"n": "\n", "r": "\r", "t": "\t"}
                         characters.append(escapes.get(value[cursor], value[cursor]))
                     elif character == quote:
@@ -130,46 +139,54 @@ def _path_tokens(path: str) -> list[str | int | None]:
                         characters.append(character)
                     cursor += 1
                 if cursor >= len(value) or value[cursor] != quote:
-                    return []
+                    return None
                 cursor += 1
                 if cursor >= len(value) or value[cursor] != "]":
-                    return []
+                    return None
                 tokens.append("".join(characters))
                 index = cursor + 1
             else:
                 closing = value.find("]", cursor)
                 if closing < 0:
-                    return []
+                    return None
                 content = value[cursor:closing]
                 if content == "":
                     tokens.append(None)
                 elif content.isdigit():
                     tokens.append(int(content))
                 else:
-                    return []
+                    return None
                 index = closing + 1
             expect_token = False
             continue
         cursor = index
         while cursor < len(value) and value[cursor] not in ".[":
             if value[cursor] == "]":
-                return []
+                return None
             cursor += 1
         token = value[index:cursor]
         if not token:
-            return []
+            return None
         tokens.append(token)
         index = cursor
         expect_token = False
     if expect_token:
-        return []
+        return None
     return tokens
+
+
+def valid_path(path: Any) -> bool:
+    """Return whether a configured client-side path has valid non-empty syntax."""
+    return _path_tokens(path) is not None
 
 
 def path_values(value: Any, path: str) -> list[Any]:
     """Return every value addressed by a dotted path; [] expands arrays."""
+    tokens = _path_tokens(path)
+    if tokens is None:
+        return []
     current = [value]
-    for token in _path_tokens(path):
+    for token in tokens:
         next_values: list[Any] = []
         for item in current:
             if token is None:
@@ -224,8 +241,7 @@ def _compact(value: Any, path_hint: str | None = None) -> Any:
         return {
             "redacted": True,
             "categories": categories or ["unclassified_string"],
-            "value_fingerprint": _fingerprint(value),
-            "value_length": len(value),
+            "value_retention": "not_retained",
         }
     if isinstance(value, (int, float, bool)) or value is None:
         return value
@@ -237,7 +253,10 @@ def _compact(value: Any, path_hint: str | None = None) -> Any:
 
 
 def _condition(payload: Any, condition: dict[str, Any]) -> bool | None:
-    value = path_value(payload, str(condition.get("path", "")))
+    path = condition.get("path")
+    if not valid_path(path):
+        return None
+    value = path_value(payload, str(path))
     rule = str(condition.get("match_rule", "equals"))
     expected = condition.get("expected_value")
     if rule == "present":
@@ -313,6 +332,26 @@ def evaluate_business_rule(
         return result
     if operator not in BUSINESS_RULE_OPERATORS:
         result["reason"] = f"Unsupported operator '{operator}'."
+        return result
+
+    path_fields = {
+        "equals_path": ("left_path", "right_path"),
+        "sum_product_equals": ("target_path", "items_path"),
+        "all_items_equal": ("items_path", "expected_path"),
+        "unique_across_requirements": ("path",),
+        "range": ("path",),
+        "format": ("path",),
+        "regex": ("path",),
+    }.get(operator, ())
+    invalid_paths = [field for field in path_fields if not valid_path(rule.get(field))]
+    if operator == "implies":
+        invalid_paths.extend(
+            f"{branch}.path"
+            for branch in ("if", "then")
+            if not isinstance(rule.get(branch), dict) or not valid_path(rule[branch].get("path"))
+        )
+    if invalid_paths:
+        result["reason"] = "Invalid configured path syntax: " + ", ".join(invalid_paths) + "."
         return result
 
     passed: bool | None = None
@@ -467,6 +506,46 @@ def _stable_key(value: Any) -> str:
         return repr(value)
 
 
+def _rule_surface(requirement: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
+    expectation = requirement.get("expectation")
+    mechanism = (
+        expectation.get("source_mechanism", "data_layer_push")
+        if isinstance(expectation, dict)
+        else "data_layer_push"
+    )
+    raw = requirement.get("raw_api_call")
+    signal = requirement.get("source_signal")
+    resolved = requirement.get("resolved_data_layer")
+    candidates: list[tuple[Any, str]] = []
+    if mechanism == "data_layer_push":
+        candidates.append(
+            (raw.get("payload") if isinstance(raw, dict) else None, "raw_api_call.payload")
+        )
+    else:
+        if isinstance(signal, dict):
+            candidates.extend(
+                (
+                    (signal.get("payload"), "source_signal.payload"),
+                    (
+                        signal.get("value", MISSING),
+                        "source_signal.value",
+                    ),
+                )
+            )
+    candidates.append(
+        (
+            resolved.get("snapshot") if isinstance(resolved, dict) else None,
+            "resolved_data_layer.snapshot",
+        )
+    )
+    for payload, source in candidates:
+        if isinstance(payload, dict):
+            return payload, source
+        if source == "source_signal.value" and payload is not MISSING:
+            return {"value": payload}, source
+    return None, None
+
+
 def evaluate_report_business_rules(data: dict[str, Any]) -> list[dict[str, Any]]:
     """Evaluate declared business rules for every normalized requirement."""
     requirements = data.get("requirements")
@@ -477,26 +556,35 @@ def evaluate_report_business_rules(data: dict[str, Any]) -> list[dict[str, Any]]
     for requirement in requirements:
         if not isinstance(requirement, dict):
             continue
-        raw = requirement.get("raw_api_call")
-        if not isinstance(raw, dict) or not isinstance(raw.get("payload"), dict):
+        payload, source = _rule_surface(requirement)
+        if payload is None:
             continue
+        raw = requirement.get("raw_api_call")
+        signal = requirement.get("source_signal")
+        event_index = (
+            raw.get("event_index")
+            if isinstance(raw, dict)
+            else signal.get("event_index")
+            if isinstance(signal, dict)
+            else None
+        )
         occurrence_key = (
             str(requirement.get("event_group_id", "")),
-            raw.get("event_index", requirement.get("requirement_id")),
+            event_index if event_index is not None else requirement.get("requirement_id"),
+            source,
         )
         if occurrence_key in seen_occurrences:
             continue
         seen_occurrences.add(occurrence_key)
-        all_payloads.append(raw["payload"])
+        all_payloads.append(payload)
     output: list[dict[str, Any]] = []
     for requirement in requirements:
         if not isinstance(requirement, dict):
             continue
         expectation = requirement.get("expectation")
-        raw = requirement.get("raw_api_call")
-        if not isinstance(expectation, dict) or not isinstance(raw, dict):
+        if not isinstance(expectation, dict):
             continue
-        payload = raw.get("payload")
+        payload, evaluation_source = _rule_surface(requirement)
         rules = expectation.get("business_rules")
         if not isinstance(payload, dict) or not isinstance(rules, list):
             continue
@@ -505,6 +593,7 @@ def evaluate_report_business_rules(data: dict[str, Any]) -> list[dict[str, Any]]
                 continue
             result = evaluate_business_rule(rule, payload, all_payloads)
             result["requirement_id"] = requirement.get("requirement_id")
+            result["evaluation_source"] = evaluation_source
             output.append(result)
     return output
 
@@ -529,7 +618,6 @@ def _finding(
     category: str,
     confidence: str,
     basis: str,
-    value: Any,
     forbidden: set[str],
     allowlisted_paths: set[str],
 ) -> dict[str, Any]:
@@ -549,8 +637,7 @@ def _finding(
         "allowlisted": allowlisted,
         "status": status,
         "redacted_value": f"<redacted:{category}>",
-        "value_fingerprint": _fingerprint(value),
-        "value_length": len(str(value)),
+        "value_fingerprint": "not-retained",
     }
 
 
@@ -570,6 +657,7 @@ def scan_sensitive_value(
     allowlisted_paths = {str(item) for item in policy.get("allowlisted_paths", []) if str(item)}
     custom_patterns = policy.get("custom_patterns", [])
     findings: list[dict[str, Any]] = []
+    seen_signatures: set[tuple[str, str, str, str]] = set()
 
     def add(
         path: str,
@@ -579,24 +667,15 @@ def scan_sensitive_value(
         candidate: Any,
     ) -> None:
         signature = (path, category, basis, _fingerprint(candidate))
-        if any(
-            (
-                item["path"],
-                item["category"],
-                item["basis"],
-                item["value_fingerprint"],
-            )
-            == signature
-            for item in findings
-        ):
+        if signature in seen_signatures:
             return
+        seen_signatures.add(signature)
         findings.append(
             _finding(
                 path=path,
                 category=category,
                 confidence=confidence,
                 basis=basis,
-                value=candidate,
                 forbidden=forbidden,
                 allowlisted_paths=allowlisted_paths,
             )
@@ -638,17 +717,23 @@ def scan_sensitive_value(
                     match.group(0),
                 )
 
-        if item.startswith(("http://", "https://")):
-            for query_key, query_value in parse_qsl(urlsplit(item).query, keep_blank_values=True):
+        if "?" in item or item.startswith(("http://", "https://", "/")):
+            for query_key, query_value in parse_qsl(
+                urlsplit(item).query,
+                keep_blank_values=True,
+            ):
                 normalized_query = re.sub(r"[^a-z0-9]+", "_", query_key.lower()).strip("_")
+                query_path = f"{path}?{query_key}"
                 if normalized_query in SENSITIVE_QUERY_KEYS and query_value:
                     add(
-                        f"{path}?{query_key}",
+                        query_path,
                         "sensitive_query_parameter",
                         "confirmed",
                         "sensitive_query_key",
                         query_value,
                     )
+                if query_value:
+                    walk(query_value, query_path, query_key)
 
         if isinstance(custom_patterns, list):
             for custom in custom_patterns:

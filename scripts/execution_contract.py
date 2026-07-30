@@ -4,11 +4,11 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from acceptance_contract import ACTION_BOUNDARY_FIELDS, worst_status
 from evidence_contract import (
     ACTION_BOUND_EVIDENCE_KINDS,
     CONTAINER_BOUND_EVIDENCE_KINDS,
@@ -58,7 +58,6 @@ PROTECTED_AUTHORIZATION_EXCLUSIONS = (
     "EXTERNAL_APPROVAL",
     "IRREVERSIBLE_ACTION",
 )
-STATUS_RANK = {"PASS": 0, "NOT_TESTED": 1, "REVIEW": 2, "BLOCKED": 3, "FAIL": 4}
 FORBIDDEN_SESSION_SECRET_KEYS = {
     "password",
     "passphrase",
@@ -139,15 +138,6 @@ def iso_timestamp(value: Any) -> bool:
     return parsed.tzinfo is not None
 
 
-def worst_status(statuses: Iterable[Any]) -> str:
-    normalized = [
-        str(status).strip().upper()
-        for status in statuses
-        if str(status).strip().upper() in STATUS_RANK
-    ]
-    return max(normalized, key=STATUS_RANK.__getitem__) if normalized else "NOT_TESTED"
-
-
 def _credential_paths(value: Any, path: str = "session") -> list[str]:
     findings: list[str] = []
     if isinstance(value, dict):
@@ -218,11 +208,17 @@ def _result_catalogs(
     return by_requirement, dict(by_group), events, evidence
 
 
-def _normalized_event_status(requirements: list[dict[str, Any]]) -> str:
+def _normalized_event_status(
+    requirements: list[dict[str, Any]],
+    unexpected: list[dict[str, Any]] | None = None,
+) -> str:
     return worst_status(
-        row.get("verdict", {}).get("overall")
-        for row in requirements
-        if isinstance(row.get("verdict"), dict)
+        [
+            row.get("verdict", {}).get("overall")
+            for row in requirements
+            if isinstance(row.get("verdict"), dict)
+        ]
+        + [row.get("status") for row in (unexpected or []) if isinstance(row, dict)]
     )
 
 
@@ -346,20 +342,7 @@ def _validate_action_boundary_link(
             f"requirement {requirement_id}: action_boundary.{field_name} "
             "does not match the session ledger"
         )
-        for field_name in (
-            "action_id",
-            "retry_of_action_id",
-            "last_event_before",
-            "first_event_after",
-            "settled_final_event",
-            "action_timestamp",
-            "interaction_outcome",
-            "completion_signal",
-            "quiet_window_ms",
-            "timeout_ms",
-            "stream_settled",
-            "settlement_reason",
-        )
+        for field_name in ACTION_BOUNDARY_FIELDS
         if boundary.get(field_name) != action.get(field_name)
     )
 
@@ -391,7 +374,7 @@ class _ValidationContext:
     anomalous_by_group: dict[str, list[dict[str, Any]]] = field(
         default_factory=lambda: defaultdict(list)
     )
-    push_indexes: set[tuple[str, int]] = field(default_factory=set)
+    push_indexes: set[tuple[str, int, int]] = field(default_factory=set)
 
 
 def _validate_session_metadata(ledger: dict[str, Any], errors: list[str]) -> None:
@@ -691,12 +674,24 @@ def _validate_push_index(
 ) -> None:
     event_index = push.get("event_index")
     stream_id = str(push.get("stream_id", "tag_assistant")).strip()
+    connection_epoch = push.get("connection_epoch", 1)
     if not isinstance(event_index, int) or isinstance(event_index, bool):
         context.errors.append(f"session business push {push_id}: event_index must be an integer")
         return
-    key = (stream_id, event_index)
+    if (
+        not isinstance(connection_epoch, int)
+        or isinstance(connection_epoch, bool)
+        or connection_epoch < 1
+    ):
+        context.errors.append(
+            f"session business push {push_id}: connection_epoch must be a positive integer"
+        )
+        return
+    key = (stream_id, connection_epoch, event_index)
     if key in context.push_indexes:
-        context.errors.append(f"session business push {push_id}: duplicate stream/event index")
+        context.errors.append(
+            f"session business push {push_id}: duplicate stream/connection-epoch/event index"
+        )
     context.push_indexes.add(key)
     last_event = action.get("last_event_before")
     settled_event = action.get("settled_final_event")
@@ -897,6 +892,8 @@ def _session_event_status(
 ) -> str:
     statuses: list[str] = []
     for case in group_cases:
+        if case.get("scope_status") == "OUT_OF_SCOPE":
+            continue
         execution_status = case.get("execution_status")
         if execution_status == "BLOCKED":
             statuses.append("BLOCKED")
@@ -912,8 +909,12 @@ def _session_event_status(
                 for row in action.get("layer_results", [])
                 if isinstance(row, dict)
             )
-    if context.anomalous_by_group.get(group_id):
-        statuses.append("FAIL")
+    for push in context.anomalous_by_group.get(group_id, []):
+        unexpected = context.unexpected_by_push.get(str(push.get("push_id", "")).strip())
+        if isinstance(unexpected, dict):
+            statuses.append(unexpected.get("status"))
+        else:
+            statuses.append("FAIL")
     return worst_status(statuses)
 
 
@@ -930,7 +931,14 @@ def _validate_event_statuses(context: _ValidationContext) -> None:
             )
             continue
         session_status = _session_event_status(context, group_id, group_cases)
-        normalized_status = _normalized_event_status(group_requirements)
+        normalized_status = _normalized_event_status(
+            group_requirements,
+            [
+                row
+                for row in context.unexpected_rows
+                if str(row.get("event_group_id", "")).strip() == group_id
+            ],
+        )
         if context.final and session_status != normalized_status:
             context.errors.append(
                 f"session event {group_id}: execution status {session_status} "
@@ -1054,6 +1062,7 @@ def business_push_rows(ledger: dict[str, Any]) -> list[dict[str, Any]]:
         [dict(row) for row in ledger.get("business_pushes", []) if isinstance(row, dict)],
         key=lambda row: (
             str(row.get("stream_id", "")),
+            row.get("connection_epoch", 1),
             row.get("event_index", -1),
             str(row.get("captured_at", "")),
         ),

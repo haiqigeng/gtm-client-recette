@@ -52,7 +52,16 @@ operators:
 - `regex`.
 
 Every rule needs a stable `rule_id`, operator, explicit paths/options, result,
-reason, status, and evidence ID. Run:
+reason, status, evidence ID, and deterministic `evaluation_source`. Evaluate
+the accepted source surface in this order:
+
+1. exact raw API Call payload for `source_mechanism: data_layer_push`;
+2. captured `source_signal.payload` or `source_signal.value` for a native,
+   DOM, direct-vendor, or other non-dataLayer mechanism;
+3. resolved Data Layer snapshot only as an evidenced fallback.
+
+Malformed or empty configured paths are invalid and can never produce
+`PASS`. Run:
 
 ```powershell
 python scripts/validate_business_rules.py normalized-results.json
@@ -78,10 +87,10 @@ a validation error. Every declared rule set requires its component verdict, so
 removing a failed result or verdict cannot leave the requirement passing.
 
 Rule output summarizes structured values and redacts every string primitive
-before CLI, workbook, or chat output; only length and fingerprint are retained.
-Field-path context still classifies keyed phone, name, address, and similar
-values when possible. This prevents an unrecognized identifier from leaking
-through a diagnostic rule result.
+before CLI, workbook, or chat output. It retains no value-derived fingerprint
+or length. Field-path context still classifies keyed phone, name, address, and
+similar values when possible. This prevents an unrecognized identifier from
+leaking through a diagnostic rule result.
 
 For uniqueness, atomic requirements sharing the same event group and runtime
 event index represent one occurrence and are counted once. This prevents
@@ -125,6 +134,8 @@ For a full new run, initialize a `sensitive_data_policy` and scan:
 The deterministic scanner recognizes confirmed sensitive field names, email
 patterns, sensitive URL keys, keyed phone/IP values, optional unkeyed
 heuristics, allowlisted paths, and analyst-supplied custom patterns.
+It recursively inspects decoded query values from absolute and relative URLs,
+including vendor parameters whose values are percent-encoded.
 Custom patterns require a stable ID, valid regex, `custom` category, and
 confirmed/suspected confidence.
 
@@ -144,11 +155,12 @@ evidence. Keep only:
 - allowlist decision;
 - `PASS`, `FAIL`, or `REVIEW`;
 - redacted marker;
-- stable short fingerprint and value length.
+- the constant marker `value_fingerprint: "not-retained"` for schema
+  compatibility.
 
 `scanned_targets` must exactly enumerate the normalized client-side surfaces,
 and stored findings must exactly equal a fresh deterministic scan, including
-their redacted marker, basis, fingerprint, and length. Naming a scan layer
+their redacted marker, basis, and non-retention marker. Naming a scan layer
 without a policy, scan evidence, or sensitive-data verdict is invalid.
 
 Use:
@@ -169,7 +181,7 @@ the normalized artifact unsafe: the validator and workbook builder refuse it.
 Use the scanner's redacted output for the immediate finding, quarantine the
 source capture, and either rerun with synthetic data or create a safe redacted
 evidence record before workbook generation. Report the affected event as
-incomplete/failed with path, category, and fingerprint only.
+incomplete/failed with path, category, and detection basis only.
 
 Allowlist only an analyst-confirmed safe test path or accepted technical value.
 Do not use an allowlist to make real personal data exportable.

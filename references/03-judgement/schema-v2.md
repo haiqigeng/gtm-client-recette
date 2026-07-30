@@ -278,6 +278,11 @@ The session action also records `observed_business_push_count` and one
 The explicit count must equal the classified business-push rows assigned to
 the action.
 
+Each session business-push row records `stream_id`, positive
+`connection_epoch`, and `event_index`. Their combination is unique.
+`connection_epoch` defaults to `1` and increments when a recovered Preview
+connection restarts event numbering.
+
 ### Occurrence evidence
 
 Keep occurrence and chronology separate from payload correctness:
@@ -435,12 +440,16 @@ actual state.
 ### Business, sensitive-data, and client checks
 
 `business_rule_results` maps every declared safe rule ID to a deterministic
-status and evidence ID. Declared rules require the component verdict and use
-type-strict comparisons.
+status, evidence ID, and `evaluation_source`. Declared rules require the
+component verdict and use type-strict comparisons. Data-layer rules evaluate
+the raw API Call payload; non-dataLayer rules evaluate the captured source
+signal; resolved state is only a fallback. Invalid path syntax is rejected.
 
 `sensitive_data_scan` records scanned targets and redacted findings. Findings
-must never retain `value`, `raw_value`, or `sample`. The target inventory and
-full redacted findings must match a fresh deterministic scan.
+must never retain `value`, `raw_value`, `sample`, or a value-derived fingerprint
+or length. The compatibility field `value_fingerprint` is always
+`not-retained`. The target inventory and full redacted findings must match a
+fresh deterministic scan, including encoded query values.
 
 `client_checks` uses explicit categories for SPA/auto-event source, responsive
 context, cross-domain/linker/cookie/iframe behaviour, dataLayer integrity,
@@ -522,6 +531,9 @@ classification, actual observation, status, and evidence IDs in the row or its
 bound evidence. An anomalous push row also carries `observed_push_id` so strict
 validation can reconcile it with the chronological session stream. Do not turn
 every unrelated native `gtm.*` or container event into noise.
+
+A mapped unexpected row participates in the affected event roll-up with its
+own `REVIEW` or `FAIL`; it cannot remain visible while the event stays `PASS`.
 
 ## Evidence catalogue linkage
 

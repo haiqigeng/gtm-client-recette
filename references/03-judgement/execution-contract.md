@@ -54,7 +54,8 @@ context.
 7. **Reconcile the complete push stream.** The independently observed business
    push count must equal the classified ledger rows. Map each row to its
    action, case, page/state, container, and planned event or mark it unplanned
-   relevant.
+   relevant. After a reconnect that restarts numbering, identify rows by
+   stream, connection epoch, and event index.
 8. **Close every applicable layer.** The completed action records a direct
    evidence-backed result for every layer derived before execution. A
    browser-sending tag includes network request identity and decoded
@@ -63,6 +64,10 @@ context.
    mode, action, event index, container, request, tag, and configuration field
    when applicable. Naming patterns and generic request correlation are not
    direct evidence.
+10. **Roll up contradictions.** A mapped relevant unexpected push contributes
+    its own `REVIEW` or `FAIL` to the affected event. Conditional expected
+    absence and confirmed out-of-scope cases remain neutral only when their
+    declared branch/scope conditions are satisfied.
 
 Pause for analyst action only at protected, consequential, or genuinely
 ambiguous boundaries. Complete ordinary encountered gates and resume

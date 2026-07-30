@@ -9,9 +9,10 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from acceptance_contract import STATUS_PRIORITY, status_of
 from event_feedback import event_feedback, feedback_for_event
 from execution_contract import validate_session
-from recette_schema import STATUS_PRIORITY, status_of, validate
+from recette_schema import validate
 
 
 def load_object(path: Path) -> dict[str, Any]:
@@ -59,8 +60,28 @@ def _row_applies(
         return True
     if str(row.get("requirement_id", "")) in requirement_ids:
         return True
-    affected = row.get("affected_requirement_ids")
-    return isinstance(affected, list) and bool(requirement_ids & {str(item) for item in affected})
+    for field in ("affected_requirement_ids", "requirement_ids"):
+        affected = row.get(field)
+        if isinstance(affected, list) and requirement_ids & {str(item) for item in affected}:
+            return True
+    return False
+
+
+def _blocker_applies(
+    row: dict[str, Any],
+    event_group_id: str,
+    requirement_ids: set[str],
+) -> bool:
+    has_explicit_scope = any(
+        row.get(field) not in (None, "", [])
+        for field in (
+            "event_group_id",
+            "requirement_id",
+            "affected_requirement_ids",
+            "requirement_ids",
+        )
+    )
+    return not has_explicit_scope or _row_applies(row, event_group_id, requirement_ids)
 
 
 def event_view(data: dict[str, Any], event_group_id: str) -> dict[str, Any]:
@@ -87,7 +108,7 @@ def event_view(data: dict[str, Any], event_group_id: str) -> dict[str, Any]:
     view["blockers"] = [
         row
         for row in rows(view.get("blockers"), "blockers")
-        if _row_applies(row, event_group_id, requirement_ids)
+        if _blocker_applies(row, event_group_id, requirement_ids)
     ]
     return view
 
@@ -292,8 +313,8 @@ def main() -> int:
             patch = load_object(args.event_patch)
             updated, event_group_id = apply_event(data, patch)
             destination = args.output or args.ledger
-            save_atomic(destination, updated)
             output = validate_event(updated, event_group_id, session)
+            save_atomic(destination, updated)
             output["output"] = str(destination.resolve())
         elif args.command == "status":
             output = {

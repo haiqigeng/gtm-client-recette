@@ -46,10 +46,9 @@ def has_value(value: Any) -> bool:
 
 
 def is_browser_sending_tag(expectation: dict[str, Any]) -> bool:
-    """Return whether a concerned tag is declared to send a browser request."""
-    return bool(expectation.get("tag_name")) and (
-        expectation.get("tag_delivery") == "browser_request"
-        or any(has_value(expectation.get(field)) for field in DESTINATION_EXPECTATION_FIELDS)
+    """Return whether the requirement declares a browser-side destination send."""
+    return expectation.get("tag_delivery") == "browser_request" or any(
+        has_value(expectation.get(field)) for field in DESTINATION_EXPECTATION_FIELDS
     )
 
 

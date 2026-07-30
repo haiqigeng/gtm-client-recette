@@ -50,7 +50,7 @@ redacted marker.
 material variant, applicable layers, completion signal, push count, retry
 lineage, and layer results. `Observed Push Stream` lists every chronological
 business push, action/case mapping, page/state, classification/reason,
-container, and exact API Call evidence.
+container, connection epoch, and exact API Call evidence.
 
 `Event Evidence` keeps action and retry IDs, independent interaction outcome
 and completion signal, adaptive quiet/timeout values, stream-settlement reason,
@@ -62,6 +62,10 @@ destination request, trigger/sequence, consent, business-rule, redacted
 sensitive-data, client-check, regression, and container evidence distinct on
 their dedicated sheets. Serialize objects and arrays for display only; retain
 structured values in normalized JSON.
+
+`Business Rules` exposes the deterministic evaluation source. Every exported
+string is written as a literal cell value, including text beginning with `=`,
+`+`, `-`, or `@`; evidence can never become an executable spreadsheet formula.
 
 `Destination Evidence` shows the claimed destination ID and vendor event name,
 their declared raw request paths, the expected and actual tested-parameter

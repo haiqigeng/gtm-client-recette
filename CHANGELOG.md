@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+## [v1.2.1](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v1.2.1) (2026-07-30)
+
+- Prevent conditional-absence, out-of-scope interaction, mapped unexpected
+  push, malformed business-rule path, and non-dataLayer source-surface cases
+  from producing an incorrect event or component `PASS`.
+- Treat Preview event indexes as unique within a stream and connection epoch,
+  preserving valid index reuse after reconnection while still rejecting true
+  duplicates.
+- Make `apply-event` transactional: validate the complete event patch and its
+  session reconciliation before atomically replacing the working result.
+- Harden the supplemental dataLayer recorder so snapshot failures never change
+  the website's push outcome, real cycles remain distinguishable from shared
+  references, safe reassignment and wrapper chains remain observable, and
+  unverifiable replacements are reported rather than double-wrapped.
+- Evaluate declared business rules on the accepted raw dataLayer payload or
+  non-dataLayer source signal before using resolved state as a fallback, and
+  retain the deterministic evaluation source.
+- Detect sensitive values nested in encoded absolute or relative URL query
+  parameters without persisting value-derived fingerprints or lengths.
+- Export every workbook string as a literal value to prevent formula
+  activation, and expose connection epoch and business-rule evaluation source
+  in their evidence sheets.
+- Derive browser-request layers for tagless direct vendor sends, emit valid
+  initializer output when a requirement has no named tag, and centralize only
+  the shared status/action-boundary acceptance constants.
+- Add 12 focused contract regressions and a real Chromium Playwright suite for
+  recorder installation, mutation safety, hostile objects, cycles,
+  reassignment, wrappers, duplicate installation, and custom data layers.
+
 ## [v1.2.0](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v1.2.0) (2026-07-29)
 
 - Promote the session ledger to the strict completion contract: register every

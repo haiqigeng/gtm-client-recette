@@ -235,6 +235,12 @@ batched sends are not lost. Decode retained safe request records with:
 python scripts/decode_browser_requests.py requests.json decoded-requests.json
 ```
 
+Recorder capture must never change the website's own `push` return value or
+error. Check `window.__gtmRecetteJournal.checkIntegrity("dataLayer")` after a
+reassignment or wrapper change. Treat `pushReplacedUnverified` as a capture
+limitation rather than wrapping an unknown delegate twice. For a confirmed
+custom array, call `window.__gtmRecetteJournal.watch("<layerName>")`.
+
 Do not retain credentials, authorization headers, cookies, or raw sensitive
 values.
 
@@ -291,7 +297,8 @@ Use the ledger commands to enforce this sequence:
 1. `register-case` before the first attempt;
 2. `begin-action` with the case ID and prior Preview cursor;
 3. `record-push` once for every observed business push, including companion
-   and anomalous pushes;
+   and anomalous pushes; preserve the connection epoch when a reconnect resets
+   Preview event indexes;
 4. `settle-action` with the independently counted business-push total;
 5. `record-layer` for every layer declared applicable to the completed case.
 
@@ -321,6 +328,11 @@ Classify each push against its trigger condition, page/state, causal action,
 expected count, and order. This is how the recette detects duplicates,
 premature, delayed, wrong-order, and wrong-context events, including planned
 event names firing where they do not belong.
+
+Within one Preview stream, identify a push by connection epoch plus event
+index. Increment the epoch after a recorded disconnect/reconnect so a reused
+index is not mistaken for a duplicate; never use an epoch change to hide an
+unclassified window.
 
 Treat an encountered form or authentication gate as part of the journey. Use
 unique synthetic data and submit ordinary forms, registrations, and explicitly
@@ -380,6 +392,11 @@ When no push is expected, replace only the raw-push link with exact
 measurement, direct vendor call, or Custom HTML execution. Keep every
 applicable downstream comparison.
 
+Evaluate a declared business rule on the accepted source surface: the raw API
+Call payload for `data_layer_push`, otherwise the captured `source_signal`
+payload/value, with resolved Data Layer only as an evidenced fallback. Retain
+the evaluation source and never allow malformed path syntax to pass.
+
 Inspect only concerned tags: expected to fire, expected not to fire,
 unexpected but relevant, or needed to explain non-firing. For a wanted tag that
 does not fire, capture trigger evaluation, blockers/exceptions, relevant
@@ -417,6 +434,9 @@ python scripts/incremental_recette.py validate-event normalized-results.json `
   --event-group-id EVG-001 `
   --session-ledger session.json
 ```
+
+`apply-event` is transactional: if normalized or session reconciliation fails,
+the working result must remain unchanged.
 
 Give one immediate evidence-backed verdict and precise reason per event. Group
 homogeneous successful cases compactly, but name every distinct failed,
