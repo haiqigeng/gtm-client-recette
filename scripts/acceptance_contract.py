@@ -37,3 +37,24 @@ def worst_status(statuses: Iterable[Any]) -> str:
     """Return the worst applicable final status."""
     normalized = [status_of(status) for status in statuses if status_of(status) in VALID_STATUSES]
     return max(normalized, key=STATUS_RANK.__getitem__) if normalized else "NOT_TESTED"
+
+
+def occurrence_rule(expectation: dict[str, Any]) -> tuple[str, str | None]:
+    """Return the normalized occurrence rule and optional anchor event name."""
+    configured = expectation.get("expected_occurrence")
+    if isinstance(configured, str):
+        return configured, None
+    if isinstance(configured, dict):
+        return str(configured.get("rule", "")), configured.get("anchor_event_name")
+    return "", None
+
+
+def expects_absence(expectation: dict[str, Any]) -> bool:
+    """Return whether the accepted branch requires the event to be absent."""
+    configured = expectation.get("expected_occurrence")
+    rule, _ = occurrence_rule(expectation)
+    return rule == "absent" or (
+        rule == "conditional"
+        and isinstance(configured, dict)
+        and configured.get("branch_rule") == "absent"
+    )

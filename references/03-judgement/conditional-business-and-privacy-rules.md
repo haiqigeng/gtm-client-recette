@@ -51,14 +51,23 @@ operators:
 - `format`;
 - `regex`.
 
-Every rule needs a stable `rule_id`, operator, explicit paths/options, result,
-reason, status, evidence ID, and deterministic `evaluation_source`. Evaluate
-the accepted source surface in this order:
+Every applicable rule needs a stable `rule_id`, operator, explicit
+paths/options, result, reason, status, evidence ID, and deterministic
+`evaluation_source`. Select the accepted source by mechanism:
 
-1. exact raw API Call payload for `source_mechanism: data_layer_push`;
-2. captured `source_signal.payload` or `source_signal.value` for a native,
-   DOM, direct-vendor, or other non-dataLayer mechanism;
-3. resolved Data Layer snapshot only as an evidenced fallback.
+- use the exact raw API Call payload for `source_mechanism: data_layer_push`;
+- use captured `source_signal.payload` or `source_signal.value` for a native,
+  DOM, direct-vendor, or other non-dataLayer mechanism; and
+- use resolved Data Layer only as an evidenced fallback when the mechanism's
+  authoritative surface is unavailable.
+
+Do not evaluate payload-only business rules when the accepted occurrence
+branch requires absence. Keep occurrence count, scenario acquisition, tag
+non-firing, request absence, trigger, consent, and every other applicable
+check. For `unique_across_requirements`, compare one evidence surface class;
+if relevant occurrences mix raw, source-signal, and resolved fallback
+surfaces, use `REVIEW` with that precise limitation rather than inventing a
+duplicate or certifying uniqueness.
 
 Malformed or empty configured paths are invalid and can never produce
 `PASS`. Run:
@@ -138,6 +147,16 @@ It recursively inspects decoded query values from absolute and relative URLs,
 including vendor parameters whose values are percent-encoded.
 Custom patterns require a stable ID, valid regex, `custom` category, and
 confirmed/suspected confidence.
+
+Common encoded and decoded analytics/media user-data keys such as `em`, `ph`,
+`fn`, `ln`, `external_id`, `uip`, and normalized `ep.*`/`up.*` families are
+classified by their technical value. Plaintext values remain in their
+confirmed email, phone, person-name, postal, IP, or sensitive-query category.
+A syntactically recognized SHA-256 value or Google `tv.*` user-data bundle is
+reported as `hashed_user_data`, which is visible but not forbidden by the
+default technical leakage policy. This format check does not prove source
+normalization, consent, vendor receipt, or legal compliance; those remain
+separate accepted requirements.
 
 Run:
 

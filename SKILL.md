@@ -166,12 +166,18 @@ branch, and material finite value. Use supplied routes and images first.
 Otherwise explore the actual site and use the DOM census as discovery support:
 
 ```javascript
-await page.addScriptTag({ path: "scripts/dom_interaction_census.js" })
+const censusSource = await fs.promises.readFile(
+  "scripts/dom_interaction_census.js",
+  "utf8"
+)
+await page.evaluate(censusSource)
 await page.evaluate(() => window.__gtmRecetteCensus())
 ```
 
 The census identifies candidates; execute real user-facing interactions through
-the browser. Do not call one header item, menu item, card, CTA, footer link, or
+the browser. Its selectors must resolve uniquely; use `selectorChain` for an
+open-shadow-root candidate and treat an unresolved selector as a discovery
+limitation. Do not call one header item, menu item, card, CTA, footer link, or
 product count representative of the family.
 
 - Exhaust safe, practical finite sets. Counts 1 through 9 require nine isolated
@@ -239,7 +245,12 @@ Recorder capture must never change the website's own `push` return value or
 error. Check `window.__gtmRecetteJournal.checkIntegrity("dataLayer")` after a
 reassignment or wrapper change. Treat `pushReplacedUnverified` as a capture
 limitation rather than wrapping an unknown delegate twice. For a confirmed
-custom array, call `window.__gtmRecetteJournal.watch("<layerName>")`.
+custom array, identify the GTM snippet's `l=` name and call
+`window.__gtmRecetteJournal.watch("<layerName>")` before the controlled
+navigation. Read incrementally with `recordsSince(lastCallIndex)`. Distinguish
+`shared_reference`, `circular_reference`, `unreadable`, and
+`snapshot_truncated`; a truncation affecting a required field makes that
+supplemental capture incomplete and cannot be silently treated as exact.
 
 Do not retain credentials, authorization headers, cookies, or raw sensitive
 values.

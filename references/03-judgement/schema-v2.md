@@ -443,13 +443,19 @@ actual state.
 status, evidence ID, and `evaluation_source`. Declared rules require the
 component verdict and use type-strict comparisons. Data-layer rules evaluate
 the raw API Call payload; non-dataLayer rules evaluate the captured source
-signal; resolved state is only a fallback. Invalid path syntax is rejected.
+signal; resolved state is only a fallback. Payload rules are non-applicable on
+an accepted absence branch. Uniqueness uses one evidence surface class and
+becomes `REVIEW` when heterogeneous raw/source/resolved evidence prevents a
+safe comparison. Invalid path syntax is rejected.
 
 `sensitive_data_scan` records scanned targets and redacted findings. Findings
 must never retain `value`, `raw_value`, `sample`, or a value-derived fingerprint
 or length. The compatibility field `value_fingerprint` is always
 `not-retained`. The target inventory and full redacted findings must match a
 fresh deterministic scan, including encoded query values.
+Recognized SHA-256 and Google `tv.*` user-data formats use the visible
+`hashed_user_data` category, which is not forbidden by default; plaintext
+analytics/media user-data keys retain their confirmed sensitive category.
 
 `client_checks` uses explicit categories for SPA/auto-event source, responsive
 context, cross-domain/linker/cookie/iframe behaviour, dataLayer integrity,
@@ -532,8 +538,10 @@ bound evidence. An anomalous push row also carries `observed_push_id` so strict
 validation can reconcile it with the chronological session stream. Do not turn
 every unrelated native `gtm.*` or container event into noise.
 
-A mapped unexpected row participates in the affected event roll-up with its
-own `REVIEW` or `FAIL`; it cannot remain visible while the event stays `PASS`.
+Every unexpected row requires a known `event_group_id`. A session push inherits
+the group of the action window unless the analyst supplies another known group.
+The row participates in that event roll-up with its own `REVIEW` or `FAIL`; it
+cannot remain visible while the event stays `PASS`.
 
 ## Evidence catalogue linkage
 

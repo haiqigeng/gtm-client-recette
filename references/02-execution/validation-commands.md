@@ -97,9 +97,11 @@ python -m playwright install chromium
 python -B tests/run_browser_helpers.py
 ```
 
-It checks the smoke fixture plus hostile snapshot objects, shared references
-versus cycles, reassignment, wrapper chains, duplicate installation, honest
-detachment reporting, and custom data layers.
+It checks the smoke fixture plus hostile snapshot objects and array elements,
+shared references versus cycles, snapshot budgets, reassignment, wrapper
+chains, duplicate installation, honest detachment reporting, custom data
+layers, strict-CSP census loading, unique structural selectors, inherited
+visibility, accessible-name precedence, and open shadow roots.
 
 Strict final validation cross-checks normalized action boundaries against the
 session ledger, case/layer completion, classified push counts, and direct

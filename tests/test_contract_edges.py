@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from argparse import Namespace
 from copy import deepcopy
 from pathlib import Path
 
@@ -28,6 +29,7 @@ from execution_contract import validate_session  # noqa: E402
 from incremental_recette import event_view  # noqa: E402
 from init_coverage_ledger import initialize_requirement  # noqa: E402
 from layer_contract import applicable_layers  # noqa: E402
+from preview_session_ledger import record_push  # noqa: E402
 from recette_schema import validate  # noqa: E402
 
 
@@ -75,6 +77,125 @@ class ContractEdgeTests(unittest.TestCase):
                 findings,
             )
             self.assertNotIn(email, json.dumps(findings))
+
+    def test_vendor_user_data_query_values_distinguish_plaintext_from_hashes(self) -> None:
+        raw_url = (
+            "https://collect.example/pixel?em=person%40example.com&ph=%2B33123456789"
+            "&fn=Alice&ln=Example&external_id=customer-1&uip=192.0.2.1&up.postal=75001"
+        )
+        raw_findings = scan_sensitive_value(raw_url)
+        self.assertTrue(
+            {"email", "phone", "person_name", "ip_address", "postal_address"}
+            <= {row["category"] for row in raw_findings},
+            raw_findings,
+        )
+        self.assertTrue(all(row["status"] == "FAIL" for row in raw_findings), raw_findings)
+
+        digest = "a" * 64
+        hash_url = (
+            "https://collect.example/pixel?"
+            f"em=tv.1~em{digest}&ph={digest}&fn={digest}&ln={digest}&external_id={digest}"
+        )
+        hash_findings = scan_sensitive_value(hash_url)
+        self.assertEqual(5, len(hash_findings), hash_findings)
+        self.assertTrue(
+            all(row["category"] == "hashed_user_data" for row in hash_findings),
+            hash_findings,
+        )
+        self.assertTrue(all(row["status"] == "PASS" for row in hash_findings), hash_findings)
+        self.assertNotIn(digest, json.dumps(hash_findings))
+
+        decoded_findings = scan_sensitive_value(
+            {"em": "person@example.com", "ph": "+33123456789", "external_id": digest}
+        )
+        self.assertEqual(
+            {"email", "phone", "hashed_user_data"},
+            {row["category"] for row in decoded_findings},
+            decoded_findings,
+        )
+        unencoded_url_findings = scan_sensitive_value(
+            "https://collect.example/pixel?em=person@example.com"
+        )
+        self.assertEqual(
+            1,
+            sum(row["category"] == "email" for row in unencoded_url_findings),
+            unencoded_url_findings,
+        )
+
+    def test_unexpected_failure_requires_a_known_event_group(self) -> None:
+        data = fixture()
+        data["unexpected"] = [
+            {
+                "unexpected_id": "UNX-NOGROUP",
+                "status": "FAIL",
+                "classification_reason": "Confirmed wrong-context business push.",
+                "evidence_ids": ["EVD-RAW-011"],
+            }
+        ]
+        errors = validate(data, strict=False)
+        self.assertTrue(any("missing event_group_id" in error for error in errors), errors)
+
+    def test_unplanned_push_inherits_its_action_event_group(self) -> None:
+        data = fixture()
+        session = execution_fixture(data)
+        record_push(
+            session,
+            Namespace(
+                push_id="PUSH-UNPLANNED",
+                action_id="ACT-001",
+                event_index=12,
+                connection_epoch=1,
+                stream_id="tag_assistant",
+                event_group_id=None,
+                classification="unplanned_relevant",
+                event_name="view_item_list",
+                url="https://example.test/shop",
+                page_state="homepage",
+                classification_reason="Wrong-context event observed.",
+                evidence_id="EVD-RAW-011",
+                container_id="GTM-TEST",
+            ),
+        )
+        self.assertEqual("EVG-001", session["business_pushes"][-1]["event_group_id"])
+
+    def test_uniqueness_never_pools_raw_and_resolved_surfaces(self) -> None:
+        rule = {
+            "rule_id": "BR-UNIQUE",
+            "operator": "unique_across_requirements",
+            "path": "transaction_id",
+        }
+        data = {
+            "requirements": [
+                {
+                    "requirement_id": "REQ-RAW",
+                    "event_group_id": "EVG-RAW",
+                    "expectation": {
+                        "source_mechanism": "data_layer_push",
+                        "business_rules": [rule],
+                    },
+                    "raw_api_call": {
+                        "event_index": 1,
+                        "payload": {"transaction_id": "T-1"},
+                    },
+                },
+                {
+                    "requirement_id": "REQ-RESOLVED",
+                    "event_group_id": "EVG-RESOLVED",
+                    "expectation": {
+                        "source_mechanism": "data_layer_push",
+                        "business_rules": [rule],
+                    },
+                    "raw_api_call": None,
+                    "resolved_data_layer": {"snapshot": {"transaction_id": "T-1"}},
+                },
+            ]
+        }
+        results = evaluate_report_business_rules(data)
+        self.assertEqual({"REVIEW"}, {row["status"] for row in results}, results)
+        self.assertTrue(
+            all("heterogeneous evidence surfaces" in row["reason"] for row in results),
+            results,
+        )
 
     def test_out_of_scope_case_is_neutral_in_event_status_rollup(self) -> None:
         data = fixture()
@@ -140,6 +261,14 @@ class ContractEdgeTests(unittest.TestCase):
             {
                 "expected_firing": "not_fired",
                 "expected_request_behavior": "absent",
+                "business_rules": [
+                    {
+                        "rule_id": "BR-NOT-APPLICABLE-WHEN-ABSENT",
+                        "operator": "range",
+                        "path": "ecommerce.value",
+                        "min": 0,
+                    }
+                ],
             }
         )
         req["tag"].update(
@@ -191,6 +320,7 @@ class ContractEdgeTests(unittest.TestCase):
             }
             for layer in layers
         ]
+        self.assertEqual([], evaluate_report_business_rules(data))
         self.assertEqual([], validate(data, strict=True))
         self.assertEqual([], validate_session(session, results=data, final=True))
 
@@ -323,6 +453,24 @@ class ContractEdgeTests(unittest.TestCase):
             source["expectation"].pop(field, None)
         initialized = initialize_requirement(source)
         self.assertIsNone(initialized["tag"])
+
+    def test_initializer_omits_payload_rule_layer_for_expected_absence(self) -> None:
+        source = deepcopy(requirement(fixture()))
+        source["expectation"]["expected_occurrence"] = "absent"
+        source["expectation"]["business_rules"] = [
+            {
+                "rule_id": "BR-ABSENT",
+                "operator": "range",
+                "path": "ecommerce.value",
+                "min": 0,
+            }
+        ]
+        initialized = initialize_requirement(source)
+        self.assertIsNone(initialized["verdict"]["business_rule"])
+        self.assertNotIn(
+            "business_rules_when_declared",
+            applicable_layers([initialized]),
+        )
 
     def test_run_wide_blocker_survives_incremental_event_projection(self) -> None:
         data = fixture()

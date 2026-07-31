@@ -6,6 +6,8 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
+from acceptance_contract import expects_absence
+
 CANONICAL_LAYERS = (
     "raw_api_call",
     "resolved_data_layer",
@@ -101,7 +103,10 @@ def requirement_layers(requirement: dict[str, Any]) -> set[str]:
             "tag_sequence_when_applicable",
             expectation.get("sequence_contract") is not None,
         ),
-        ("business_rules_when_declared", bool(expectation.get("business_rules"))),
+        (
+            "business_rules_when_declared",
+            bool(expectation.get("business_rules")) and not expects_absence(expectation),
+        ),
         ("sensitive_data_scan", bool(expectation.get("sensitive_data_policy"))),
         (
             "client_checks_when_applicable",

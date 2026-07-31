@@ -10,6 +10,7 @@ from playwright.sync_api import sync_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
 RECORDER = ROOT / "scripts" / "datalayer_recorder.js"
+CENSUS = ROOT / "scripts" / "dom_interaction_census.js"
 SMOKE_PAGE = ROOT / "tests" / "fixtures" / "browser_helpers_smoke.html"
 
 
@@ -52,7 +53,7 @@ def main() -> int:
                 after: snapshot.records.length,
                 returned,
                 arrayLength: window.dataLayer.length,
-                captureType: record.arguments.__gtm_recette_type
+                captureType: record.arguments[0].__gtm_recette_type
               };
             }"""
         )
@@ -63,9 +64,29 @@ def main() -> int:
             hostile["returned"] == hostile["arrayLength"], "Original push result changed.", hostile
         )
         require(
-            hostile["captureType"] == "snapshot_failed",
-            "Hostile payload did not use the safe capture fallback.",
+            hostile["captureType"] == "unreadable",
+            "Hostile payload did not use the per-argument unreadable marker.",
             hostile,
+        )
+
+        hostile_array = page.evaluate(
+            """() => {
+              const values = [{kept: true}, {unreadable: true}];
+              Object.defineProperty(values, 1, {
+                enumerable: true,
+                get() { throw new Error("hostile array element"); }
+              });
+              const before = window.__gtmRecetteJournal.snapshot().records.at(-1).callIndex;
+              window.dataLayer.push({event: "hostile_array", values});
+              const captured = window.__gtmRecetteJournal.recordsSince(before)[0].arguments[0];
+              return captured.values;
+            }"""
+        )
+        require(
+            hostile_array[0] == {"kept": True}
+            and hostile_array[1]["__gtm_recette_type"] == "unreadable",
+            "One hostile array element discarded readable sibling evidence.",
+            hostile_array,
         )
 
         references = page.evaluate(
@@ -83,14 +104,64 @@ def main() -> int:
         )
         require(
             references["dag"]["left"] == {"value": 7}
-            and references["dag"]["right"] == {"value": 7},
-            "Shared DAG references were mislabeled as circular.",
+            and references["dag"]["right"]["__gtm_recette_type"] == "shared_reference",
+            "Shared DAG references were not retained safely and distinctly from cycles.",
             references,
         )
         require(
             references["cycle"]["self"]["__gtm_recette_type"] == "circular_reference",
             "A real circular reference was not marked.",
             references,
+        )
+
+        diamond = page.evaluate(
+            """() => {
+              let shared = {leaf: true};
+              for (let index = 0; index < 28; index += 1) {
+                shared = {left: shared, right: shared};
+              }
+              const before = window.__gtmRecetteJournal.snapshot().records.at(-1).callIndex;
+              const startedAt = performance.now();
+              window.dataLayer.push({event: "bounded_diamond", payload: shared});
+              const elapsedMs = performance.now() - startedAt;
+              const record = window.__gtmRecetteJournal.recordsSince(before)[0];
+              return {
+                elapsedMs,
+                containsSharedMarker: JSON.stringify(record).includes("shared_reference")
+              };
+            }"""
+        )
+        require(
+            diamond["elapsedMs"] < 150 and diamond["containsSharedMarker"] is True,
+            "Shared-reference snapshot exceeded its passive-instrumentation budget.",
+            diamond,
+        )
+
+        depth_budget = page.evaluate(
+            """() => {
+              const payload = {event: "depth_budget"};
+              let cursor = payload;
+              for (let index = 0; index < 80; index += 1) {
+                cursor.next = {};
+                cursor = cursor.next;
+              }
+              const before = window.__gtmRecetteJournal.snapshot().records.at(-1).callIndex;
+              const returned = window.dataLayer.push(payload);
+              const record = window.__gtmRecetteJournal.recordsSince(before)[0];
+              return {
+                returned,
+                arrayLength: window.dataLayer.length,
+                containsTruncation: JSON.stringify(record).includes("snapshot_truncated"),
+                reason: JSON.stringify(record).includes("max_depth")
+              };
+            }"""
+        )
+        require(
+            depth_budget["returned"] == depth_budget["arrayLength"]
+            and depth_budget["containsTruncation"] is True
+            and depth_budget["reason"] is True,
+            "Snapshot depth budget did not preserve push semantics with an explicit marker.",
+            depth_budget,
         )
 
         reassignment = page.evaluate(
@@ -205,6 +276,57 @@ def main() -> int:
             custom_layer["watched"] is True and custom_layer["after"] == custom_layer["before"] + 1,
             "Configured custom data layer was not recorded.",
             custom_layer,
+        )
+
+        census_page = context.new_page()
+        census_page.set_content(
+            """
+            <meta http-equiv="Content-Security-Policy" content="script-src 'none'">
+            <style>.hidden-parent { opacity: 0; }</style>
+            <div class="branch"><div><div><div><div><div><div><button>CTA one</button></div></div></div></div></div></div></div>
+            <div class="branch"><div><div><div><div><div><div><button>CTA two</button></div></div></div></div></div></div></div>
+            <span id="preferred-label">Labelled name</span>
+            <button aria-label="Wrong fallback" aria-labelledby="preferred-label">Fallback</button>
+            <div class="hidden-parent"><button>Hidden action</button></div>
+            <div id="shadow-host"></div>
+            """
+        )
+        census_page.evaluate(CENSUS.read_text(encoding="utf-8"))
+        census_page.evaluate(
+            """() => {
+              const root = document.querySelector("#shadow-host").attachShadow({mode: "open"});
+              root.innerHTML = "<button>Shadow action</button><button>Shadow secondary</button>";
+            }"""
+        )
+        census = census_page.evaluate(
+            "window.__gtmRecetteCensus({includeOffscreen: true, maxItems: 20})"
+        )
+        by_name = {item["accessibleName"]: item for item in census["items"]}
+        require("Hidden action" not in by_name, "Inherited opacity was treated as visible.", census)
+        require(
+            "Labelled name" in by_name and "Wrong fallback" not in by_name,
+            "aria-labelledby did not take precedence over aria-label.",
+            census,
+        )
+        cta_one = by_name["CTA one"]
+        cta_two = by_name["CTA two"]
+        require(
+            cta_one["selectorUnique"] is True
+            and cta_two["selectorUnique"] is True
+            and cta_one["selector"] != cta_two["selector"],
+            "Structurally similar controls received an ambiguous selector.",
+            census,
+        )
+        shadow = by_name["Shadow action"]
+        shadow_secondary = by_name["Shadow secondary"]
+        require(
+            shadow["selectorUnique"] is True
+            and shadow_secondary["selectorUnique"] is True
+            and shadow["selector"] != shadow_secondary["selector"]
+            and shadow["shadowHostChain"] == ["#shadow-host"]
+            and len(shadow["selectorChain"]) == 2,
+            "Open-shadow-root interaction discovery is incomplete.",
+            shadow,
         )
         browser.close()
 
