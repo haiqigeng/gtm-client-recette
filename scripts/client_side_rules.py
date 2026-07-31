@@ -12,6 +12,8 @@ from datetime import datetime
 from typing import Any
 from urllib.parse import parse_qsl, urlsplit
 
+from acceptance_contract import expects_absence
+
 MISSING = object()
 
 BUSINESS_RULE_OPERATORS = {
@@ -32,9 +34,10 @@ SENSITIVE_CATEGORIES = {
     "person_name",
     "ip_address",
     "sensitive_query_parameter",
+    "hashed_user_data",
     "custom",
 }
-DEFAULT_FORBIDDEN_CATEGORIES = sorted(SENSITIVE_CATEGORIES - {"custom"})
+DEFAULT_FORBIDDEN_CATEGORIES = sorted(SENSITIVE_CATEGORIES - {"custom", "hashed_user_data"})
 
 EMAIL_RE = re.compile(r"(?<![\w.+-])[\w.+-]+@[\w-]+(?:\.[\w-]+)+(?![\w.-])", re.I)
 PHONE_RE = re.compile(r"(?<!\w)(?:\+?\d[\s().-]*){8,15}(?!\w)")
@@ -48,6 +51,11 @@ UUID_RE = re.compile(
     re.I,
 )
 ISO_CURRENCY_RE = re.compile(r"^[A-Z]{3}$")
+SHA256_HEX_RE = re.compile(r"^[0-9a-f]{64}$", re.I)
+GOOGLE_USER_DATA_HASH_RE = re.compile(
+    r"^tv\.\d+(?:~(?:em|ph|pn|fn|ln)?[0-9a-f]{64})+$",
+    re.I,
+)
 
 SENSITIVE_KEY_CATEGORIES = {
     "email": "email",
@@ -99,7 +107,89 @@ SENSITIVE_QUERY_KEYS = {
     "user_data_email",
     "user_data_phone",
     "zip",
+    "em",
+    "ph",
+    "pn",
+    "fn",
+    "ln",
+    "external_id",
+    "uip",
+    "ep_user_mail",
+    "ep_user_phone",
+    "up_postal",
 }
+
+QUERY_KEY_CATEGORIES = {
+    "email": "email",
+    "email_address": "email",
+    "email_hash": "email",
+    "user_email": "email",
+    "user_mail": "email",
+    "mail": "email",
+    "em": "email",
+    "phone": "phone",
+    "phone_number": "phone",
+    "phone_hash": "phone",
+    "user_phone": "phone",
+    "telephone": "phone",
+    "mobile": "phone",
+    "ph": "phone",
+    "pn": "phone",
+    "first_name": "person_name",
+    "last_name": "person_name",
+    "full_name": "person_name",
+    "fn": "person_name",
+    "ln": "person_name",
+    "address": "postal_address",
+    "street": "postal_address",
+    "postcode": "postal_address",
+    "postal": "postal_address",
+    "postal_code": "postal_address",
+    "zip": "postal_address",
+    "ip": "ip_address",
+    "ip_address": "ip_address",
+    "uip": "ip_address",
+    "external_id": "sensitive_query_parameter",
+    "sha256_email_address": "email",
+    "sha256_phone_number": "phone",
+    "user_data_email": "email",
+    "user_data_phone": "phone",
+}
+HASH_CAPABLE_QUERY_KEYS = {
+    "em",
+    "ph",
+    "pn",
+    "fn",
+    "ln",
+    "external_id",
+    "email_hash",
+    "phone_hash",
+    "sha256_email_address",
+    "sha256_phone_number",
+}
+
+
+def _query_key_tail(normalized_key: str) -> str:
+    for prefix in ("ep_", "up_"):
+        if normalized_key.startswith(prefix):
+            return normalized_key[len(prefix) :]
+    return normalized_key
+
+
+def _query_key_category(normalized_key: str) -> str | None:
+    tail = _query_key_tail(normalized_key)
+    return QUERY_KEY_CATEGORIES.get(tail) or (
+        "sensitive_query_parameter" if normalized_key in SENSITIVE_QUERY_KEYS else None
+    )
+
+
+def _query_key_accepts_hash(normalized_key: str) -> bool:
+    return _query_key_tail(normalized_key) in HASH_CAPABLE_QUERY_KEYS
+
+
+def _recognized_user_data_hash(value: str) -> bool:
+    compact = value.strip()
+    return bool(SHA256_HEX_RE.fullmatch(compact) or GOOGLE_USER_DATA_HASH_RE.fullmatch(compact))
 
 
 def _path_tokens(path: str) -> list[str | int | None] | None:
@@ -551,10 +641,13 @@ def evaluate_report_business_rules(data: dict[str, Any]) -> list[dict[str, Any]]
     requirements = data.get("requirements")
     if not isinstance(requirements, list):
         return []
-    all_payloads: list[dict[str, Any]] = []
-    seen_occurrences: set[tuple[str, Any]] = set()
+    surface_entries: list[dict[str, Any]] = []
+    seen_occurrences: set[tuple[str, Any, str | None]] = set()
     for requirement in requirements:
         if not isinstance(requirement, dict):
+            continue
+        expectation = requirement.get("expectation")
+        if isinstance(expectation, dict) and expects_absence(expectation):
             continue
         payload, source = _rule_surface(requirement)
         if payload is None:
@@ -576,13 +669,15 @@ def evaluate_report_business_rules(data: dict[str, Any]) -> list[dict[str, Any]]
         if occurrence_key in seen_occurrences:
             continue
         seen_occurrences.add(occurrence_key)
-        all_payloads.append(payload)
+        surface_entries.append({"payload": payload, "source": source})
     output: list[dict[str, Any]] = []
     for requirement in requirements:
         if not isinstance(requirement, dict):
             continue
         expectation = requirement.get("expectation")
         if not isinstance(expectation, dict):
+            continue
+        if expects_absence(expectation):
             continue
         payload, evaluation_source = _rule_surface(requirement)
         rules = expectation.get("business_rules")
@@ -591,7 +686,25 @@ def evaluate_report_business_rules(data: dict[str, Any]) -> list[dict[str, Any]]
         for rule in rules:
             if not isinstance(rule, dict):
                 continue
-            result = evaluate_business_rule(rule, payload, all_payloads)
+            comparable_payloads = [
+                entry["payload"]
+                for entry in surface_entries
+                if entry["source"] == evaluation_source
+            ]
+            result = evaluate_business_rule(rule, payload, comparable_payloads)
+            if rule.get("operator") == "unique_across_requirements":
+                path = str(rule.get("path", ""))
+                relevant_sources = {
+                    str(entry["source"])
+                    for entry in surface_entries
+                    if path_value(entry["payload"], path) is not MISSING
+                }
+                if len(relevant_sources) > 1:
+                    result["status"] = "REVIEW"
+                    result["reason"] = (
+                        "Uniqueness cannot be certified across heterogeneous evidence "
+                        "surfaces: " + ", ".join(sorted(relevant_sources)) + "."
+                    )
             result["requirement_id"] = requirement.get("requirement_id")
             result["evaluation_source"] = evaluation_source
             output.append(result)
@@ -657,7 +770,7 @@ def scan_sensitive_value(
     allowlisted_paths = {str(item) for item in policy.get("allowlisted_paths", []) if str(item)}
     custom_patterns = policy.get("custom_patterns", [])
     findings: list[dict[str, Any]] = []
-    seen_signatures: set[tuple[str, str, str, str]] = set()
+    seen_signatures: set[tuple[str, str, str]] = set()
 
     def add(
         path: str,
@@ -666,7 +779,7 @@ def scan_sensitive_value(
         basis: str,
         candidate: Any,
     ) -> None:
-        signature = (path, category, basis, _fingerprint(candidate))
+        signature = (path, category, _fingerprint(candidate))
         if signature in seen_signatures:
             return
         seen_signatures.add(signature)
@@ -683,9 +796,18 @@ def scan_sensitive_value(
 
     def walk(item: Any, path: str, key: str | None = None) -> None:
         normalized_key = re.sub(r"[^a-z0-9]+", "_", (key or "").lower()).strip("_")
-        key_category = SENSITIVE_KEY_CATEGORIES.get(normalized_key)
+        key_category = _query_key_category(normalized_key) or SENSITIVE_KEY_CATEGORIES.get(
+            normalized_key
+        )
         if key_category and item not in (None, "", [], {}):
-            add(path, key_category, "confirmed", "sensitive_field_name", item)
+            if (
+                isinstance(item, str)
+                and _query_key_accepts_hash(normalized_key)
+                and _recognized_user_data_hash(item)
+            ):
+                add(path, "hashed_user_data", "confirmed", "recognized_hash_format", item)
+            else:
+                add(path, key_category, "confirmed", "sensitive_field_name", item)
 
         if isinstance(item, dict):
             for child_key, child in item.items():
@@ -699,16 +821,17 @@ def scan_sensitive_value(
         if not isinstance(item, str) or not item:
             return
 
-        for match in EMAIL_RE.finditer(item):
+        pattern_source = item.split("?", 1)[0] if "?" in item else item
+        for match in EMAIL_RE.finditer(pattern_source):
             add(path, "email", "confirmed", "email_pattern", match.group(0))
         if key_category == "phone":
-            for match in PHONE_RE.finditer(item):
+            for match in PHONE_RE.finditer(pattern_source):
                 add(path, "phone", "confirmed", "phone_pattern_in_phone_field", match.group(0))
         elif policy.get("scan_unkeyed_phone_values") is True:
-            for match in PHONE_RE.finditer(item):
+            for match in PHONE_RE.finditer(pattern_source):
                 add(path, "phone", "suspected", "unkeyed_phone_pattern", match.group(0))
         if key_category == "ip_address" or policy.get("scan_unkeyed_ip_values") is True:
-            for match in IP_RE.finditer(item):
+            for match in IP_RE.finditer(pattern_source):
                 add(
                     path,
                     "ip_address",
@@ -724,14 +847,26 @@ def scan_sensitive_value(
             ):
                 normalized_query = re.sub(r"[^a-z0-9]+", "_", query_key.lower()).strip("_")
                 query_path = f"{path}?{query_key}"
-                if normalized_query in SENSITIVE_QUERY_KEYS and query_value:
-                    add(
-                        query_path,
-                        "sensitive_query_parameter",
-                        "confirmed",
-                        "sensitive_query_key",
-                        query_value,
-                    )
+                query_category = _query_key_category(normalized_query)
+                if query_category and query_value:
+                    if _query_key_accepts_hash(normalized_query) and _recognized_user_data_hash(
+                        query_value
+                    ):
+                        add(
+                            query_path,
+                            "hashed_user_data",
+                            "confirmed",
+                            "recognized_hash_format",
+                            query_value,
+                        )
+                    else:
+                        add(
+                            query_path,
+                            query_category,
+                            "confirmed",
+                            "sensitive_query_key",
+                            query_value,
+                        )
                 if query_value:
                     walk(query_value, query_path, query_key)
 

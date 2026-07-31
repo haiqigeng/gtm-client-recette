@@ -17,15 +17,17 @@
   }
 
   function accessibleName(element) {
-    const ariaLabel = element.getAttribute("aria-label");
-    if (ariaLabel) {
-      return normalizedText(ariaLabel);
-    }
     const labelledBy = element.getAttribute("aria-labelledby");
     if (labelledBy) {
+      const root = element.getRootNode();
       const label = labelledBy
         .split(/\s+/)
-        .map((id) => document.getElementById(id))
+        .map((id) => {
+          if (root && typeof root.getElementById === "function") {
+            return root.getElementById(id);
+          }
+          return document.getElementById(id);
+        })
         .filter(Boolean)
         .map((node) => normalizedText(node.textContent))
         .filter(Boolean)
@@ -33,6 +35,10 @@
       if (label) {
         return label;
       }
+    }
+    const ariaLabel = element.getAttribute("aria-label");
+    if (ariaLabel) {
+      return normalizedText(ariaLabel);
     }
     if (element.labels && element.labels.length) {
       const label = Array.from(element.labels)
@@ -50,14 +56,28 @@
     );
   }
 
+  function composedParent(element) {
+    if (element.parentElement) {
+      return element.parentElement;
+    }
+    const root = element.getRootNode();
+    return root && root.host ? root.host : null;
+  }
+
   function isVisible(element, includeOffscreen) {
-    const style = getComputedStyle(element);
-    if (
-      style.display === "none" ||
-      style.visibility === "hidden" ||
-      Number(style.opacity) === 0
-    ) {
-      return false;
+    let current = element;
+    while (current && current.nodeType === Node.ELEMENT_NODE) {
+      const style = getComputedStyle(current);
+      if (
+        current.hidden ||
+        style.display === "none" ||
+        style.visibility === "hidden" ||
+        style.visibility === "collapse" ||
+        Number(style.opacity) === 0
+      ) {
+        return false;
+      }
+      current = composedParent(current);
     }
     const rect = element.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0 || element.getClientRects().length === 0) {
@@ -81,9 +101,24 @@
     return String(value).replace(/["\\]/g, "\\$&");
   }
 
+  function resolvesUniquely(root, selector, element) {
+    if (!selector) {
+      return false;
+    }
+    try {
+      const matches = root.querySelectorAll(selector);
+      return matches.length === 1 && matches[0] === element;
+    } catch {
+      return false;
+    }
+  }
+
   function selectorFor(element, root) {
     if (element.id) {
-      return `#${cssString(element.id)}`;
+      const selector = `#${cssString(element.id)}`;
+      if (resolvesUniquely(root, selector, element)) {
+        return selector;
+      }
     }
     for (const attribute of ["data-testid", "data-test", "data-track", "name"]) {
       const value = element.getAttribute(attribute);
@@ -92,7 +127,7 @@
           value
         )}"]`;
         try {
-          if (root.querySelectorAll(selector).length === 1) {
+          if (resolvesUniquely(root, selector, element)) {
             return selector;
           }
         } catch (_) {
@@ -105,7 +140,9 @@
     let node = element;
     while (node && node.nodeType === Node.ELEMENT_NODE && node !== root) {
       let part = node.tagName.toLowerCase();
-      const parent = node.parentElement;
+      const nodeRoot = node.getRootNode();
+      const parent =
+        node.parentElement || (nodeRoot === root && root.children ? root : null);
       if (parent) {
         const siblings = Array.from(parent.children).filter(
           (candidate) => candidate.tagName === node.tagName
@@ -116,17 +153,39 @@
       }
       parts.unshift(part);
       node = parent;
-      if (parts.length >= 6) {
-        break;
-      }
     }
-    return parts.join(" > ");
+    const selector = parts.join(" > ");
+    return resolvesUniquely(root, selector, element) ? selector : null;
+  }
+
+  function interactionCandidates(root, selector, shadowHostChain = []) {
+    const candidates = Array.from(root.querySelectorAll(selector)).map((element) => ({
+      element,
+      queryRoot: root,
+      shadowHostChain,
+    }));
+    for (const host of Array.from(root.querySelectorAll("*"))) {
+      if (!host.shadowRoot) {
+        continue;
+      }
+      const hostSelector = selectorFor(host, root);
+      const childChain = hostSelector
+        ? [...shadowHostChain, hostSelector]
+        : [...shadowHostChain, "<unresolved-shadow-host>"];
+      candidates.push(...interactionCandidates(host.shadowRoot, selector, childChain));
+    }
+    return candidates;
   }
 
   function placementFor(element) {
-    const placement = element.closest(
-      "header,nav,footer,main,aside,form,dialog,[role=dialog],[role=navigation]"
-    );
+    const selector =
+      "header,nav,footer,main,aside,form,dialog,[role=dialog],[role=navigation]";
+    let current = element;
+    let placement = null;
+    while (current && !placement) {
+      placement = typeof current.closest === "function" ? current.closest(selector) : null;
+      current = placement ? null : composedParent(current);
+    }
     if (!placement) {
       return "document";
     }
@@ -183,11 +242,13 @@
       ].join(",");
 
     const items = [];
-    for (const element of Array.from(root.querySelectorAll(selector))) {
+    for (const candidate of interactionCandidates(root, selector)) {
+      const { element, queryRoot, shadowHostChain } = candidate;
       if (!isVisible(element, Boolean(options.includeOffscreen))) {
         continue;
       }
       const rect = element.getBoundingClientRect();
+      const localSelector = selectorFor(element, queryRoot);
       items.push({
         index: items.length + 1,
         tag: element.tagName.toLowerCase(),
@@ -199,7 +260,10 @@
         disabled:
           Boolean(element.disabled) || element.getAttribute("aria-disabled") === "true",
         placement: placementFor(element),
-        selector: selectorFor(element, root),
+        selector: localSelector,
+        selectorUnique: Boolean(localSelector),
+        shadowHostChain,
+        selectorChain: [...shadowHostChain, localSelector].filter(Boolean),
         trackingAttributes: trackingAttributes(element),
         rect: {
           x: Math.round(rect.x),

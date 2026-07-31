@@ -6,20 +6,25 @@
 
 ## Current release
 
-[v1.2.1](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v1.2.1) is
+[v1.2.2](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v1.2.2) is
 the current supported release. Download the validated package:
-[gtm-preview-recette-v1.2.1.zip](https://github.com/haiqigeng/gtm-preview-recette/releases/download/v1.2.1/gtm-preview-recette-v1.2.1.zip).
+[gtm-preview-recette-v1.2.2.zip](https://github.com/haiqigeng/gtm-preview-recette/releases/download/v1.2.2/gtm-preview-recette-v1.2.2.zip).
 
-v1.2.1 is the verdict-safety and browser-hardening release. It prevents
-false-PASS results for malformed rule paths, conditional absence, out-of-scope
-cases, relevant unexpected pushes, non-dataLayer source rules, and Preview
-event-index reuse after reconnection. Event application is now transactional
-across normalized and session validation. The supplemental recorder tolerates
-hostile page objects, dataLayer reassignment, wrapper chains, and custom layer
-names without changing the website's own push result. Encoded sensitive URL
-values are detected without retaining value-derived fingerprints, workbook
-strings are formula-safe, and browser helper behaviour is exercised in
-Playwright CI.
+v1.2.2 is the field-correctness release. The supplemental recorder now
+distinguishes cycles from reused objects with bounded snapshots and explicit
+truncation markers, preserving the website's push outcome even for hostile or
+deep payloads. Unexpected findings require a known event group, so a confirmed
+wrong-context or duplicate push cannot disappear from event roll-ups.
+Cross-requirement uniqueness no longer combines raw and resolved evidence; a
+heterogeneous evidence set is surfaced for review instead of becoming a false
+duplicate. Payload-only business rules are non-applicable on an accepted
+absence branch. Sensitive request scanning recognizes common analytics/media
+user-data keys, fails plaintext values, and distinguishes supported SHA-256
+formats without retaining values. The interaction census now produces
+verified unique selectors, traverses open shadow roots, respects inherited
+visibility and accessible-name precedence, and has a CSP-compatible execution
+path. Each corrected false-result and browser-instrumentation case has focused
+regression coverage.
 
 An expert-only workflow for testing an existing client-side Google Tag Manager
 implementation against a tracking plan. It coordinates Playwright, GTM Preview,

@@ -448,7 +448,7 @@ def record_push(ledger: dict[str, Any], args: argparse.Namespace) -> None:
             "--connection-epoch after a Preview reconnect."
         )
     group_id = args.event_group_id
-    if group_id is None and args.classification != "unplanned_relevant":
+    if group_id is None:
         group_id = action.get("event_group_id")
     ledger.setdefault("business_pushes", []).append(
         {

@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from acceptance_contract import expects_absence
 from layer_contract import CANONICAL_LAYERS, applicable_layers
 
 
@@ -184,7 +185,11 @@ def initialize_requirement(row: dict[str, Any]) -> dict[str, Any]:
                     )
                     else None
                 ),
-                "business_rule": ("PENDING" if expectation.get("business_rules") else None),
+                "business_rule": (
+                    "PENDING"
+                    if expectation.get("business_rules") and not expects_absence(expectation)
+                    else None
+                ),
                 "sensitive_data": ("PENDING" if expectation.get("sensitive_data_policy") else None),
                 "client_checks": None,
                 "regression": None,

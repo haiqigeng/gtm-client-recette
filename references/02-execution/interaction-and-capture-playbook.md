@@ -33,9 +33,11 @@ do not infer acceptance rules from generated files.
 Install `scripts/dom_interaction_census.js` in the current document and call:
 
 ```javascript
-await page.addScriptTag({
-  path: "scripts/dom_interaction_census.js"
-});
+const censusSource = await fs.promises.readFile(
+  "scripts/dom_interaction_census.js",
+  "utf8"
+)
+await page.evaluate(censusSource)
 
 window.__gtmRecetteCensus({
   rootSelector: "header",
@@ -47,10 +49,14 @@ Run it separately for each applicable placement and viewport. For a
 same-origin iframe, execute it inside that frame; for a cross-origin iframe,
 use browser/frame locators and record the boundary.
 
-The census supplies labels, accessible names, destinations, placement,
-tracking attributes, visibility, and stable candidate selectors. It discovers
-cases only. Map each candidate to the tracking plan, remove irrelevant
-elements, and give each accepted instance its own action boundary.
+Using browser-protocol evaluation avoids an inline-script injection that a
+strict page Content Security Policy can reject. The census supplies labels,
+accessible names, destinations, placement, tracking attributes, inherited
+visibility, and selectors verified inside their query root. Open-shadow-root
+items include `shadowHostChain` and `selectorChain`; `selectorUnique: false`
+is a discovery limitation, never an executable locator claim. The census
+discovers cases only. Map each candidate to the tracking plan, remove
+irrelevant elements, and give each accepted instance its own action boundary.
 
 Do not retain field values, account identifiers, or protected text from an
 authenticated page. Redact or quarantine a census that contains personal
@@ -142,6 +148,13 @@ The journal records every call, every argument, URL, timestamp, action ID,
 array length, type marker, and available `gtm.uniqueEventId`. It also records
 pre-existing entries when installed late.
 
+Snapshots distinguish a repeated object (`shared_reference`) from a real
+ancestor cycle (`circular_reference`). Depth, node, and elapsed-time budgets
+protect the page from expensive capture; `snapshot_truncated` preserves the
+limitation explicitly. A hostile array member becomes `unreadable` without
+discarding readable siblings. Use `recordsSince(lastCallIndex)` so a long SPA
+session is not repeatedly cloned from the beginning.
+
 Rules:
 
 - label this evidence `browser_interception`;
@@ -149,6 +162,8 @@ Rules:
   are applicable;
 - never relabel the journal as Tag Assistant evidence;
 - verify the wrapper after navigation or suspected dataLayer reassignment;
+- treat a required field behind `snapshot_truncated` as incomplete
+  supplemental evidence;
 - re-inject on every new document and applicable frame;
 - quarantine and privacy-scan raw captures before report generation;
 - use it to expose gaps, duplicates, wrong-context pushes, state-only updates,

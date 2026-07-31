@@ -12,6 +12,11 @@
   const GLOBAL_NAME = "__gtmRecetteJournal";
   const WRAPPED = Symbol.for("gtm-recette.dataLayer-wrapped");
   const ORIGINAL_PUSH = "__gtmRecetteOriginalPush";
+  const SNAPSHOT_LIMITS = Object.freeze({
+    maxDepth: 64,
+    maxNodes: 12000,
+    maxElapsedMs: 16,
+  });
 
   if (window[GLOBAL_NAME]) {
     return;
@@ -61,7 +66,55 @@
     }
   }
 
-  function typedSnapshot(value, seen = new Map(), path = "$") {
+  function snapshotClock() {
+    try {
+      return typeof performance !== "undefined" && typeof performance.now === "function"
+        ? performance.now()
+        : Date.now();
+    } catch {
+      return Date.now();
+    }
+  }
+
+  function truncatedSnapshot(context, reason, path) {
+    if (!context.truncated) {
+      context.truncated = true;
+      context.truncationReason = reason;
+      context.truncationPath = path;
+    }
+    return {
+      __gtm_recette_type: "snapshot_truncated",
+      reason: context.truncationReason,
+      path: context.truncationPath,
+      nodeCount: context.nodes,
+    };
+  }
+
+  function snapshotBudget(context, path, depth) {
+    if (context.truncated) {
+      return truncatedSnapshot(context, context.truncationReason, context.truncationPath);
+    }
+    if (depth > context.limits.maxDepth) {
+      return truncatedSnapshot(context, "max_depth", path);
+    }
+    context.nodes += 1;
+    if (context.nodes > context.limits.maxNodes) {
+      return truncatedSnapshot(context, "max_nodes", path);
+    }
+    if (
+      context.nodes % 64 === 0 &&
+      snapshotClock() - context.startedAt > context.limits.maxElapsedMs
+    ) {
+      return truncatedSnapshot(context, "max_elapsed_ms", path);
+    }
+    return null;
+  }
+
+  function typedSnapshot(value, context, path = "$", depth = 0) {
+    const budgetResult = snapshotBudget(context, path, depth);
+    if (budgetResult) {
+      return budgetResult;
+    }
     if (value === undefined) {
       return { __gtm_recette_type: "undefined" };
     }
@@ -101,13 +154,20 @@
       return value;
     }
 
-    if (seen.has(value)) {
+    if (context.ancestors.has(value)) {
       return {
         __gtm_recette_type: "circular_reference",
-        reference: seen.get(value),
+        reference: context.visited.get(value),
       };
     }
-    seen.set(value, path);
+    if (context.visited.has(value)) {
+      return {
+        __gtm_recette_type: "shared_reference",
+        reference: context.visited.get(value),
+      };
+    }
+    context.visited.set(value, path);
+    context.ancestors.add(value);
     try {
       if (value instanceof Date) {
         return {
@@ -123,31 +183,61 @@
         };
       }
       if (Array.isArray(value)) {
-        return value.map((item, index) =>
-          typedSnapshot(item, seen, `${path}[${index}]`)
-        );
+        const result = [];
+        for (let index = 0; index < value.length; index += 1) {
+          try {
+            result.push(
+              typedSnapshot(value[index], context, `${path}[${index}]`, depth + 1)
+            );
+          } catch (error) {
+            result.push({
+              __gtm_recette_type: "unreadable",
+              error: errorText(error),
+            });
+          }
+          if (context.truncated) {
+            break;
+          }
+        }
+        return result;
       }
 
       const result = {};
-      for (const key of Object.keys(value)) {
+      for (const key in value) {
+        if (!Object.prototype.hasOwnProperty.call(value, key)) {
+          continue;
+        }
         try {
-          result[key] = typedSnapshot(value[key], seen, `${path}.${key}`);
+          result[key] = typedSnapshot(value[key], context, `${path}.${key}`, depth + 1);
         } catch (error) {
           result[key] = {
             __gtm_recette_type: "unreadable",
             error: errorText(error),
           };
         }
+        if (context.truncated) {
+          break;
+        }
       }
       return result;
     } finally {
-      seen.delete(value);
+      context.ancestors.delete(value);
     }
   }
 
   function safeSnapshot(value, path = "$") {
     try {
-      return typedSnapshot(value, new Map(), path);
+      const context = {
+        visited: new Map(),
+        ancestors: new Set(),
+        nodes: 0,
+        startedAt: snapshotClock(),
+        truncated: false,
+        truncationReason: null,
+        truncationPath: null,
+        limits: SNAPSHOT_LIMITS,
+      };
+      return typedSnapshot(value, context, path, 0);
     } catch (error) {
       return {
         __gtm_recette_type: "snapshot_failed",
@@ -448,12 +538,26 @@
     },
     checkIntegrity,
     snapshot() {
-      return safeSnapshot(state);
+      return {
+        version: state.version,
+        installedAt: state.installedAt,
+        currentActionId: state.currentActionId,
+        nextCallIndex: state.nextCallIndex,
+        layers: safeSnapshot(state.layers, "$.layers"),
+        records: state.records.map((record, index) =>
+          safeSnapshot(record, `$.records[${index}]`)
+        ),
+        integrity: state.integrity.map((record, index) =>
+          safeSnapshot(record, `$.integrity[${index}]`)
+        ),
+      };
     },
     recordsSince(callIndex = 0) {
-      return safeSnapshot(
-        state.records.filter((record) => record.callIndex > Number(callIndex || 0))
-      );
+      return state.records
+        .filter((record) => record.callIndex > Number(callIndex || 0))
+        .map((record, index) =>
+          safeSnapshot(record, `$.recordsSince[${index}]`)
+        );
     },
   };
 

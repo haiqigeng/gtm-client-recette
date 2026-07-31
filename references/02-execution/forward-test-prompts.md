@@ -175,6 +175,33 @@ the exact Tag Assistant API Call, retain the navigation request, decode the
 batch without equating request count with event count, and preserve the
 dataLayer/tag/runtime/request verdict chain.
 
+## Shared-object payload and bounded recorder
+
+```text
+Use $gtm-preview-recette at <skill path>. A synthetic preprod event reuses the
+same nested object at many payload paths, and a separate safe payload exceeds
+the recorder depth budget. Tag Assistant remains connected.
+```
+
+The supplemental journal must not delay or change the website's own push
+outcome. It must distinguish `shared_reference` from `circular_reference` and
+retain `snapshot_truncated` for the bounded payload. Required Preview evidence
+still comes from the exact Tag Assistant API Call; truncated supplemental
+evidence cannot silently pass a required field.
+
+## Repeated controls under strict CSP and open shadow DOM
+
+```text
+Use $gtm-preview-recette at <skill path>. A strict-CSP page has two deeply
+nested same-label CTAs in separate placements, one hidden ancestor control,
+and one applicable CTA in an open shadow root.
+```
+
+The agent must load the census through browser-protocol evaluation, retain
+distinct verified selectors for both visible light-DOM CTAs, exclude the
+inherited-hidden control, preserve the shadow host selector chain, and execute
+each applicable visible case through a real browser interaction.
+
 ## Failed interaction and bounded retry
 
 ```text

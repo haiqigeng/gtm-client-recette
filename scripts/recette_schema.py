@@ -12,6 +12,8 @@ from urllib.parse import parse_qsl, urlsplit
 
 from acceptance_contract import (
     VALID_STATUSES,
+    expects_absence,
+    occurrence_rule,
     status_of,
     worst_status,
 )
@@ -563,25 +565,6 @@ def _validate_requirement_evidence_kinds(
             )
 
 
-def _occurrence_rule(expectation: dict[str, Any]) -> tuple[str, str | None]:
-    configured = expectation.get("expected_occurrence")
-    if isinstance(configured, str):
-        return configured, None
-    if isinstance(configured, dict):
-        return str(configured.get("rule", "")), configured.get("anchor_event_name")
-    return "", None
-
-
-def _expects_absence(expectation: dict[str, Any]) -> bool:
-    configured = expectation.get("expected_occurrence")
-    rule, _ = _occurrence_rule(expectation)
-    return rule == "absent" or (
-        rule == "conditional"
-        and isinstance(configured, dict)
-        and configured.get("branch_rule") == "absent"
-    )
-
-
 def _validate_occurrence(
     requirement: dict[str, Any],
     label: str,
@@ -589,7 +572,7 @@ def _validate_occurrence(
 ) -> None:
     expectation = requirement.get("expectation", {})
     verdict = requirement.get("verdict", {})
-    rule, anchor_name = _occurrence_rule(expectation)
+    rule, anchor_name = occurrence_rule(expectation)
     if rule not in OCCURRENCE_RULES:
         errors.append(f"{label}: invalid or missing expected_occurrence rule")
         return
@@ -1178,7 +1161,7 @@ def _validate_scenario(
     label: str,
     errors: list[str],
 ) -> None:
-    expected_rule, _ = _occurrence_rule(requirement.get("expectation", {}))
+    expected_rule, _ = occurrence_rule(requirement.get("expectation", {}))
     scenario = requirement.get("scenario")
     if expected_rule not in {"conditional", "non_deterministic"} and scenario is None:
         return
@@ -1923,6 +1906,16 @@ def _validate_business_rule_results(
                     )
     if len(set(rule_ids)) != len(rule_ids):
         errors.append(f"{label}: business_rules contains duplicate rule_id values")
+    if expects_absence(expectation):
+        if results not in (None, []):
+            errors.append(
+                f"{label}: expected absence must not retain payload business_rule_results"
+            )
+        if status_of(verdict.get("business_rule")) in VALID_STATUSES:
+            errors.append(
+                f"{label}: expected absence must not retain a payload business_rule verdict"
+            )
+        return
     if not isinstance(results, list):
         errors.append(f"{label}: declared business_rules require business_rule_results")
         return
@@ -2950,7 +2943,7 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
                     f"{label}: PASS resolved Data Layer differs from raw value without "
                     "a documented transformation"
                 )
-        elif overall == "PASS" and not _expects_absence(expectation):
+        elif overall == "PASS" and not expects_absence(expectation):
             errors.append(f"{label}: PASS requires an observed event or an expected absence")
         elif status_of(verdict.get("event_occurrence")) == "FAIL":
             _validate_action_boundary(
@@ -3155,6 +3148,11 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
 
     for index, row in enumerate(unexpected, start=1):
         unexpected_id = str(row.get("unexpected_id", "")).strip() or str(index)
+        event_group_id = str(row.get("event_group_id", "")).strip()
+        if not event_group_id:
+            errors.append(f"unexpected {unexpected_id}: missing event_group_id")
+        elif event_group_id not in set(event_group_ids):
+            errors.append(f"unexpected {unexpected_id}: unknown event_group_id '{event_group_id}'")
         status = status_of(row)
         if status not in VALID_STATUSES:
             errors.append(f"unexpected {unexpected_id}: invalid status '{status}'")

@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+## [v1.2.2](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v1.2.2) (2026-08-01)
+
+- Bound supplemental dataLayer snapshots by depth, node count, and elapsed
+  time; distinguish shared references from real cycles; retain readable array
+  siblings around hostile elements; and preserve stable snapshot/cursor API
+  envelopes with explicit truncation markers.
+- Require every unexpected finding to reference a known event group and make
+  unplanned session pushes inherit their action group, preventing confirmed
+  anomalies from disappearing from event feedback and plan-ordered roll-ups.
+- Evaluate cross-requirement uniqueness within one authoritative evidence
+  surface and return a precise `REVIEW` when raw, source-signal, and resolved
+  fallbacks cannot be compared safely.
+- Make payload business rules non-applicable when the accepted occurrence
+  branch requires absence, while retaining occurrence, non-firing, request
+  absence, scenario, and other downstream checks.
+- Expand redacted sensitive-data detection across encoded URLs and decoded
+  parameter objects for common analytics/media user-data keys. Classify
+  supported SHA-256 and Google `tv.*` formats as `hashed_user_data`, while
+  plaintext email, phone, name, postal, IP, and external-ID values remain
+  failures under the default technical leakage policy.
+- Make DOM census selectors resolve uniquely without structural truncation,
+  traverse open shadow roots with selector chains, respect inherited hidden
+  state and `aria-labelledby` precedence, and document CSP-compatible
+  evaluation.
+- Add regression coverage for recorder performance and truncation, hostile
+  array elements, missing anomaly groups, mixed uniqueness surfaces,
+  conditional absence with declared rules, plaintext-versus-hash detection,
+  repeated selectors, strict CSP, hidden ancestors, accessible names, and
+  shadow-root controls.
+
 ## [v1.2.1](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v1.2.1) (2026-07-30)
 
 - Prevent conditional-absence, out-of-scope interaction, mapped unexpected
@@ -27,7 +57,7 @@
 - Derive browser-request layers for tagless direct vendor sends, emit valid
   initializer output when a requirement has no named tag, and centralize only
   the shared status/action-boundary acceptance constants.
-- Add 12 focused contract regressions and a real Chromium Playwright suite for
+- Add 13 focused contract regressions and a real Chromium Playwright suite for
   recorder installation, mutation safety, hostile objects, cycles,
   reassignment, wrappers, duplicate installation, and custom data layers.
 
