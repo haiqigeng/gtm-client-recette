@@ -6,25 +6,24 @@
 
 ## Current release
 
-[v1.2.2](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v1.2.2) is
+[v1.3.0](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v1.3.0) is
 the current supported release. Download the validated package:
-[gtm-preview-recette-v1.2.2.zip](https://github.com/haiqigeng/gtm-preview-recette/releases/download/v1.2.2/gtm-preview-recette-v1.2.2.zip).
+[gtm-preview-recette-v1.3.0.zip](https://github.com/haiqigeng/gtm-preview-recette/releases/download/v1.3.0/gtm-preview-recette-v1.3.0.zip).
 
-v1.2.2 is the field-correctness release. The supplemental recorder now
-distinguishes cycles from reused objects with bounded snapshots and explicit
-truncation markers, preserving the website's push outcome even for hostile or
-deep payloads. Unexpected findings require a known event group, so a confirmed
-wrong-context or duplicate push cannot disappear from event roll-ups.
-Cross-requirement uniqueness no longer combines raw and resolved evidence; a
-heterogeneous evidence set is surfaced for review instead of becoming a false
-duplicate. Payload-only business rules are non-applicable on an accepted
-absence branch. Sensitive request scanning recognizes common analytics/media
-user-data keys, fails plaintext values, and distinguishes supported SHA-256
-formats without retaining values. The interaction census now produces
-verified unique selectors, traverses open shadow roots, respects inherited
-visibility and accessible-name precedence, and has a CSP-compatible execution
-path. Each corrected false-result and browser-instrumentation case has focused
-regression coverage.
+v1.3.0 is the operator-utility and verdict-safety release. It fixes occurrence
+identity so one captured push is not counted once per tested field, preserves
+conclusive duplicate failures across mixed evidence surfaces, treats ambiguous
+short media keys contextually, and blocks conclusive verdicts when the exact
+compared value is truncated or unreadable. Preview reconnects now use explicit
+session/action epochs, while bulk push imports are transactional.
+
+Long browser sessions can durably acknowledge and prune persisted recorder
+rows without resetting chronology. Focused retests can reuse discovery and
+journey instructions, but never inherit verdicts, evidence, authorization,
+consent, or prior PASS status. Optional Audit facts and Configuration change
+manifests are registered by digest as supporting-only context. The validated
+workbook adds an actionable Defect Register and can emit concise defect and
+stakeholder sidecars from the same source evidence.
 
 An expert-only workflow for testing an existing client-side Google Tag Manager
 implementation against a tracking plan. It coordinates Playwright, GTM Preview,
@@ -115,8 +114,9 @@ an internal test matrix without forcing a new template. XLSX hyperlinks,
 comments, merged/hidden structure, and embedded images are retained during
 inspection so supplied journey guidance is not lost.
 
-The required output is a concise XLSX validation matrix backed by 19 validated
-worksheets, including interaction cases and the observed business-push stream.
+The required output is a concise XLSX validation matrix backed by 20 validated
+worksheets, including the Defect Register, interaction cases, and the observed
+business-push stream.
 Each row shows the tracking-plan value, raw/resolved client signal, GTM/tag
 configuration, runtime and outbound values, component verdicts, exact
 mismatch, and evidence.
@@ -158,6 +158,7 @@ python -B scripts/incremental_recette.py status normalized-results.json `
 python -B scripts/incremental_recette.py validate-event normalized-results.json `
   --event-group-id EVG-001 `
   --session-ledger session.json
+python -B scripts/preview_session_ledger.py import-pushes session.json pushes.json
 ```
 
 Evaluate declared client-side rules, scan for redacted sensitive-data findings,
@@ -167,6 +168,23 @@ or compare a supplied previous run:
 python -B scripts/validate_business_rules.py normalized-results.json
 python -B scripts/scan_sensitive_data.py normalized-results.json
 python -B scripts/diff_recette_runs.py previous-results.json normalized-results.json
+python -B scripts/build_retest_manifest.py normalized-results.json session.json retest.json
+```
+
+Register optional upstream context without granting it verdict authority, or
+emit concise report sidecars:
+
+```powershell
+python -B scripts/register_supporting_artifact.py normalized-results.json audit-facts.json `
+  --artifact-id ART-AUDIT-001 `
+  --artifact-type gtm_container_audit_facts `
+  --source-skill gtm-container-audit-cleanup `
+  --source-run-id AUDIT-001 `
+  --source-version 1.0.0
+python -B scripts/build_recette_report.py normalized-results.json gtm-recette-results.xlsx `
+  --strict --session-ledger session.json `
+  --defects-csv defects.csv --defects-md defects.md `
+  --stakeholder-summary summary.md
 ```
 
 Run regression tests:

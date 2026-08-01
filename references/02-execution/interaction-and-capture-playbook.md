@@ -144,6 +144,17 @@ window.__gtmRecetteJournal.checkIntegrity("dataLayer");
 window.__gtmRecetteJournal.clearAction();
 ```
 
+After the selected records have been durably saved, reconciled to the session
+ledger, and privacy-scanned:
+
+```javascript
+window.__gtmRecetteJournal.acknowledgeThrough(lastPersistedCallIndex);
+```
+
+This removes only retained records through that call index. It never resets
+`nextCallIndex`, so action chronology remains stable. Do not acknowledge a
+record that exists only in browser memory or before a failed bulk import.
+
 The journal records every call, every argument, URL, timestamp, action ID,
 array length, type marker, and available `gtm.uniqueEventId`. It also records
 pre-existing entries when installed late.

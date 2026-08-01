@@ -27,7 +27,9 @@ Collect when known or applicable:
 - conditional branches, user states, or A/B acquisition method;
 - accepted cross-field rules and sensitive-data allowlists;
 - previous normalized recette and acceptance-relevant read-only container
-  comparison evidence.
+  comparison evidence;
+- optional Audit fact or Configuration change-manifest artifact, registered by
+  digest as supporting-only context with no verdict authority.
 
 Missing journey instructions are not a blocker when relevant interactions can
 be inferred safely. Missing consent scenarios are not a blocker when consent is
@@ -53,11 +55,13 @@ Return:
   completion signal, linked retry attempts, and adaptive settlement evidence;
 - a session ledger retaining every interaction case, attempt, applicable layer
   result, safe run authorization, and classified chronological business push;
-- a validated `.xlsx` with client summary, requirement matrix, journey
-  coverage, interaction-case, event, observed-push-stream, tag, destination,
+- a validated `.xlsx` with client summary, defect register, requirement matrix,
+  journey coverage, interaction-case, event, observed-push-stream, tag, destination,
   trigger/sequence, consent, business-rule, sensitive-data, client-check,
   regression, container, unexpected-item, blocker, evidence, and run-context
-  sheets.
+  sheets;
+- optional concise defect CSV/Markdown and stakeholder Markdown sidecars,
+  generated from the same validated result rather than maintained separately.
 
 The recette is achieved by complete operational coverage and trustworthy
 comparison. The workbook is its durable delivery artifact.

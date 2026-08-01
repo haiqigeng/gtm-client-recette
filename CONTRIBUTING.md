@@ -8,9 +8,9 @@ container IDs, screenshots, reports, credentials, emails, or browser traces.
 Use semantic `v` versioning, never calendar-date versioning:
 
 - Store `MAJOR.MINOR.PATCH` in `pyproject.toml`; the current release is
-  `1.2.2`.
-- Prefix Git tags and release archives with `v`, for example `v1.2.2` and
-  `gtm-preview-recette-v1.2.2.zip`.
+  `1.3.0`.
+- Prefix Git tags and release archives with `v`, for example `v1.3.0` and
+  `gtm-preview-recette-v1.3.0.zip`.
 - Increment PATCH for compatible fixes, MINOR for compatible functionality,
   and MAJOR for incompatible changes.
 
@@ -21,7 +21,7 @@ python -m pip install -e ".[dev]"
 python -m ruff check --no-cache .
 python -m ruff format --check .
 python -m unittest discover -s tests -v
-python -B scripts/check_release.py --tag v1.2.2
+python -B scripts/check_release.py --tag v1.3.0
 ```
 
 Changes to verdict logic require a regression fixture that fails before the

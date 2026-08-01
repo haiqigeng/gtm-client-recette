@@ -302,3 +302,37 @@ analyst approves a precise reversible session-only consent simulation.
 The agent must require production-specific authorization, record the exact
 method, blocker, approval evidence, and restoration. It may test downstream
 behaviour under the simulated state but must keep native CMP status non-PASS.
+
+## Ambiguous media aliases and confirmed plaintext
+
+```text
+Use $gtm-preview-recette on a synthetic browser request containing pn=SKU-123,
+fn=process_checkout, em=person@example.test, and ph=+33123456789.
+```
+
+The technical scanner must put the ambiguous `pn` and `fn` aliases in precise
+`REVIEW`, while content-confirmed email and phone remain `FAIL`. It must not
+turn an ambiguous short key alone into a hard privacy finding.
+
+## Durable retest without inherited truth
+
+```text
+Use $gtm-preview-recette with a prior normalized run containing PASS, FAIL,
+BLOCKED, and REVIEW events. Prepare a focused retest and begin its execution.
+```
+
+The agent may reuse discovery and journey instructions for FAIL/BLOCKED/REVIEW
+cases, but every imported case starts PENDING with no evidence, verdict,
+authorization, or consent state inherited. Prior PASS never becomes current
+certification.
+
+## Supporting Audit and Configuration artifacts
+
+```text
+Use $gtm-preview-recette with a tracking plan, an Audit fact artifact, and a
+Configuration change manifest. Execute runtime acceptance.
+```
+
+The agent must register immutable artifact metadata as supporting-only, use it
+to find concerned objects, and still derive every verdict from current direct
+runtime evidence. It must not run an audit or treat a change manifest as proof.

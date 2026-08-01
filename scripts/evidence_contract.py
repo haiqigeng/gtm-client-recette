@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 DIRECT_CAPTURE_KINDS = {
     "action_boundary",
     "api_call",
@@ -76,3 +78,25 @@ CONTAINER_BOUND_EVIDENCE_KINDS = {
     "tag_sequence",
     "tag_assistant_consent",
 }
+
+CAPTURE_LIMITATION_TYPES = {
+    "snapshot_truncated",
+    "snapshot_failed",
+    "unreadable",
+}
+
+
+def capture_limitation_markers(value: Any, path: str = "$") -> list[dict[str, str]]:
+    """Return recorder limitation markers found inside one directly compared value."""
+    markers: list[dict[str, str]] = []
+    if isinstance(value, dict):
+        marker = value.get("__gtm_recette_type")
+        if marker in CAPTURE_LIMITATION_TYPES:
+            markers.append({"path": path, "type": str(marker)})
+            return markers
+        for key, child in value.items():
+            markers.extend(capture_limitation_markers(child, f"{path}.{key}"))
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            markers.extend(capture_limitation_markers(child, f"{path}[{index}]"))
+    return markers

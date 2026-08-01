@@ -83,42 +83,6 @@ SENSITIVE_KEY_CATEGORIES = {
     "ip": "ip_address",
     "ip_address": "ip_address",
 }
-SENSITIVE_QUERY_KEYS = {
-    "email",
-    "email_address",
-    "email_hash",
-    "ep_email",
-    "ep_user_email",
-    "mail",
-    "phone",
-    "phone_hash",
-    "ep_phone",
-    "telephone",
-    "mobile",
-    "first_name",
-    "last_name",
-    "full_name",
-    "address",
-    "street",
-    "postcode",
-    "postal_code",
-    "sha256_email_address",
-    "sha256_phone_number",
-    "user_data_email",
-    "user_data_phone",
-    "zip",
-    "em",
-    "ph",
-    "pn",
-    "fn",
-    "ln",
-    "external_id",
-    "uip",
-    "ep_user_mail",
-    "ep_user_phone",
-    "up_postal",
-}
-
 QUERY_KEY_CATEGORIES = {
     "email": "email",
     "email_address": "email",
@@ -155,6 +119,7 @@ QUERY_KEY_CATEGORIES = {
     "user_data_email": "email",
     "user_data_phone": "phone",
 }
+AMBIGUOUS_SHORT_QUERY_KEYS = {"em", "ph", "pn", "fn", "ln"}
 HASH_CAPABLE_QUERY_KEYS = {
     "em",
     "ph",
@@ -178,9 +143,7 @@ def _query_key_tail(normalized_key: str) -> str:
 
 def _query_key_category(normalized_key: str) -> str | None:
     tail = _query_key_tail(normalized_key)
-    return QUERY_KEY_CATEGORIES.get(tail) or (
-        "sensitive_query_parameter" if normalized_key in SENSITIVE_QUERY_KEYS else None
-    )
+    return QUERY_KEY_CATEGORIES.get(tail)
 
 
 def _query_key_accepts_hash(normalized_key: str) -> bool:
@@ -190,6 +153,23 @@ def _query_key_accepts_hash(normalized_key: str) -> bool:
 def _recognized_user_data_hash(value: str) -> bool:
     compact = value.strip()
     return bool(SHA256_HEX_RE.fullmatch(compact) or GOOGLE_USER_DATA_HASH_RE.fullmatch(compact))
+
+
+def _sensitive_key_confidence(
+    normalized_key: str,
+    value: Any,
+    category: str,
+) -> tuple[str, str]:
+    """Avoid hard failures for ambiguous vendor aliases without content proof."""
+    tail = _query_key_tail(normalized_key)
+    if tail not in AMBIGUOUS_SHORT_QUERY_KEYS:
+        return "confirmed", "sensitive_field_name"
+    text = value if isinstance(value, str) else ""
+    if category == "email" and EMAIL_RE.search(text):
+        return "confirmed", "email_pattern_in_ambiguous_field"
+    if category == "phone" and PHONE_RE.search(text):
+        return "confirmed", "phone_pattern_in_ambiguous_field"
+    return "suspected", "ambiguous_short_key"
 
 
 def _path_tokens(path: str) -> list[str | int | None] | None:
@@ -636,13 +616,47 @@ def _rule_surface(requirement: dict[str, Any]) -> tuple[dict[str, Any] | None, s
     return None, None
 
 
+def _surface_occurrence_id(requirement: dict[str, Any], source: str | None) -> tuple[Any, ...]:
+    """Identify one observed occurrence without counting one row per checked field."""
+    if source == "raw_api_call.payload":
+        raw = requirement.get("raw_api_call")
+        if isinstance(raw, dict) and isinstance(raw.get("event_index"), int):
+            return (
+                "event_index",
+                raw.get("stream_id", "tag_assistant"),
+                raw.get("connection_epoch", 1),
+                raw["event_index"],
+            )
+        if isinstance(raw, dict) and raw.get("evidence_id"):
+            return ("evidence", raw["evidence_id"])
+    if source and source.startswith("source_signal"):
+        signal = requirement.get("source_signal")
+        if isinstance(signal, dict) and isinstance(signal.get("event_index"), int):
+            return (
+                "event_index",
+                signal.get("stream_id", "tag_assistant"),
+                signal.get("connection_epoch", 1),
+                signal["event_index"],
+            )
+        if isinstance(signal, dict) and signal.get("evidence_id"):
+            return ("evidence", signal["evidence_id"])
+    if source == "resolved_data_layer.snapshot":
+        resolved = requirement.get("resolved_data_layer")
+        if isinstance(resolved, dict) and resolved.get("evidence_id"):
+            return ("evidence", resolved["evidence_id"])
+    boundary = requirement.get("action_boundary")
+    if isinstance(boundary, dict) and boundary.get("action_id"):
+        return ("action", boundary["action_id"])
+    return ("requirement", requirement.get("requirement_id"))
+
+
 def evaluate_report_business_rules(data: dict[str, Any]) -> list[dict[str, Any]]:
     """Evaluate declared business rules for every normalized requirement."""
     requirements = data.get("requirements")
     if not isinstance(requirements, list):
         return []
     surface_entries: list[dict[str, Any]] = []
-    seen_occurrences: set[tuple[str, Any, str | None]] = set()
+    seen_occurrences: set[tuple[str, str | None, tuple[Any, ...]]] = set()
     for requirement in requirements:
         if not isinstance(requirement, dict):
             continue
@@ -652,19 +666,10 @@ def evaluate_report_business_rules(data: dict[str, Any]) -> list[dict[str, Any]]
         payload, source = _rule_surface(requirement)
         if payload is None:
             continue
-        raw = requirement.get("raw_api_call")
-        signal = requirement.get("source_signal")
-        event_index = (
-            raw.get("event_index")
-            if isinstance(raw, dict)
-            else signal.get("event_index")
-            if isinstance(signal, dict)
-            else None
-        )
         occurrence_key = (
             str(requirement.get("event_group_id", "")),
-            event_index if event_index is not None else requirement.get("requirement_id"),
             source,
+            _surface_occurrence_id(requirement, source),
         )
         if occurrence_key in seen_occurrences:
             continue
@@ -699,7 +704,7 @@ def evaluate_report_business_rules(data: dict[str, Any]) -> list[dict[str, Any]]
                     for entry in surface_entries
                     if path_value(entry["payload"], path) is not MISSING
                 }
-                if len(relevant_sources) > 1:
+                if len(relevant_sources) > 1 and result["status"] == "PASS":
                     result["status"] = "REVIEW"
                     result["reason"] = (
                         "Uniqueness cannot be certified across heterogeneous evidence "
@@ -770,7 +775,7 @@ def scan_sensitive_value(
     allowlisted_paths = {str(item) for item in policy.get("allowlisted_paths", []) if str(item)}
     custom_patterns = policy.get("custom_patterns", [])
     findings: list[dict[str, Any]] = []
-    seen_signatures: set[tuple[str, str, str]] = set()
+    seen_signatures: dict[tuple[str, str, str], int] = {}
 
     def add(
         path: str,
@@ -780,19 +785,22 @@ def scan_sensitive_value(
         candidate: Any,
     ) -> None:
         signature = (path, category, _fingerprint(candidate))
-        if signature in seen_signatures:
-            return
-        seen_signatures.add(signature)
-        findings.append(
-            _finding(
-                path=path,
-                category=category,
-                confidence=confidence,
-                basis=basis,
-                forbidden=forbidden,
-                allowlisted_paths=allowlisted_paths,
-            )
+        finding = _finding(
+            path=path,
+            category=category,
+            confidence=confidence,
+            basis=basis,
+            forbidden=forbidden,
+            allowlisted_paths=allowlisted_paths,
         )
+        existing_index = seen_signatures.get(signature)
+        if existing_index is not None:
+            existing = findings[existing_index]
+            if existing["confidence"] == "suspected" and confidence == "confirmed":
+                findings[existing_index] = finding
+            return
+        seen_signatures[signature] = len(findings)
+        findings.append(finding)
 
     def walk(item: Any, path: str, key: str | None = None) -> None:
         normalized_key = re.sub(r"[^a-z0-9]+", "_", (key or "").lower()).strip("_")
@@ -807,7 +815,12 @@ def scan_sensitive_value(
             ):
                 add(path, "hashed_user_data", "confirmed", "recognized_hash_format", item)
             else:
-                add(path, key_category, "confirmed", "sensitive_field_name", item)
+                confidence, basis = _sensitive_key_confidence(
+                    normalized_key,
+                    item,
+                    key_category,
+                )
+                add(path, key_category, confidence, basis, item)
 
         if isinstance(item, dict):
             for child_key, child in item.items():
@@ -860,11 +873,16 @@ def scan_sensitive_value(
                             query_value,
                         )
                     else:
+                        confidence, basis = _sensitive_key_confidence(
+                            normalized_query,
+                            query_value,
+                            query_category,
+                        )
                         add(
                             query_path,
                             query_category,
-                            "confirmed",
-                            "sensitive_query_key",
+                            confidence,
+                            basis,
                             query_value,
                         )
                 if query_value:

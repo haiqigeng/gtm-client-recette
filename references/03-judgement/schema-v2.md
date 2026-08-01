@@ -55,6 +55,10 @@ client-side scope:
   definitions;
 - `regression_context`: optional previous-run source and acceptance-relevant
   read-only container changes.
+- `supporting_artifacts`: optional contract-v1 metadata for supplied Audit
+  facts or Configuration change manifests. Each row is digest-bound,
+  `role=supporting_only`, and `verdict_authority=false`; it cannot replace any
+  runtime evidence layer.
 
 The singular `container_id` and `workspace` must match the primary web
 container. Server containers are not valid entries. Re-normalize a legacy row
@@ -98,6 +102,13 @@ The validator derives required layers from in-scope expectations and rejects
 an omitted applicable layer. Extra names outside the supported set are also
 invalid. An unavailable layer remains explicit in the requirement status and
 cannot be silently substituted.
+
+If a directly compared `field_value`, configured value, runtime value, or
+destination value contains `snapshot_truncated`, `snapshot_failed`, or
+`unreadable`, its component verdict must be `BLOCKED` until the exact value is
+recaptured authoritatively. A limitation elsewhere in a large supplemental
+snapshot does not automatically block an independently captured required
+field.
 
 ## Atomic requirement
 
