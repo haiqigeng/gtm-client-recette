@@ -197,6 +197,7 @@ def parser() -> argparse.ArgumentParser:
     push.add_argument("--evidence-id", required=True)
     push.add_argument("--container-id", required=True)
     push.add_argument("--stream-id", default="tag_assistant")
+    push.add_argument("--captured-at")
     push.add_argument(
         "--connection-epoch",
         type=int,
@@ -205,6 +206,19 @@ def parser() -> argparse.ArgumentParser:
             "preview_disconnected actions."
         ),
     )
+
+    import_pushes = subparsers.add_parser("import-pushes")
+    import_pushes.add_argument("ledger", type=Path)
+    import_pushes.add_argument(
+        "push_file",
+        type=Path,
+        help="JSON array, or an object with a pushes array, captured for open actions.",
+    )
+
+    import_cases = subparsers.add_parser("import-cases")
+    import_cases.add_argument("ledger", type=Path)
+    import_cases.add_argument("manifest", type=Path)
+    import_cases.add_argument("--results", type=Path, required=True)
 
     layer = subparsers.add_parser("record-layer")
     layer.add_argument("ledger", type=Path)
@@ -404,6 +418,7 @@ def begin_action(ledger: dict[str, Any], args: argparse.Namespace) -> None:
         "material_variant": case.get("material_variant"),
         "action": case.get("action"),
         "attempt_number": len(previous) + 1,
+        "connection_epoch": ledger.get("connection_epoch", 1),
         "retry_of_action_id": args.retry_of_action_id,
         "preview_connected_before": True,
         "target_ready_before": True,
@@ -424,18 +439,29 @@ def record_push(ledger: dict[str, Any], args: argparse.Namespace) -> None:
     if any(row.get("push_id") == args.push_id for row in ledger.get("business_pushes", [])):
         raise SystemExit(f"Duplicate push_id: {args.push_id}")
     action = find_unique(ledger.get("actions", []), "action_id", args.action_id)
+    if action.get("state") != "OPEN":
+        raise SystemExit("Business pushes can be recorded only for an open action.")
+    if args.classification not in PUSH_CLASSIFICATIONS:
+        raise SystemExit(f"Invalid push classification: {args.classification}")
+    if not isinstance(args.event_index, int) or isinstance(args.event_index, bool):
+        raise SystemExit("Business push event_index must be an integer.")
+    captured_at = getattr(args, "captured_at", None)
+    if captured_at:
+        try:
+            parsed_capture = datetime.fromisoformat(str(captured_at).replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise SystemExit("captured_at must be ISO 8601 with timezone.") from exc
+        if parsed_capture.tzinfo is None:
+            raise SystemExit("captured_at must be ISO 8601 with timezone.")
     if args.event_index <= action.get("last_event_before", -1):
         raise SystemExit("Business push event_index must follow last_event_before.")
     connection_epoch = args.connection_epoch
     if connection_epoch is None:
-        connection_epoch = 1
-        for previous in ledger.get("actions", []):
-            if not isinstance(previous, dict) or previous.get("action_id") == args.action_id:
-                break
-            if previous.get("settlement_reason") == "preview_disconnected":
-                connection_epoch += 1
+        connection_epoch = action.get("connection_epoch", ledger.get("connection_epoch", 1))
     if connection_epoch < 1:
         raise SystemExit("connection_epoch must be a positive integer.")
+    if connection_epoch != action.get("connection_epoch", 1):
+        raise SystemExit("connection_epoch must match the open action connection epoch.")
     if any(
         isinstance(row, dict)
         and row.get("stream_id", "tag_assistant") == args.stream_id
@@ -460,7 +486,7 @@ def record_push(ledger: dict[str, Any], args: argparse.Namespace) -> None:
             "event_group_id": group_id,
             "event_name": args.event_name,
             "event_index": args.event_index,
-            "captured_at": now(),
+            "captured_at": captured_at or now(),
             "url": args.url or action.get("url"),
             "page_state": args.page_state,
             "classification": args.classification,
@@ -469,6 +495,112 @@ def record_push(ledger: dict[str, Any], args: argparse.Namespace) -> None:
             "container_id": args.container_id,
         }
     )
+
+
+def import_pushes(ledger: dict[str, Any], args: argparse.Namespace) -> None:
+    value = json.loads(args.push_file.read_text(encoding="utf-8"))
+    pushes = value.get("pushes") if isinstance(value, dict) else value
+    if not isinstance(pushes, list) or any(not isinstance(row, dict) for row in pushes):
+        raise SystemExit("Push import must be a JSON array or an object with a pushes array.")
+    required = {
+        "push_id",
+        "action_id",
+        "event_index",
+        "event_name",
+        "classification",
+        "classification_reason",
+        "page_state",
+        "evidence_id",
+        "container_id",
+    }
+    for index, row in enumerate(pushes, start=1):
+        missing = sorted(key for key in required if row.get(key) in (None, ""))
+        if missing:
+            raise SystemExit(f"Push import row {index} is missing: " + ", ".join(missing))
+        record_push(
+            ledger,
+            argparse.Namespace(
+                push_id=row["push_id"],
+                action_id=row["action_id"],
+                event_index=row["event_index"],
+                event_name=row["event_name"],
+                classification=row["classification"],
+                classification_reason=row["classification_reason"],
+                event_group_id=row.get("event_group_id"),
+                url=row.get("url"),
+                page_state=row["page_state"],
+                evidence_id=row["evidence_id"],
+                container_id=row["container_id"],
+                stream_id=row.get("stream_id", "tag_assistant"),
+                connection_epoch=row.get("connection_epoch"),
+                captured_at=row.get("captured_at"),
+            ),
+        )
+
+
+def import_cases(ledger: dict[str, Any], args: argparse.Namespace) -> None:
+    value = json.loads(args.manifest.read_text(encoding="utf-8"))
+    if not isinstance(value, dict) or value.get("artifact_type") != ("gtm_recette_retest_manifest"):
+        raise SystemExit("Case import requires a gtm_recette_retest_manifest object.")
+    if value.get("verdicts_inherited") is not False or value.get("evidence_inherited") is not False:
+        raise SystemExit(
+            "Retest manifests must explicitly reject verdict and evidence inheritance."
+        )
+    limitations = value.get("limitations", [])
+    if not isinstance(limitations, list):
+        raise SystemExit("Retest manifest limitations must be an array.")
+    if limitations:
+        raise SystemExit(
+            "Resolve every retest discovery limitation before importing cases: "
+            + ", ".join(
+                str(row.get("event_group_id", "unknown"))
+                for row in limitations
+                if isinstance(row, dict)
+            )
+        )
+    cases = value.get("cases")
+    if not isinstance(cases, list) or any(not isinstance(row, dict) for row in cases):
+        raise SystemExit("Retest manifest cases must be an array of objects.")
+    for index, row in enumerate(cases, start=1):
+        required = (
+            "case_id",
+            "event_group_id",
+            "url",
+            "element",
+            "placement",
+            "action",
+        )
+        missing = [field for field in required if row.get(field) in (None, "")]
+        if missing:
+            raise SystemExit(f"Retest manifest case {index} is missing: " + ", ".join(missing))
+        if row.get("execution_status") != "PENDING":
+            raise SystemExit("Every imported retest case must start PENDING.")
+        if row.get("authorization_ids") not in (None, []):
+            raise SystemExit("Prior-run authorizations cannot be inherited by retest cases.")
+        variant = row.get("material_variant", {})
+        if not isinstance(variant, dict):
+            raise SystemExit(f"Retest manifest case {index} material_variant must be an object.")
+        register_case(
+            ledger,
+            argparse.Namespace(
+                results=args.results,
+                case_id=str(row["case_id"]),
+                event_group_id=str(row["event_group_id"]),
+                url=str(row["url"]),
+                element=str(row["element"]),
+                placement=str(row["placement"]),
+                action=str(row["action"]),
+                variant=[
+                    f"{key}={json.dumps(item, ensure_ascii=False)}" for key, item in variant.items()
+                ],
+                discovered_from="prior_run",
+                scope_status="IN_SCOPE",
+                reason=None,
+                authorization_id=[],
+                include_layer=[],
+                exclude_layer=[],
+            ),
+        )
 
 
 def record_layer(ledger: dict[str, Any], args: argparse.Namespace) -> None:
@@ -562,6 +694,10 @@ def settle_action(ledger: dict[str, Any], args: argparse.Namespace) -> None:
         )
         case["execution_status"] = "EXECUTED"
         case["final_action_id"] = args.action_id
+    if args.settlement_reason == "preview_disconnected":
+        ledger["connection_epoch"] = (
+            action.get("connection_epoch", ledger.get("connection_epoch", 1)) + 1
+        )
 
 
 def init_command(args: argparse.Namespace) -> None:
@@ -573,6 +709,7 @@ def init_command(args: argparse.Namespace) -> None:
             "created_at": timestamp,
             "updated_at": timestamp,
             "profile_path": args.profile_path,
+            "connection_epoch": 1,
             "approved_origins": sorted({origin(item) for item in args.approved_origin}),
             "surfaces": {},
             "authorizations": [],
@@ -690,6 +827,8 @@ MUTATING_COMMANDS = {
     "close-case": close_case,
     "begin-action": begin_action,
     "record-push": record_push,
+    "import-pushes": import_pushes,
+    "import-cases": import_cases,
     "record-layer": record_layer,
     "settle-action": settle_action,
     "checkpoint": checkpoint,

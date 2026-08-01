@@ -57,3 +57,28 @@ version evidence.
 
 Do not let a regression label hide the actual layer failure. The event feedback
 must still say what currently failed and why.
+
+## Failure-focused retest preparation
+
+Build a manifest from current `FAIL`, `BLOCKED`, and `REVIEW` events:
+
+```powershell
+python -B scripts/build_retest_manifest.py `
+  normalized-results.json session.json retest-manifest.json
+```
+
+Import its cases into a newly initialized session:
+
+```powershell
+python -B scripts/preview_session_ledger.py import-cases new-session.json `
+  retest-manifest.json --results new-results.json
+```
+
+This caches only interaction discovery, URL, placement, action, and material
+variant. Every case begins `PENDING`; no prior evidence, verdict,
+authorization, consent simulation, or PASS is inherited. Revalidate the
+tracking-plan scope and current container/context before execution.
+
+If a non-PASS event has no reusable URL, action, or element, the manifest puts
+it in `limitations` rather than silently omitting it or inventing a case.
+Resolve every listed limitation before `import-cases` accepts the manifest.

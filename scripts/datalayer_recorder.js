@@ -23,10 +23,11 @@
   }
 
   const state = {
-    version: 2,
+    version: 3,
     installedAt: new Date().toISOString(),
     currentActionId: null,
     nextCallIndex: 1,
+    acknowledgedThrough: 0,
     layers: {},
     records: [],
     integrity: [],
@@ -526,7 +527,7 @@
   }
 
   const api = {
-    version: 2,
+    version: 3,
     install,
     watch,
     markAction(actionId) {
@@ -543,6 +544,9 @@
         installedAt: state.installedAt,
         currentActionId: state.currentActionId,
         nextCallIndex: state.nextCallIndex,
+        acknowledgedThrough: state.acknowledgedThrough,
+        earliestRetainedCallIndex:
+          state.records.length > 0 ? state.records[0].callIndex : null,
         layers: safeSnapshot(state.layers, "$.layers"),
         records: state.records.map((record, index) =>
           safeSnapshot(record, `$.records[${index}]`)
@@ -558,6 +562,25 @@
         .map((record, index) =>
           safeSnapshot(record, `$.recordsSince[${index}]`)
         );
+    },
+    acknowledgeThrough(callIndex) {
+      const numeric = Number(callIndex);
+      if (!Number.isInteger(numeric) || numeric < 0) {
+        throw new TypeError("callIndex must be a non-negative integer");
+      }
+      const latestRecorded = state.nextCallIndex - 1;
+      if (numeric > latestRecorded) {
+        throw new RangeError("callIndex cannot exceed the latest recorded call");
+      }
+      const before = state.records.length;
+      state.records = state.records.filter((record) => record.callIndex > numeric);
+      state.acknowledgedThrough = Math.max(state.acknowledgedThrough, numeric);
+      return {
+        acknowledgedThrough: state.acknowledgedThrough,
+        removed: before - state.records.length,
+        remaining: state.records.length,
+        nextCallIndex: state.nextCallIndex,
+      };
     },
   };
 

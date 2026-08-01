@@ -19,6 +19,15 @@ python -B scripts/build_recette_report.py normalized-results.json gtm-recette-re
   --session-ledger session.json
 ```
 
+Add concise defect and stakeholder sidecars when needed:
+
+```powershell
+python -B scripts/build_recette_report.py normalized-results.json gtm-recette-results.xlsx `
+  --strict --session-ledger session.json `
+  --defects-csv defects.csv --defects-md defects.md `
+  --stakeholder-summary summary.md
+```
+
 Evaluate declared cross-field rules:
 
 ```powershell
@@ -72,6 +81,15 @@ python -B scripts/preview_session_ledger.py validate session.json `
   --final
 ```
 
+Bulk-import a captured action window, or prepare a safe non-PASS retest:
+
+```powershell
+python -B scripts/preview_session_ledger.py import-pushes session.json pushes.json
+python -B scripts/build_retest_manifest.py results.json session.json retest.json
+python -B scripts/preview_session_ledger.py import-cases new-session.json retest.json `
+  --results new-results.json
+```
+
 Validate one completed event, inspect progress, and validate the final ledger:
 
 ```powershell
@@ -100,7 +118,8 @@ python -B tests/run_browser_helpers.py
 It checks the smoke fixture plus hostile snapshot objects and array elements,
 shared references versus cycles, snapshot budgets, reassignment, wrapper
 chains, duplicate installation, honest detachment reporting, custom data
-layers, strict-CSP census loading, unique structural selectors, inherited
+layers, durable record acknowledgement with monotonic indexes, strict-CSP
+census loading, unique structural selectors, inherited
 visibility, accessible-name precedence, and open shadow roots.
 
 Strict final validation cross-checks normalized action boundaries against the

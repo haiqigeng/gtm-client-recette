@@ -12,6 +12,7 @@ from typing import Any
 from acceptance_contract import STATUS_PRIORITY, status_of
 from event_feedback import event_feedback, feedback_for_event
 from execution_contract import validate_session
+from init_coverage_ledger import initialize_requirement
 from recette_schema import validate
 
 
@@ -275,6 +276,45 @@ def status_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
     return output
 
 
+def scaffold_event_patch(
+    data: dict[str, Any],
+    event_group_id: str,
+    session: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Create a PENDING event patch with discovery context but no inherited proof."""
+    selected = event_requirements(data, event_group_id)
+    reset_requirements: list[dict[str, Any]] = []
+    for row in selected:
+        reset = initialize_requirement(deepcopy(row))
+        reset.pop("blocker_id", None)
+        scenario = reset.get("scenario")
+        if isinstance(scenario, dict):
+            scenario.pop("evidence_id", None)
+            scenario.pop("condition_met", None)
+        reset["notes"] = "Pending fresh capture; prior verdict and evidence were not inherited."
+        reset_requirements.append(reset)
+    session_view = _session_event_view(session, event_group_id) if session is not None else None
+    return {
+        "event_group_id": event_group_id,
+        "requirements": reset_requirements,
+        "evidence": [],
+        "unexpected": [],
+        "blockers": [],
+        "capture_context": {
+            "supporting_only": True,
+            "verdicts_inherited": False,
+            "evidence_inherited": False,
+            "prior_cases": (session_view or {}).get("cases", []),
+            "prior_actions": (session_view or {}).get("actions", []),
+            "prior_business_pushes": (session_view or {}).get("business_pushes", []),
+            "instruction": (
+                "Use this context to locate the interaction. Replace it with new direct "
+                "evidence from the current action window before applying the patch."
+            ),
+        },
+    }
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -293,6 +333,12 @@ def parse_args() -> argparse.Namespace:
     status_parser = subparsers.add_parser("status")
     status_parser.add_argument("ledger", type=Path)
     status_parser.add_argument("--session-ledger", type=Path)
+
+    scaffold_parser = subparsers.add_parser("scaffold-event")
+    scaffold_parser.add_argument("ledger", type=Path)
+    scaffold_parser.add_argument("--event-group-id", required=True)
+    scaffold_parser.add_argument("--session-ledger", type=Path)
+    scaffold_parser.add_argument("--output", type=Path, required=True)
 
     final_parser = subparsers.add_parser("final-validate")
     final_parser.add_argument("ledger", type=Path)
@@ -321,6 +367,16 @@ def main() -> int:
                 "events": (
                     event_feedback(data, session) if session is not None else status_rows(data)
                 )
+            }
+        elif args.command == "scaffold-event":
+            patch = scaffold_event_patch(data, args.event_group_id, session)
+            save_atomic(args.output, patch)
+            output = {
+                "event_group_id": args.event_group_id,
+                "requirements": len(patch["requirements"]),
+                "verdicts_inherited": False,
+                "evidence_inherited": False,
+                "output": str(args.output.resolve()),
             }
         else:
             errors = validate(data, strict=True)

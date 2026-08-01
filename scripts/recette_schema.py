@@ -39,6 +39,7 @@ from evidence_contract import (
     DETERMINISTIC_CAPTURE_KINDS,
     DIRECT_CAPTURE_KINDS,
     EVENT_INDEX_EVIDENCE_KINDS,
+    capture_limitation_markers,
 )
 from layer_contract import (
     CANONICAL_LAYERS,
@@ -46,6 +47,7 @@ from layer_contract import (
     applicable_layers,
     is_browser_sending_tag,
 )
+from supporting_artifacts import validate_supporting_artifacts
 
 SCHEMA_VERSION = 2
 MATCH_RULES = {
@@ -253,6 +255,17 @@ PROTECTED_BLOCKERS = {
     "EXTERNAL_APPROVAL",
     "IRREVERSIBLE_ACTION",
 }
+
+COMPARED_VALUE_COMPONENTS = (
+    ("raw_api_call", "field_value", "raw_payload"),
+    ("resolved_data_layer", "field_value", "resolved_data_layer"),
+    ("gtm_variable", "field_value", "gtm_variable"),
+    ("tag", "configured_value", "tag_configuration"),
+    ("tag", "runtime_value", "tag_parameter"),
+    ("destination_request", "field_value", "destination_parameter"),
+    ("source_signal", "value", "source_signal"),
+    ("source_signal", "payload", "source_signal"),
+)
 BASE_LAYERS = {
     "raw_api_call",
     "resolved_data_layer",
@@ -2247,6 +2260,35 @@ def _validate_regression(
         errors.append(f"{label}: verdict.regression differs from regression classification")
 
 
+def _validate_capture_limitations(
+    requirement: dict[str, Any],
+    label: str,
+    errors: list[str],
+) -> None:
+    """Prevent conclusive verdicts when the exact compared value was not captured."""
+    verdict = requirement.get("verdict")
+    if not isinstance(verdict, dict):
+        return
+    for object_name, field_name, component in COMPARED_VALUE_COMPONENTS:
+        observation = requirement.get(object_name)
+        if not isinstance(observation, dict) or field_name not in observation:
+            continue
+        markers = capture_limitation_markers(
+            observation[field_name],
+            f"{object_name}.{field_name}",
+        )
+        if not markers:
+            continue
+        component_status = status_of(verdict.get(component))
+        if component_status != "BLOCKED":
+            details = ", ".join(f"{marker['type']} at {marker['path']}" for marker in markers)
+            errors.append(
+                f"{label}: verdict.{component} must be BLOCKED because the directly "
+                f"compared value contains {details}; recapture it authoritatively before "
+                "using a conclusive verdict"
+            )
+
+
 def semantic_errors(data: dict[str, Any]) -> list[str]:
     """Return every structural and semantic validation error."""
     errors: list[str] = []
@@ -2281,6 +2323,7 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
     if run.get("environment_class") not in {"test", "preprod", "staging", "production"}:
         errors.append("run: environment_class must be test, preprod, staging, or production")
     _validate_run_client_context(run, errors)
+    errors.extend(validate_supporting_artifacts(run.get("supporting_artifacts")))
     if "observation-only" in (
         f"{run.get('tracking_plan_source', '')} {run.get('acceptance_scope', '')}".lower()
     ):
@@ -2777,6 +2820,7 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
                     "the analyst must resolve"
                 )
         acceptance_status = worst_status(acceptance_components)
+        _validate_capture_limitations(requirement, label, errors)
 
         refs = evidence_ids(requirement.get("evidence_ids"))
         if not refs:
@@ -3003,6 +3047,7 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
                 not observed and status_of(verdict.get("gtm_variable")) == "BLOCKED"
             )
             if variable_blocked_by_absence:
+                # Expected source absence legitimately blocks downstream resolution.
                 pass
             elif not isinstance(variable, dict) or variable.get("applicable") is not True:
                 errors.append(f"{label}: expected GTM variable lacks applicable evidence")

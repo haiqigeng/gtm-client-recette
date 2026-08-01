@@ -90,7 +90,9 @@ Read the following only when relevant:
   sensitive-data checks; and
 - [regression comparison](references/03-judgement/regression-comparison.md)
   when a prior recette or acceptance-relevant read-only container comparison is
-  supplied.
+  supplied; and
+- [cross-skill handoff](references/01-orientation/cross-skill-handoff.md) when
+  an Audit fact artifact or Configuration change manifest is supplied.
 
 Use [the gold mini-recette](references/gold-mini-recette.md) only when
 calibration is needed for independent layer verdicts, wrong-context detection,
@@ -157,6 +159,19 @@ python scripts/init_coverage_ledger.py interpreted-requirements.json normalized-
   --workspace Recette `
   --tracking-plan-source tracking-plan.xlsx `
   --acceptance-scope "Confirmed tracking-plan requirements"
+```
+
+Audit facts and Configuration change manifests are optional supporting
+context, never acceptance authority. Register immutable metadata only; do not
+copy their conclusions into a recette verdict:
+
+```powershell
+python scripts/register_supporting_artifact.py normalized-results.json audit-facts.json `
+  --artifact-id ART-AUDIT-001 `
+  --artifact-type gtm_container_audit_facts `
+  --source-skill gtm-container-audit-cleanup `
+  --source-run-id AUDIT-001 `
+  --source-version 1.0.0
 ```
 
 ### 2. Build complete but proportionate coverage
@@ -252,6 +267,11 @@ navigation. Read incrementally with `recordsSince(lastCallIndex)`. Distinguish
 `snapshot_truncated`; a truncation affecting a required field makes that
 supplemental capture incomplete and cannot be silently treated as exact.
 
+After records have been durably persisted, reconciled, and privacy-scanned,
+call `acknowledgeThrough(lastPersistedCallIndex)` to prune only those retained
+records. Never acknowledge before durable persistence; call indexes remain
+monotonic after pruning.
+
 Do not retain credentials, authorization headers, cookies, or raw sensitive
 values.
 
@@ -316,6 +336,12 @@ Use the ledger commands to enforce this sequence:
 Final validation rejects a pending case, an unclassified or omitted push, an
 open action, a missing applicable layer, or a normalized action boundary that
 does not exactly match the retained attempt.
+
+For a large captured action window, export its rows once and use
+`preview_session_ledger.py import-pushes`; the import is transactional and
+rejects a duplicate stream/epoch/index before the ledger is written. The
+ledger owns the current connection epoch explicitly and advances it only after
+a settled `preview_disconnected` action.
 
 Never use the expected tracking event as proof that the website interaction
 completed. If an overlay, stale locator, animation, validation error, or other
@@ -439,6 +465,16 @@ Before announcing an event result, validate its complete atomic patch and then
 apply it:
 
 ```powershell
+python scripts/incremental_recette.py scaffold-event normalized-results.json `
+  --event-group-id EVG-001 `
+  --session-ledger session.json `
+  --output event-001-patch.json
+```
+
+The scaffold may reuse discovery and journey context, but it never inherits a
+verdict or evidence. Every layer still requires fresh direct capture.
+
+```powershell
 python scripts/incremental_recette.py apply-event normalized-results.json event-001-patch.json `
   --session-ledger session.json
 python scripts/incremental_recette.py validate-event normalized-results.json `
@@ -480,7 +516,10 @@ python scripts/validate_business_rules.py normalized-results.json
 python scripts/scan_sensitive_data.py normalized-results.json
 python scripts/build_recette_report.py normalized-results.json gtm-recette-results.xlsx `
   --strict `
-  --session-ledger session.json
+  --session-ledger session.json `
+  --defects-csv gtm-recette-defects.csv `
+  --defects-md gtm-recette-defects.md `
+  --stakeholder-summary gtm-recette-summary.md
 ```
 
 Reload the workbook and verify sheets, row counts, filters, hyperlinks,
@@ -491,3 +530,8 @@ Finish with every planned event in original order and its aggregate status.
 Keep each component failure and affected case visible beneath the event
 roll-up. State exact missing or blocked evidence instead of implying
 completion.
+
+When a previous run is supplied for retest, generate a retest manifest and
+import only its discovery cases. Earlier PASS, FAIL, evidence, consent, and
+authorization never become current truth; every imported case starts
+`PENDING` and must be executed again.

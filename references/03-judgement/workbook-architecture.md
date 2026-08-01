@@ -11,28 +11,35 @@ python scripts/build_recette_report.py normalized-results.json gtm-recette-resul
 The workbook contains, in order:
 
 1. `Client Summary`
-2. `Requirement Matrix`
-3. `Journey Coverage`
-4. `Interaction Cases`
-5. `Event Evidence`
-6. `Observed Push Stream`
-7. `Tag Evidence`
-8. `Destination Evidence`
-9. `Trigger & Sequence`
-10. `Consent`
-11. `Business Rules`
-12. `Sensitive Data`
-13. `Client Checks`
-14. `Regression`
-15. `Container Context`
-16. `Unexpected Events-Tags`
-17. `Blockers`
-18. `Evidence Catalogue`
-19. `Run Context`
+2. `Defect Register`
+3. `Requirement Matrix`
+4. `Journey Coverage`
+5. `Interaction Cases`
+6. `Event Evidence`
+7. `Observed Push Stream`
+8. `Tag Evidence`
+9. `Destination Evidence`
+10. `Trigger & Sequence`
+11. `Consent`
+12. `Business Rules`
+13. `Sensitive Data`
+14. `Client Checks`
+15. `Regression`
+16. `Container Context`
+17. `Unexpected Events-Tags`
+18. `Blockers`
+19. `Evidence Catalogue`
+20. `Run Context`
 
 `Client Summary` includes the complete event list in original plan order,
 status, requirement and case counts, verified layer statuses, concise reason,
 exact non-PASS retest interaction, and evidence IDs.
+
+`Defect Register` contains one concise actionable row per non-PASS requirement
+and unexpected occurrence: event order, case/placement/variant, failed layer,
+expected and observed value/type, precise reason, evidence IDs, and exact
+retest. It is the handoff table for developers and analysts; it does not hide
+the detailed evidence sheets.
 
 `Requirement Matrix` is the atomic technical deliverable. Show source
 expectation, raw value/state/type, resolved value/state/type, GTM variable,
@@ -77,10 +84,22 @@ structured action/event/container/request/tag linkage separate from optional
 `source_detail`, then path/URL, timezone-qualified capture time, and redacted
 description.
 
-Keep all 19 sheets even when an optional domain has zero rows. The empty,
+Keep all 20 sheets even when an optional domain has zero rows. The empty,
 filtered sheet makes non-applicability visible and prevents a missing worksheet
 from hiding an omitted layer.
 
 The builder reloads the XLSX and verifies required sheets, order, row counts,
 filters, links, and formatting. Do not declare completion when strict validation
 or reload checks fail.
+
+Generate optional shareable sidecars from the same validated source:
+
+```powershell
+python scripts/build_recette_report.py normalized-results.json gtm-recette-results.xlsx `
+  --strict --session-ledger session.json `
+  --defects-csv defects.csv --defects-md defects.md `
+  --stakeholder-summary summary.md
+```
+
+The stakeholder summary reports scope, event totals, and non-PASS actions. It
+does not invent a GO/NO-GO decision or hide technical evidence.

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import sys
 from collections import Counter
@@ -63,6 +64,7 @@ WRAP_ALIGNMENT = Alignment(vertical="top", wrap_text=True)
 
 REQUIRED_SHEETS = [
     "Client Summary",
+    "Defect Register",
     "Requirement Matrix",
     "Journey Coverage",
     "Interaction Cases",
@@ -81,6 +83,27 @@ REQUIRED_SHEETS = [
     "Blockers",
     "Evidence Catalogue",
     "Run Context",
+]
+
+DEFECT_HEADERS = [
+    "defect_id",
+    "plan_order",
+    "event_group_id",
+    "event_name",
+    "status",
+    "case_id",
+    "requirement_id",
+    "placement",
+    "material_variant",
+    "failed_layer",
+    "expected_value",
+    "expected_type",
+    "observed_value",
+    "observed_type",
+    "concise_reason",
+    "exact_retest",
+    "evidence_ids",
+    "retest_status",
 ]
 
 REQUIREMENT_HEADERS = [
@@ -542,6 +565,9 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Validate normalized data without writing a workbook.",
     )
+    parser.add_argument("--defects-csv", type=Path)
+    parser.add_argument("--defects-md", type=Path)
+    parser.add_argument("--stakeholder-summary", type=Path)
     return parser.parse_args()
 
 
@@ -789,6 +815,236 @@ def requirement_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
             }
         )
     return output
+
+
+def _defect_observation(requirement: dict[str, Any], layer: str) -> tuple[Any, Any]:
+    expectation = requirement.get("expectation", {})
+    raw = requirement.get("raw_api_call") or {}
+    resolved = requirement.get("resolved_data_layer") or {}
+    variable = requirement.get("gtm_variable") or {}
+    tag = requirement.get("tag") or {}
+    destination = requirement.get("destination_request") or {}
+    occurrence = requirement.get("occurrence_evidence") or {}
+    mapping = {
+        "event_occurrence": (occurrence.get("actual_count"), "number"),
+        "source_signal": (
+            (requirement.get("source_signal") or {}).get("value"),
+            (requirement.get("source_signal") or {}).get("value_type"),
+        ),
+        "raw_payload": (raw.get("field_value"), raw.get("field_type")),
+        "resolved_data_layer": (resolved.get("field_value"), resolved.get("field_type")),
+        "gtm_variable": (variable.get("field_value"), variable.get("field_type")),
+        "tag_configuration": (tag.get("configured_value"), None),
+        "tag_firing": (tag.get("actual_firing"), "string"),
+        "tag_parameter": (tag.get("runtime_value"), tag.get("runtime_type")),
+        "destination_request": (destination.get("request_behavior"), "string"),
+        "destination_parameter": (
+            destination.get("field_value"),
+            destination.get("field_type"),
+        ),
+        "consent": ((requirement.get("consent") or {}).get("state_at_event"), "object"),
+        "trigger_logic": (requirement.get("trigger_evaluation"), "object"),
+        "tag_sequence": (requirement.get("tag_sequence"), "object"),
+        "business_rule": (requirement.get("business_rule_results"), "array"),
+        "sensitive_data": (requirement.get("sensitive_data_scan"), "object"),
+        "client_checks": (requirement.get("client_checks"), "array"),
+        "regression": (requirement.get("regression"), "object"),
+    }
+    return mapping.get(layer, (None, expectation.get("expected_type")))
+
+
+def _defect_expectation(requirement: dict[str, Any], layer: str) -> tuple[Any, Any]:
+    expectation = requirement.get("expectation", {})
+    if layer == "event_occurrence":
+        return expectation.get("expected_occurrence"), "occurrence_rule"
+    if layer == "tag_configuration":
+        return expectation.get("expected_tag_configuration"), None
+    if layer == "tag_firing":
+        return expectation.get("expected_firing"), "string"
+    if layer == "destination_request":
+        return expectation.get("expected_request_behavior"), "string"
+    if layer == "consent":
+        return expectation.get("expected_consent_state"), "object"
+    if layer == "trigger_logic":
+        return expectation.get("trigger_contract"), "object"
+    if layer == "tag_sequence":
+        return expectation.get("sequence_contract"), "object"
+    if layer == "business_rule":
+        return expectation.get("business_rules"), "array"
+    if layer == "sensitive_data":
+        return expectation.get("sensitive_data_policy"), "object"
+    if layer == "client_checks":
+        return [
+            {
+                "check_id": row.get("check_id"),
+                "comparison": row.get("comparison"),
+                "expected": row.get("expected"),
+            }
+            for row in requirement.get("client_checks", [])
+            if isinstance(row, dict)
+        ], "array"
+    if layer == "regression":
+        return "no acceptance regression", "regression_state"
+    return expectation.get("expected_value"), expectation.get("expected_type")
+
+
+def defect_rows(
+    data: dict[str, Any],
+    session: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Build the actionable non-PASS register used by XLSX and sidecars."""
+    run_inventory = {
+        str(row.get("event_group_id")): row
+        for row in data.get("run", {}).get("event_inventory", [])
+        if isinstance(row, dict)
+    }
+    feedback = {str(row.get("event_group_id")): row for row in event_feedback(data, session)}
+    cases = {
+        str(row.get("case_id")): row
+        for row in (session or {}).get("cases", [])
+        if isinstance(row, dict)
+    }
+    actions = {
+        str(row.get("action_id")): row
+        for row in (session or {}).get("actions", [])
+        if isinstance(row, dict)
+    }
+    output: list[dict[str, Any]] = []
+    for requirement in as_rows(data.get("requirements"), "requirements"):
+        verdict = requirement.get("verdict") or {}
+        defect_status = status_of(verdict.get("overall"))
+        if defect_status == "PASS":
+            continue
+        group_id = str(requirement.get("event_group_id", ""))
+        inventory = run_inventory.get(group_id, {})
+        layer = str(verdict.get("failure_layer") or "event_occurrence")
+        expected_value, expected_type = _defect_expectation(requirement, layer)
+        observed_value, observed_type = _defect_observation(requirement, layer)
+        boundary = requirement.get("action_boundary") or {}
+        action = actions.get(str(boundary.get("action_id", "")), {})
+        case = cases.get(str(action.get("case_id", "")), {})
+        reason = str(
+            verdict.get("mismatch")
+            or verdict.get("review_question")
+            or requirement.get("notes")
+            or feedback.get(group_id, {}).get("reason")
+            or "Non-PASS requirement; inspect the cited layer evidence."
+        ).strip()
+        output.append(
+            {
+                "defect_id": f"DEF-REQ-{requirement.get('requirement_id')}",
+                "plan_order": inventory.get("plan_order")
+                or (requirement.get("source") or {}).get("plan_order"),
+                "event_group_id": group_id,
+                "event_name": inventory.get("event_name")
+                or (requirement.get("expectation") or {}).get("event_name"),
+                "status": defect_status,
+                "case_id": case.get("case_id"),
+                "requirement_id": requirement.get("requirement_id"),
+                "placement": case.get("placement"),
+                "material_variant": case.get("material_variant"),
+                "failed_layer": layer,
+                "expected_value": expected_value,
+                "expected_type": expected_type,
+                "observed_value": observed_value,
+                "observed_type": observed_type,
+                "concise_reason": reason,
+                "exact_retest": feedback.get(group_id, {}).get("retest"),
+                "evidence_ids": requirement.get("evidence_ids"),
+                "retest_status": "PENDING",
+            }
+        )
+    for unexpected in as_rows(data.get("unexpected"), "unexpected"):
+        defect_status = status_of(unexpected.get("status"))
+        if defect_status == "PASS":
+            continue
+        group_id = str(unexpected.get("event_group_id", ""))
+        inventory = run_inventory.get(group_id, {})
+        case = cases.get(str(unexpected.get("case_id", "")), {})
+        output.append(
+            {
+                "defect_id": f"DEF-UNX-{unexpected.get('unexpected_id')}",
+                "plan_order": inventory.get("plan_order"),
+                "event_group_id": group_id,
+                "event_name": unexpected.get("event_name") or inventory.get("event_name"),
+                "status": defect_status,
+                "case_id": unexpected.get("case_id"),
+                "requirement_id": None,
+                "placement": case.get("placement"),
+                "material_variant": case.get("material_variant"),
+                "failed_layer": "unexpected_business_push",
+                "expected_value": "absent in this action window",
+                "expected_type": "occurrence_rule",
+                "observed_value": unexpected.get("classification"),
+                "observed_type": "string",
+                "concise_reason": unexpected.get("classification_reason")
+                or unexpected.get("review_question")
+                or unexpected.get("notes"),
+                "exact_retest": feedback.get(group_id, {}).get("retest"),
+                "evidence_ids": unexpected.get("evidence_ids"),
+                "retest_status": "PENDING",
+            }
+        )
+    for case in cases.values():
+        group_id = str(case.get("event_group_id", ""))
+        inventory = run_inventory.get(group_id, {})
+        case_status = str(case.get("execution_status", "")).upper()
+        final_action = actions.get(str(case.get("final_action_id", "")), {})
+        layer_results = [
+            row
+            for row in final_action.get("layer_results", [])
+            if isinstance(row, dict) and status_of(row.get("status")) != "PASS"
+        ]
+        if case_status == "EXECUTED" and not layer_results:
+            continue
+        if not layer_results:
+            layer_results = [
+                {
+                    "layer": "interaction_case",
+                    "status": case_status,
+                    "reason": case.get("reason") or "Case did not reach an executed result.",
+                    "evidence_ids": [],
+                }
+            ]
+        variant = case.get("material_variant") or {}
+        retest = (
+            f"{case.get('url')} — {case.get('action')} {case.get('element')} "
+            f"at {case.get('placement')}"
+            + (f" with {dumps_structured(variant)}" if variant else "")
+        )
+        for layer_result in layer_results:
+            layer = str(layer_result.get("layer", "interaction_case"))
+            output.append(
+                {
+                    "defect_id": f"DEF-CASE-{case.get('case_id')}-{layer}",
+                    "plan_order": inventory.get("plan_order"),
+                    "event_group_id": group_id,
+                    "event_name": inventory.get("event_name"),
+                    "status": status_of(layer_result.get("status")) or case_status,
+                    "case_id": case.get("case_id"),
+                    "requirement_id": None,
+                    "placement": case.get("placement"),
+                    "material_variant": variant,
+                    "failed_layer": layer,
+                    "expected_value": "applicable layer accepted",
+                    "expected_type": "layer_status",
+                    "observed_value": layer_result.get("status") or case_status,
+                    "observed_type": "status",
+                    "concise_reason": layer_result.get("reason") or case.get("reason"),
+                    "exact_retest": retest,
+                    "evidence_ids": layer_result.get("evidence_ids") or [],
+                    "retest_status": "PENDING",
+                }
+            )
+    return sorted(
+        output,
+        key=lambda row: (
+            float(row.get("plan_order"))
+            if isinstance(row.get("plan_order"), (int, float))
+            else 1e18,
+            str(row.get("defect_id", "")),
+        ),
+    )
 
 
 def journey_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1391,6 +1647,7 @@ def build_workbook(
             raise ReportValidationError("\n".join(execution_errors))
     wb = Workbook()
     add_client_summary(wb, data, warnings, session)
+    add_table_sheet(wb, "Defect Register", DEFECT_HEADERS, defect_rows(data, session))
     add_table_sheet(wb, "Requirement Matrix", REQUIREMENT_HEADERS, requirement_rows(data))
     add_table_sheet(wb, "Journey Coverage", JOURNEY_HEADERS, journey_rows(data))
     add_table_sheet(
@@ -1503,6 +1760,7 @@ def validate_workbook(
         if workbook.sheetnames != REQUIRED_SHEETS:
             raise ReportValidationError("Generated workbook sheets are not in the required order.")
         expected_rows = {
+            "Defect Register": len(defect_rows(data, session)) + 1,
             "Requirement Matrix": len(as_rows(data.get("requirements"), "requirements")) + 1,
             "Journey Coverage": len(as_rows(data.get("requirements"), "requirements")) + 1,
             "Interaction Cases": len(case_action_rows(session or {})) + 1,
@@ -1533,6 +1791,78 @@ def validate_workbook(
                 )
     finally:
         workbook.close()
+
+
+def _sidecar_text(value: Any) -> str:
+    return str(serialize(value)).replace("\r", " ").replace("\n", " ").strip()
+
+
+def write_defects_csv(path: Path, rows_to_write: list[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=DEFECT_HEADERS, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(
+            {header: _sidecar_text(row.get(header)) for header in DEFECT_HEADERS}
+            for row in rows_to_write
+        )
+
+
+def write_defects_markdown(path: Path, rows_to_write: list[dict[str, Any]]) -> None:
+    columns = [
+        "plan_order",
+        "event_name",
+        "status",
+        "failed_layer",
+        "concise_reason",
+        "exact_retest",
+    ]
+    lines = [
+        "# GTM recette defects",
+        "",
+        "| " + " | ".join(columns) + " |",
+        "| " + " | ".join("---" for _ in columns) + " |",
+    ]
+    for row in rows_to_write:
+        values = [_sidecar_text(row.get(column)).replace("|", "\\|") for column in columns]
+        lines.append("| " + " | ".join(values) + " |")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def write_stakeholder_summary(
+    path: Path,
+    data: dict[str, Any],
+    session: dict[str, Any] | None,
+) -> None:
+    feedback = event_feedback(data, session)
+    counts = Counter(row["status"] for row in feedback)
+    lines = [
+        f"# {data.get('run', {}).get('report_title', 'GTM Preview recette')}",
+        "",
+        f"Scope: {_sidecar_text(data.get('run', {}).get('acceptance_scope'))}",
+        "",
+        "## Event totals",
+        "",
+        ", ".join(
+            f"{status}: {counts.get(status, 0)}"
+            for status in ("PASS", "FAIL", "BLOCKED", "REVIEW", "NOT_TESTED")
+        ),
+        "",
+        "## Non-PASS events",
+        "",
+    ]
+    non_pass = [row for row in feedback if row.get("status") != "PASS"]
+    if not non_pass:
+        lines.append("No non-PASS event.")
+    else:
+        lines.extend(
+            f"- {row.get('plan_order')}. {row.get('event_name')} — {row.get('status')}: "
+            f"{_sidecar_text(row.get('reason'))} Retest: {_sidecar_text(row.get('retest'))}"
+            for row in non_pass
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def main() -> int:
@@ -1566,6 +1896,13 @@ def main() -> int:
         if output.suffix.lower() != ".xlsx":
             raise ReportValidationError("Output path must use the .xlsx extension.")
         build_workbook(data, output, warnings, session)
+        defects = defect_rows(data, session)
+        if args.defects_csv:
+            write_defects_csv(args.defects_csv, defects)
+        if args.defects_md:
+            write_defects_markdown(args.defects_md, defects)
+        if args.stakeholder_summary:
+            write_stakeholder_summary(args.stakeholder_summary, data, session)
     except (OSError, json.JSONDecodeError, ReportValidationError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2

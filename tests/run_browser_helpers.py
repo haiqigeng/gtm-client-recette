@@ -30,7 +30,7 @@ def main() -> int:
         page.goto(SMOKE_PAGE.as_uri())
 
         smoke = page.evaluate("window.__gtmRecetteSmokeResult")
-        require(smoke["recorderVersion"] == 2, "Recorder version mismatch.", smoke)
+        require(smoke["recorderVersion"] == 3, "Recorder version mismatch.", smoke)
         require(smoke["recorderAttached"] is True, "Recorder did not attach.", smoke)
         require(smoke["recordCount"] == 1, "Smoke push count is not one.", smoke)
         require(smoke["argumentCount"] == 2, "Multi-argument push was not retained.", smoke)
@@ -276,6 +276,31 @@ def main() -> int:
             custom_layer["watched"] is True and custom_layer["after"] == custom_layer["before"] + 1,
             "Configured custom data layer was not recorded.",
             custom_layer,
+        )
+
+        acknowledgement = page.evaluate(
+            """() => {
+              const journal = window.__gtmRecetteJournal;
+              const before = journal.snapshot();
+              const acknowledged = before.records[Math.floor(before.records.length / 2)].callIndex;
+              const result = journal.acknowledgeThrough(acknowledged);
+              const after = journal.snapshot();
+              window.dataLayer.push({event: "after_acknowledgement"});
+              const finalSnapshot = journal.snapshot();
+              return {before, acknowledged, result, after, finalSnapshot};
+            }"""
+        )
+        require(
+            acknowledgement["result"]["removed"] > 0
+            and acknowledgement["after"]["acknowledgedThrough"] == acknowledgement["acknowledged"]
+            and all(
+                row["callIndex"] > acknowledgement["acknowledged"]
+                for row in acknowledgement["after"]["records"]
+            )
+            and acknowledgement["finalSnapshot"]["nextCallIndex"]
+            == acknowledgement["before"]["nextCallIndex"] + 1,
+            "Durable acknowledgement did not prune safely or preserve monotonic call indexes.",
+            acknowledgement,
         )
 
         census_page = context.new_page()

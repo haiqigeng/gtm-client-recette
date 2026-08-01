@@ -2,6 +2,42 @@
 
 ## Unreleased
 
+## [v1.3.0](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v1.3.0) (2026-08-01)
+
+- Correct cross-requirement uniqueness so multiple field requirements tied to
+  one captured occurrence are counted once, while a conclusive same-surface
+  duplicate failure can no longer be downgraded by heterogeneous fallback
+  evidence.
+- Make short media aliases such as `pn` and `fn` context-aware: content-proven
+  plaintext email/phone still fails, recognized hashes pass the technical
+  scan, and ambiguous aliases alone require review instead of a false hard
+  failure. Remove the redundant sensitive-query fallback table.
+- Machine-enforce capture limitations on directly compared values: an
+  `unreadable`, `snapshot_failed`, or `snapshot_truncated` required value must
+  remain blocked until authoritatively recaptured. Fix the JSON-null event-group
+  validation branch.
+- Persist Preview connection epochs explicitly on the session and each action,
+  advance them only after a settled disconnect, and reconcile every imported
+  push to its action epoch. Add transactional bulk push import with optional
+  original capture timestamps.
+- Upgrade the supplemental dataLayer journal with safe durable
+  `acknowledgeThrough` pruning, retained-range metadata, and monotonic call
+  indexes so long SPA sessions do not require unbounded record retention.
+- Add a deterministic PENDING event-patch scaffold and failure-focused retest
+  manifests. They may reuse interaction discovery, but never inherit verdicts,
+  evidence, authorizations, consent states, or earlier PASS certification.
+- Add a versioned, digest-bound contract for optional Audit facts and
+  Configuration change manifests. They remain supporting-only context with no
+  authority over runtime acceptance verdicts.
+- Add the `Defect Register` as the twentieth validated workbook sheet and
+  optional concise defect CSV/Markdown and stakeholder Markdown sidecars from
+  the same normalized result, without generating an automatic GO/NO-GO claim.
+- Extend unit and real-browser regressions across occurrence identity,
+  mixed-surface verdict preservation, ambiguous sensitive keys, capture
+  limitations, null groups, connection epochs, transactional imports, safe
+  retest/scaffolding, supporting artifacts, defect exports, and journal
+  acknowledgement.
+
 ## [v1.2.2](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v1.2.2) (2026-08-01)
 
 - Bound supplemental dataLayer snapshots by depth, node count, and elapsed

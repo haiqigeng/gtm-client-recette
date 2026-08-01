@@ -39,6 +39,7 @@ DISCOVERY_SOURCES = {
     "supplied_journey",
     "website_census",
     "runtime_discovery",
+    "prior_run",
 }
 AUTHORIZATION_SCOPES = {
     "safe_synthetic_identity",
@@ -409,6 +410,13 @@ def _validate_session_metadata(ledger: dict[str, Any], errors: list[str]) -> Non
     tag_assistants = [row for row in surface_rows if row.get("role") == "tag_assistant"]
     if tag_assistants and not all(row.get("connected") is True for row in tag_assistants):
         errors.append("session: Tag Assistant is not recorded as connected")
+    connection_epoch = ledger.get("connection_epoch", 1)
+    if (
+        not isinstance(connection_epoch, int)
+        or isinstance(connection_epoch, bool)
+        or connection_epoch < 1
+    ):
+        errors.append("session: connection_epoch must be a positive integer")
 
 
 def _validate_layer_result(
@@ -470,6 +478,15 @@ def _validate_action(context: _ValidationContext, action: dict[str, Any]) -> Non
     attempt_number = action.get("attempt_number")
     if not isinstance(attempt_number, int) or attempt_number < 1:
         context.errors.append(f"session action {action_id}: invalid attempt_number")
+    connection_epoch = action.get("connection_epoch", 1)
+    if (
+        not isinstance(connection_epoch, int)
+        or isinstance(connection_epoch, bool)
+        or connection_epoch < 1
+    ):
+        context.errors.append(
+            f"session action {action_id}: connection_epoch must be a positive integer"
+        )
     layer_results = action.get("layer_results")
     if not isinstance(layer_results, list):
         context.errors.append(f"session action {action_id}: layer_results must be an array")
@@ -687,6 +704,10 @@ def _validate_push_index(
             f"session business push {push_id}: connection_epoch must be a positive integer"
         )
         return
+    if connection_epoch != action.get("connection_epoch", 1):
+        context.errors.append(
+            f"session business push {push_id}: connection_epoch differs from its action"
+        )
     key = (stream_id, connection_epoch, event_index)
     if key in context.push_indexes:
         context.errors.append(
@@ -811,8 +832,15 @@ def _validate_push(
         )
         if not nonempty(push.get(field_name))
     )
+    if not nonempty(push.get("captured_at")):
+        context.errors.append(f"session business push {push_id}: missing 'captured_at'")
+    elif not iso_timestamp(push.get("captured_at")):
+        context.errors.append(
+            f"session business push {push_id}: captured_at must be ISO 8601 with timezone"
+        )
     _validate_push_index(context, push_id, push, action)
-    group_id = str(push.get("event_group_id", "")).strip()
+    group_value = push.get("event_group_id")
+    group_id = group_value.strip() if isinstance(group_value, str) else ""
     if classification != "unplanned_relevant" and not group_id:
         context.errors.append(
             f"session business push {push_id}: classification requires event_group_id"
@@ -971,6 +999,23 @@ def validate_session(
     actions = rows(ledger.get("actions"), "actions", errors)
     pushes = rows(ledger.get("business_pushes"), "business_pushes", errors)
     authorizations = rows(ledger.get("authorizations"), "authorizations", errors)
+    if "connection_epoch" in ledger:
+        expected_epoch = 1
+        for action in actions:
+            if action.get("connection_epoch") != expected_epoch:
+                errors.append(
+                    f"session action {action.get('action_id', '')}: connection_epoch must "
+                    f"equal the explicit current epoch {expected_epoch}"
+                )
+            if (
+                action.get("state") == "SETTLED"
+                and action.get("settlement_reason") == "preview_disconnected"
+            ):
+                expected_epoch += 1
+        if ledger.get("connection_epoch") != expected_epoch:
+            errors.append(
+                "session: connection_epoch does not reconcile with settled Preview disconnections"
+            )
     by_requirement, requirements_by_group, event_by_group, evidence = _result_catalogs(results)
     unexpected_rows = [
         row for row in (results or {}).get("unexpected", []) if isinstance(row, dict)

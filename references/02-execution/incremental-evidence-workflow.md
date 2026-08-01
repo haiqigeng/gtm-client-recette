@@ -125,11 +125,24 @@ applicable, event index and container. A screenshot is optional and cannot
 replace these records.
 
 `connection_epoch` is `1` for the initial Preview connection and increments
-when a recorded disconnect/reconnect causes event indexes to restart. The
-command derives it from prior `preview_disconnected` settlements when omitted;
-pass it explicitly when the recovery boundary is known. A push identity is the
+when a settled disconnect/reconnect causes event indexes to restart. The
+session ledger stores the current epoch explicitly and assigns it to each new
+action; `record-push` must match that action epoch. A push identity is the
 combination of stream, connection epoch, and event index, so valid index reuse
 after reconnect does not hide a true duplicate inside one epoch.
+
+For many captured pushes, use one transactional import instead of repeated CLI
+calls:
+
+```powershell
+python -B scripts/preview_session_ledger.py import-pushes `
+  session.json action-window-pushes.json
+```
+
+The file is an array, or `{ "pushes": [...] }`, with the same fields as
+`record-push`. A malformed row, duplicate ID, or duplicate stream/epoch/index
+rejects the complete import without writing a partial ledger. Only after the
+successful durable import may the browser recorder acknowledge those calls.
 
 For one bounded retry, begin a new action with
 `--retry-of-action-id <retained-action-id>`. Never reuse an action ID or merge
@@ -172,6 +185,18 @@ repair a later mismatch, and a later browser request cannot repair an earlier
 payload/configuration failure.
 
 Create an event patch:
+
+```powershell
+python -B scripts/incremental_recette.py scaffold-event working-results.json `
+  --event-group-id EVG-007 `
+  --session-ledger session.json `
+  --output event-007-patch.json
+```
+
+The shell resets every requirement to `PENDING`, empties evidence, unexpected,
+and blocker rows, and places previous case/action/push information under a
+supporting-only `capture_context`. Replace that context with current direct
+evidence; never apply it as proof.
 
 ```json
 {
@@ -248,7 +273,9 @@ python -B scripts/scan_sensitive_data.py working-results.json
 python -B scripts/build_recette_report.py `
   working-results.json gtm-recette-results.xlsx `
   --strict `
-  --session-ledger session.json
+  --session-ledger session.json `
+  --defects-csv gtm-recette-defects.csv `
+  --stakeholder-summary gtm-recette-summary.md
 ```
 
 Do not complete a run with a `PENDING` case, open action, unclassified or
