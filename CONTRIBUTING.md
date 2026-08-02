@@ -8,9 +8,9 @@ container IDs, screenshots, reports, credentials, emails, or browser traces.
 Use semantic `v` versioning, never calendar-date versioning:
 
 - Store `MAJOR.MINOR.PATCH` in `pyproject.toml`; the current release is
-  `1.3.0`.
-- Prefix Git tags and release archives with `v`, for example `v1.3.0` and
-  `gtm-preview-recette-v1.3.0.zip`.
+  `2.0.0`.
+- Prefix Git tags and release archives with `v`, for example `v2.0.0` and
+  `gtm-preview-recette-v2.0.0.zip`.
 - Increment PATCH for compatible fixes, MINOR for compatible functionality,
   and MAJOR for incompatible changes.
 
@@ -21,7 +21,7 @@ python -m pip install -e ".[dev]"
 python -m ruff check --no-cache .
 python -m ruff format --check .
 python -m unittest discover -s tests -v
-python -B scripts/check_release.py --tag v1.3.0
+python -B scripts/check_release.py --tag v2.0.0
 ```
 
 Changes to verdict logic require a regression fixture that fails before the
@@ -41,7 +41,7 @@ exhaust practical finite sets, document risk-based large-space coverage, and
 do not add speculative negative crawling.
 
 Changes to final certification must test the normalized result together with a
-schema-v2 session ledger. Cover case closure, retained retries, explicit
+schema-v3 session ledger. Cover case closure, retained retries, explicit
 business-push counts/classifications, per-case applicable layers, direct
 evidence linkage, and workbook case/push sheets. Do not weaken strict
 certification to preserve an incomplete legacy run.
@@ -56,7 +56,7 @@ check with `python -B tests/run_browser_helpers.py`; install the optional
 `browser-test` dependencies and Chromium first. Changes to plan inspection,
 request decoding, or incremental event handling require focused unit tests.
 
-Preserve schema-v2 normalization where possible. If stricter certification
+Preserve schema-v3 normalization where possible. If stricter certification
 requires new fields, update the fixtures and document the legacy-row upgrade in
 the README and changelog. Add strict negative tests for every new
 component-level PASS rule. Server-side GTM remains a future, separate scope.

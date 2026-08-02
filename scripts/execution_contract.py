@@ -8,19 +8,38 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from acceptance_contract import ACTION_BOUNDARY_FIELDS, worst_status
+from acceptance_contract import ACTION_BOUNDARY_FIELDS, expects_absence, worst_status
 from evidence_contract import (
     ACTION_BOUND_EVIDENCE_KINDS,
     CONTAINER_BOUND_EVIDENCE_KINDS,
     DIRECT_CAPTURE_KINDS,
     EVENT_INDEX_EVIDENCE_KINDS,
 )
-from layer_contract import CANONICAL_LAYERS, applicable_layers
+from layer_contract import (
+    CANONICAL_LAYERS,
+    LAYER_APPLICABILITY_MODES,
+    TAG_CATEGORIES,
+    TAG_DELIVERY_TYPES,
+    TAG_RESULT_LAYERS,
+    TAG_SCOPE_STATUSES,
+    inferred_tag_category,
+    layer_applicability,
+    normalize_tag_scope,
+    tag_scope_decision,
+)
+from tag_evidence_contract import (
+    evidence_matches_tag,
+    has_network_capture,
+    request_evidence_ids,
+    session_sensitive_findings,
+    validate_comparisons,
+    validate_expected_field,
+)
 
-SESSION_SCHEMA_VERSION = 2
+SESSION_SCHEMA_VERSION = 3
 CASE_SCOPE_STATUSES = {"IN_SCOPE", "OUT_OF_SCOPE"}
 CASE_EXECUTION_STATUSES = {"PENDING", "EXECUTED", "BLOCKED", "NOT_TESTED"}
-LAYER_RESULT_STATUSES = {"PASS", "FAIL", "BLOCKED", "REVIEW"}
+LAYER_RESULT_STATUSES = {"PASS", "FAIL", "BLOCKED", "REVIEW", "NOT_APPLICABLE"}
 PUSH_CLASSIFICATIONS = {
     "expected",
     "companion",
@@ -42,6 +61,7 @@ DISCOVERY_SOURCES = {
     "prior_run",
 }
 AUTHORIZATION_SCOPES = {
+    "complete_ordinary_journeys",
     "safe_synthetic_identity",
     "ordinary_form_submission",
     "nonproduction_lead_submission",
@@ -50,6 +70,8 @@ AUTHORIZATION_SCOPES = {
     "production_cmp_session_override",
 }
 PROTECTED_AUTHORIZATION_EXCLUSIONS = (
+    "CREDENTIALS",
+    "GOOGLE_SIGN_IN",
     "MFA",
     "CAPTCHA",
     "EMAIL_VERIFICATION",
@@ -79,11 +101,13 @@ FORBIDDEN_SESSION_SECRET_KEYS = {
     "secret",
 }
 LAYER_EVIDENCE_KINDS = {
+    "action_boundary": {"action_boundary"},
     "raw_api_call": {"api_call", "action_boundary"},
     "resolved_data_layer": {"resolved_data_layer"},
+    "concerned_tag_inventory": {"tag_inventory", "tag_configuration"},
     "gtm_variable": {"gtm_variable"},
-    "tag_configuration": {"tag_configuration"},
-    "tag_firing": {"tag_runtime"},
+    "tag_configuration": {"tag_configuration", "tag_inventory"},
+    "tag_firing": {"tag_runtime", "tag_inventory"},
     "tag_parameter": {"tag_runtime"},
     "consent_when_applicable": {"consent_state", "tag_assistant_consent"},
     "source_signal_when_no_data_layer_push": {
@@ -95,10 +119,20 @@ LAYER_EVIDENCE_KINDS = {
         "custom_html",
         "ga4_enhanced_measurement",
     },
-    "destination_request_when_applicable": {"browser_network_request"},
+    "destination_request_when_applicable": {
+        "browser_network_request",
+        "browser_network_capture",
+        "tag_configuration",
+    },
     "trigger_logic_when_applicable": {"trigger_evaluation"},
     "tag_sequence_when_applicable": {"tag_sequence"},
-    "business_rules_when_declared": {"business_rule_evaluation"},
+    "business_rules_when_declared": {
+        "business_rule_evaluation",
+        "api_call",
+        "resolved_data_layer",
+        "tag_runtime",
+        "browser_network_request",
+    },
     "sensitive_data_scan": {"sensitive_data_scan"},
     "client_checks_when_applicable": {"client_side_checks"},
     "regression_when_baseline_provided": {"previous_run_comparison"},
@@ -323,7 +357,11 @@ def _validate_direct_evidence(
             container_ids,
             errors,
         )
-    if str(layer_result.get("status", "")).strip().upper() != "BLOCKED" and not seen_allowed:
+    result_status = str(layer_result.get("status", "")).strip().upper()
+    requires_allowed_kind = result_status not in {"BLOCKED", "NOT_APPLICABLE"} or (
+        layer == "consent_when_applicable" and result_status == "NOT_APPLICABLE"
+    )
+    if requires_allowed_kind and not seen_allowed:
         errors.append(
             f"session action {action_id} layer {layer}: no direct evidence of the required kind"
         )
@@ -366,6 +404,7 @@ class _ValidationContext:
     unexpected_rows: list[dict[str, Any]]
     unexpected_by_push: dict[str, dict[str, Any]]
     container_count: int
+    run: dict[str, Any]
     actions_by_case: dict[str, list[dict[str, Any]]] = field(
         default_factory=lambda: defaultdict(list)
     )
@@ -423,6 +462,7 @@ def _validate_layer_result(
     context: _ValidationContext,
     action: dict[str, Any],
     layer_result: Any,
+    case_contract: dict[str, Any] | None = None,
 ) -> None:
     action_id = str(action.get("action_id", "")).strip()
     if not isinstance(layer_result, dict):
@@ -445,6 +485,45 @@ def _validate_layer_result(
             f"session action {action_id} layer {layer}: REVIEW requires "
             "a semantic_ambiguity question"
         )
+    case = case_contract or context.case_by_id.get(str(action.get("case_id", "")), {})
+    decisions = {
+        str(row.get("layer", "")): row
+        for row in case.get("layer_applicability", [])
+        if isinstance(row, dict)
+    }
+    decision = decisions.get(layer)
+    if decision is None:
+        context.errors.append(
+            f"session action {action_id} layer {layer}: absent from applicability card"
+        )
+    else:
+        predicate_result = layer_result.get("predicate_result")
+        if decision.get("mode") == "MANDATORY":
+            if result_status == "NOT_APPLICABLE":
+                context.errors.append(
+                    f"session action {action_id} layer {layer}: mandatory layer cannot be "
+                    "NOT_APPLICABLE"
+                )
+            if predicate_result is False:
+                context.errors.append(
+                    f"session action {action_id} layer {layer}: mandatory predicate cannot be false"
+                )
+        elif decision.get("mode") == "CONDITIONAL":
+            if not isinstance(predicate_result, bool):
+                context.errors.append(
+                    f"session action {action_id} layer {layer}: conditional layer requires "
+                    "boolean predicate_result"
+                )
+            elif predicate_result is False and result_status != "NOT_APPLICABLE":
+                context.errors.append(
+                    f"session action {action_id} layer {layer}: false predicate requires "
+                    "NOT_APPLICABLE"
+                )
+            elif predicate_result is True and result_status == "NOT_APPLICABLE":
+                context.errors.append(
+                    f"session action {action_id} layer {layer}: true predicate cannot be "
+                    "NOT_APPLICABLE"
+                )
     if context.results_provided:
         _validate_direct_evidence(
             layer=layer,
@@ -455,6 +534,495 @@ def _validate_layer_result(
         )
 
 
+def _tag_result_status(rows: list[dict[str, Any]]) -> str:
+    statuses = [
+        str(row.get("status", "")).strip().upper()
+        for row in rows
+        if str(row.get("status", "")).strip().upper() != "NOT_APPLICABLE"
+    ]
+    return worst_status(statuses) if statuses else "NOT_APPLICABLE"
+
+
+def _validate_tag_layer_result_evidence(
+    context: _ValidationContext,
+    action: dict[str, Any],
+    row: dict[str, Any],
+) -> None:
+    action_id = str(action.get("action_id", "")).strip()
+    tag_id = str(row.get("tag_id", "")).strip()
+    layer = str(row.get("layer", "")).strip()
+    status = str(row.get("status", "")).strip().upper()
+    refs = row.get("evidence_ids")
+    if not isinstance(refs, list) or not refs:
+        context.errors.append(
+            f"session action {action_id} tag {row.get('tag_id')} layer {layer}: "
+            "evidence_ids are required"
+        )
+        return
+    allowed = LAYER_EVIDENCE_KINDS.get(layer, set())
+    allowed_seen = False
+    for ref_value in refs:
+        ref = str(ref_value).strip()
+        evidence = context.evidence.get(ref)
+        if evidence is None:
+            context.errors.append(
+                f"session action {action_id} tag {row.get('tag_id')} layer {layer}: "
+                f"unknown evidence ID '{ref}'"
+            )
+            continue
+        kind = str(evidence.get("kind", "")).strip()
+        tag_matches = evidence_matches_tag(evidence, tag_id)
+        if not tag_matches:
+            context.errors.append(
+                f"session action {action_id} tag {tag_id} layer {layer}: "
+                f"evidence '{ref}' is not bound to this exact tag"
+            )
+        allowed_seen = allowed_seen or (kind in allowed and tag_matches)
+        _validate_direct_evidence_row(
+            ref,
+            evidence,
+            action_id,
+            {str(value).strip() for value in action.get("container_ids", []) if str(value).strip()},
+            context.errors,
+        )
+    if status not in {"BLOCKED", "NOT_APPLICABLE"} and not allowed_seen:
+        context.errors.append(
+            f"session action {action_id} tag {row.get('tag_id')} layer {layer}: "
+            "no direct evidence of the required kind"
+        )
+
+
+def _validate_tag_comparisons(
+    *,
+    context: _ValidationContext,
+    action: dict[str, Any],
+    items: Any,
+    label: str,
+    parent_status: str,
+) -> None:
+    validate_comparisons(
+        items=items,
+        label=label,
+        parent_status=parent_status,
+        requirements=context.by_requirement,
+        allowed_requirement_ids=action.get("requirement_ids", []),
+        errors=context.errors,
+    )
+
+
+def _validate_tag_value_layer(
+    context: _ValidationContext,
+    action: dict[str, Any],
+    *,
+    layer: str,
+    result_status: str,
+    details: dict[str, Any],
+    label: str,
+) -> None:
+    """Validate variable, configuration, and runtime-parameter comparison layers."""
+    if layer == "gtm_variable" and result_status == "NOT_APPLICABLE":
+        if details.get("no_gtm_variable_reference") is not True:
+            context.errors.append(
+                f"{label}: NOT_APPLICABLE requires positive no_gtm_variable_reference proof"
+            )
+        return
+    if layer in {"tag_configuration", "tag_firing", "tag_parameter"} and (
+        result_status == "NOT_APPLICABLE"
+    ):
+        context.errors.append(f"{label}: core tag layer cannot be NOT_APPLICABLE")
+        return
+    comparison_field = {
+        "gtm_variable": "variables",
+        "tag_configuration": "configuration",
+        "tag_parameter": "parameters",
+    }.get(layer)
+    if comparison_field and result_status not in {"BLOCKED", "NOT_APPLICABLE"}:
+        _validate_tag_comparisons(
+            context=context,
+            action=action,
+            items=details.get(comparison_field),
+            label=f"{label}.{comparison_field}",
+            parent_status=result_status,
+        )
+
+
+def _validate_tag_firing_layer(
+    context: _ValidationContext,
+    action: dict[str, Any],
+    *,
+    result_status: str,
+    details: dict[str, Any],
+    label: str,
+) -> None:
+    """Validate firing expectation provenance, state, and exact count."""
+    for field_name in ("expected_firing", "actual_firing", "fire_count"):
+        if field_name not in details:
+            context.errors.append(f"{label}: details.{field_name} is required")
+    fire_count = details.get("fire_count")
+    if not isinstance(fire_count, int) or isinstance(fire_count, bool) or fire_count < 0:
+        context.errors.append(f"{label}: fire_count must be a non-negative integer")
+    expected_firing = details.get("expected_firing")
+    validate_expected_field(
+        actual_expected=expected_firing,
+        anchor=details.get("expected_firing_anchor"),
+        requirements=context.by_requirement,
+        allowed_requirement_ids=action.get("requirement_ids", []),
+        label=f"{label}.expected_firing",
+        errors=context.errors,
+    )
+    actual_firing = details.get("actual_firing")
+    firing_matches = (
+        (
+            expected_firing == "fired_once"
+            and actual_firing in {"fired", "fired_once"}
+            and fire_count == 1
+        )
+        or (
+            expected_firing == "fired"
+            and actual_firing in {"fired", "fired_once"}
+            and isinstance(fire_count, int)
+            and fire_count >= 1
+        )
+        or (expected_firing in {"not_fired", "blocked"} and fire_count == 0)
+    )
+    if result_status == "PASS" and not firing_matches:
+        context.errors.append(f"{label}: PASS contradicts expected firing/count")
+    if result_status == "FAIL" and firing_matches:
+        context.errors.append(f"{label}: FAIL contradicts matching firing/count")
+
+
+def _validate_tag_destination_layer(
+    context: _ValidationContext,
+    action: dict[str, Any],
+    inventory: dict[str, Any],
+    row: dict[str, Any],
+    *,
+    result_status: str,
+    details: dict[str, Any],
+    label: str,
+) -> None:
+    """Validate tag delivery applicability and direct browser-request reconciliation."""
+    delivery = inventory.get("tag_delivery")
+    if delivery == "local_only":
+        if result_status != "NOT_APPLICABLE":
+            context.errors.append(f"{label}: local_only tag must be NOT_APPLICABLE")
+        if details.get("local_only_configuration_proved") is not True:
+            context.errors.append(
+                f"{label}: local_only classification requires positive configuration proof"
+            )
+        return
+    if result_status == "NOT_APPLICABLE":
+        context.errors.append(f"{label}: browser-sending tag cannot be NOT_APPLICABLE")
+    request_count = details.get("request_count")
+    if not isinstance(request_count, int) or isinstance(request_count, bool) or request_count < 0:
+        context.errors.append(f"{label}: request_count must be a non-negative integer")
+    expected_request = details.get("expected_request_behavior")
+    validate_expected_field(
+        actual_expected=expected_request,
+        anchor=details.get("expected_request_behavior_anchor"),
+        requirements=context.by_requirement,
+        allowed_requirement_ids=action.get("requirement_ids", []),
+        label=f"{label}.expected_request_behavior",
+        errors=context.errors,
+    )
+    expects_no_request = expected_request in {"absent", "blocked"}
+    if result_status == "PASS" and expects_no_request and request_count != 0:
+        context.errors.append(f"{label}: PASS expected absence requires request_count=0")
+    if (
+        result_status == "PASS"
+        and not expects_no_request
+        and (
+            not isinstance(request_count, int)
+            or request_count < 1
+            or not isinstance(details.get("request_ids"), list)
+            or not details.get("request_ids")
+        )
+    ):
+        context.errors.append(f"{label}: PASS requires matching browser request IDs")
+    if result_status not in {"BLOCKED", "NOT_APPLICABLE"}:
+        _validate_tag_comparisons(
+            context=context,
+            action=action,
+            items=details.get("parameters"),
+            label=f"{label}.parameters",
+            parent_status=result_status,
+        )
+    refs = row.get("evidence_ids") if isinstance(row.get("evidence_ids"), list) else []
+    tag_id = str(row.get("tag_id", "")).strip()
+    proved_ids = request_evidence_ids(refs, context.evidence, tag_id)
+    declared_ids = (
+        {str(value).strip() for value in details.get("request_ids", []) if str(value).strip()}
+        if isinstance(details.get("request_ids"), list)
+        else set()
+    )
+    if isinstance(request_count, int) and not isinstance(request_count, bool):
+        if request_count != len(declared_ids):
+            context.errors.append(
+                f"{label}: request_count differs from the unique declared request IDs"
+            )
+        if declared_ids != proved_ids:
+            context.errors.append(
+                f"{label}: request_ids do not reconcile with referenced network evidence"
+            )
+    if (
+        expects_no_request
+        and result_status not in {"BLOCKED", "NOT_APPLICABLE"}
+        and not has_network_capture(refs, context.evidence)
+    ):
+        context.errors.append(
+            f"{label}: expected request absence requires complete network-capture evidence"
+        )
+    if result_status == "BLOCKED" and not (
+        details.get("capture_unavailable") is True or details.get("upstream_source_absent") is True
+    ):
+        context.errors.append(
+            f"{label}: BLOCKED is reserved for genuinely unavailable network capture; "
+            "or an explicitly absent upstream source; an available capture with no "
+            "match is FAIL after tag execution"
+        )
+
+
+def _validate_tag_conditional_layer(
+    context: _ValidationContext,
+    action: dict[str, Any],
+    aggregate_by_layer: dict[str, dict[str, Any]],
+    *,
+    tag_id: str,
+    layer: str,
+    result_status: str,
+    label: str,
+) -> None:
+    """Validate tag-level conditional predicates and automatic trigger diagnosis."""
+    if layer not in {
+        "consent_when_applicable",
+        "trigger_logic_when_applicable",
+        "tag_sequence_when_applicable",
+    }:
+        return
+    predicate_result = aggregate_by_layer.get(layer, {}).get("predicate_result")
+    if result_status == "NOT_APPLICABLE" and predicate_result is not False:
+        context.errors.append(
+            f"{label}: NOT_APPLICABLE requires the event-level predicate to be false"
+        )
+    if result_status != "NOT_APPLICABLE" and predicate_result is False:
+        context.errors.append(f"{label}: false event-level predicate requires NOT_APPLICABLE")
+    if layer != "trigger_logic_when_applicable":
+        return
+    firing_row = next(
+        (
+            candidate
+            for candidate in action.get("tag_layer_results", [])
+            if isinstance(candidate, dict)
+            and candidate.get("tag_id") == tag_id
+            and candidate.get("layer") == "tag_firing"
+        ),
+        {},
+    )
+    if (
+        str(firing_row.get("status", "")).strip().upper() in {"FAIL", "BLOCKED", "REVIEW"}
+        and predicate_result is not True
+    ):
+        context.errors.append(
+            f"{label}: firing anomaly automatically activates trigger/exception diagnosis"
+        )
+
+
+def _validate_one_tag_layer_result(
+    context: _ValidationContext,
+    action: dict[str, Any],
+    inventory: dict[str, Any],
+    row: dict[str, Any],
+    aggregate_by_layer: dict[str, dict[str, Any]],
+) -> None:
+    action_id = str(action.get("action_id", "")).strip()
+    tag_id = str(row.get("tag_id", "")).strip()
+    layer = str(row.get("layer", "")).strip()
+    result_status = str(row.get("status", "")).strip().upper()
+    label = f"session action {action_id} tag {tag_id} layer {layer}"
+    if layer not in TAG_RESULT_LAYERS:
+        context.errors.append(f"{label}: unsupported per-tag layer")
+    if result_status not in LAYER_RESULT_STATUSES:
+        context.errors.append(f"{label}: invalid status '{result_status}'")
+    if row.get("action_id") != action_id:
+        context.errors.append(f"{label}: action_id differs from its action")
+    for tag_field in ("tag_name", "container_id", "tag_category", "tag_delivery"):
+        if row.get(tag_field) != inventory.get(tag_field):
+            context.errors.append(f"{label}: {tag_field} differs from frozen tag inventory")
+    if not nonempty(row.get("reason")):
+        context.errors.append(f"{label}: concise reason is required")
+    details = row.get("details")
+    if not isinstance(details, dict):
+        context.errors.append(f"{label}: details must be an object")
+        details = {}
+    if result_status == "REVIEW" and not nonempty(row.get("semantic_ambiguity")):
+        context.errors.append(f"{label}: REVIEW requires semantic_ambiguity")
+    if result_status == "BLOCKED" and not nonempty(row.get("blocker_id")):
+        context.errors.append(f"{label}: BLOCKED requires blocker_id")
+
+    _validate_tag_value_layer(
+        context,
+        action,
+        layer=layer,
+        result_status=result_status,
+        details=details,
+        label=label,
+    )
+    if layer == "tag_firing":
+        _validate_tag_firing_layer(
+            context,
+            action,
+            result_status=result_status,
+            details=details,
+            label=label,
+        )
+    if layer == "destination_request_when_applicable":
+        _validate_tag_destination_layer(
+            context,
+            action,
+            inventory,
+            row,
+            result_status=result_status,
+            details=details,
+            label=label,
+        )
+    _validate_tag_conditional_layer(
+        context,
+        action,
+        aggregate_by_layer,
+        tag_id=tag_id,
+        layer=layer,
+        result_status=result_status,
+        label=label,
+    )
+    if context.results_provided:
+        _validate_tag_layer_result_evidence(context, action, row)
+
+
+def _validate_action_tag_results(
+    context: _ValidationContext,
+    action: dict[str, Any],
+    case: dict[str, Any],
+) -> None:
+    action_id = str(action.get("action_id", "")).strip()
+    rows_value = action.get("tag_layer_results")
+    if not isinstance(rows_value, list):
+        context.errors.append(f"session action {action_id}: tag_layer_results must be an array")
+        rows_value = []
+    rows = [row for row in rows_value if isinstance(row, dict)]
+    if len(rows) != len(rows_value):
+        context.errors.append(f"session action {action_id}: tag layer result must be an object")
+    inventory_by_id = {
+        str(row.get("tag_id", "")).strip(): row
+        for row in case.get("tag_inventory", [])
+        if isinstance(row, dict) and row.get("scope_status") == "IN_SCOPE"
+    }
+    keys = [(str(row.get("tag_id", "")).strip(), str(row.get("layer", "")).strip()) for row in rows]
+    duplicates = sorted(key for key, count in Counter(keys).items() if count > 1)
+    if duplicates:
+        context.errors.append(
+            f"session action {action_id}: duplicate per-tag layer results "
+            + ", ".join(f"{tag}:{layer}" for tag, layer in duplicates)
+        )
+    expected_keys = {(tag_id, layer) for tag_id in inventory_by_id for layer in TAG_RESULT_LAYERS}
+    actual_keys = set(keys)
+    require_complete = action.get("state") == "SETTLED" or context.final
+    if require_complete and actual_keys != expected_keys:
+        missing = sorted(expected_keys - actual_keys)
+        extra = sorted(actual_keys - expected_keys)
+        if missing:
+            context.errors.append(
+                f"session action {action_id}: omitted per-tag layers "
+                + ", ".join(f"{tag}:{layer}" for tag, layer in missing)
+            )
+        if extra:
+            context.errors.append(
+                f"session action {action_id}: tag results reference excluded/unknown tags "
+                + ", ".join(f"{tag}:{layer}" for tag, layer in extra)
+            )
+    aggregate_by_layer = {
+        str(row.get("layer", "")): row
+        for row in action.get("layer_results", [])
+        if isinstance(row, dict)
+    }
+    by_layer: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        tag_id = str(row.get("tag_id", "")).strip()
+        inventory = inventory_by_id.get(tag_id)
+        if inventory is None:
+            continue
+        _validate_one_tag_layer_result(context, action, inventory, row, aggregate_by_layer)
+        by_layer[str(row.get("layer", ""))].append(row)
+
+    if not require_complete:
+        return
+    inventory_result = aggregate_by_layer.get("concerned_tag_inventory", {})
+    if inventory_by_id:
+        if str(inventory_result.get("status", "")).strip().upper() != "PASS":
+            context.errors.append(
+                f"session action {action_id}: complete inventory with in-scope tags requires "
+                "concerned_tag_inventory=PASS"
+            )
+        for layer in TAG_RESULT_LAYERS:
+            aggregate_status = str(aggregate_by_layer.get(layer, {}).get("status", "")).upper()
+            expected_status = _tag_result_status(by_layer.get(layer, []))
+            if aggregate_status != expected_status:
+                context.errors.append(
+                    f"session action {action_id}: aggregate {layer}={aggregate_status or 'blank'} "
+                    f"differs from per-tag result {expected_status}"
+                )
+    else:
+        group_requirements = context.requirements_by_group.get(
+            str(case.get("event_group_id", "")), []
+        )
+        has_data_layer = any(
+            isinstance(row.get("expectation"), dict)
+            and row["expectation"].get("source_mechanism", "data_layer_push") == "data_layer_push"
+            for row in group_requirements
+        )
+        if not has_data_layer:
+            return
+        expected_without_tag = {
+            "concerned_tag_inventory": "FAIL",
+            "tag_configuration": "FAIL",
+            "tag_firing": "FAIL",
+            "gtm_variable": "BLOCKED",
+            "tag_parameter": "BLOCKED",
+            "destination_request_when_applicable": "BLOCKED",
+        }
+        for layer, expected_status in expected_without_tag.items():
+            actual = str(aggregate_by_layer.get(layer, {}).get("status", "")).upper()
+            if actual != expected_status:
+                context.errors.append(
+                    f"session action {action_id}: no in-scope analytics tag requires "
+                    f"{layer}={expected_status}, got {actual or 'blank'}"
+                )
+
+
+def _case_contract_for_action(case: dict[str, Any], action: dict[str, Any]) -> dict[str, Any]:
+    """Return the immutable inventory/applicability revision used by one action."""
+    revision = action.get("inventory_revision", 1)
+    current_revision = case.get("inventory_revision", 1)
+    if revision == current_revision:
+        return case
+    snapshot = next(
+        (
+            row
+            for row in case.get("applicability_history", [])
+            if isinstance(row, dict) and row.get("inventory_revision") == revision
+        ),
+        None,
+    )
+    if snapshot is None:
+        return case
+    return {
+        **case,
+        "inventory_revision": revision,
+        "tag_inventory": snapshot.get("tag_inventory", []),
+        "layer_applicability": snapshot.get("layer_applicability", []),
+        "applicable_layers": snapshot.get("applicable_layers", []),
+    }
+
+
 def _validate_action(context: _ValidationContext, action: dict[str, Any]) -> None:
     action_id = str(action.get("action_id", "")).strip()
     case_id = str(action.get("case_id", "")).strip()
@@ -462,6 +1030,14 @@ def _validate_action(context: _ValidationContext, action: dict[str, Any]) -> Non
     if case is None:
         context.errors.append(f"session action {action_id}: unknown case_id '{case_id}'")
         return
+    action_revision = action.get("inventory_revision", 1)
+    if not isinstance(action_revision, int) or isinstance(action_revision, bool):
+        context.errors.append(f"session action {action_id}: inventory_revision must be an integer")
+    case_contract = _case_contract_for_action(case, action)
+    if action_revision != case_contract.get("inventory_revision", 1):
+        context.errors.append(
+            f"session action {action_id}: inventory revision has no retained applicability card"
+        )
     context.actions_by_case[case_id].append(action)
     for field_name in (
         "event_group_id",
@@ -502,7 +1078,62 @@ def _validate_action(context: _ValidationContext, action: dict[str, Any]) -> Non
             f"session action {action_id}: duplicate layer results " + ", ".join(duplicates)
         )
     for layer_result in layer_results:
-        _validate_layer_result(context, action, layer_result)
+        _validate_layer_result(context, action, layer_result, case_contract)
+    if (
+        action.get("state") == "SETTLED"
+        and action.get("interaction_outcome") == "completed"
+        and action.get("stream_settled") is True
+        and action.get("preview_connected_after") is True
+        and action.get("expected_seen") is False
+    ):
+        group_requirements = context.requirements_by_group.get(
+            str(case.get("event_group_id", "")), []
+        )
+        expected_data_layer_source = any(
+            isinstance(row.get("expectation"), dict)
+            and row["expectation"].get("source_mechanism", "data_layer_push") == "data_layer_push"
+            and not expects_absence(row["expectation"])
+            for row in group_requirements
+        )
+        if expected_data_layer_source:
+            by_layer = {
+                str(row.get("layer", "")): row for row in layer_results if isinstance(row, dict)
+            }
+            required_statuses = {
+                "raw_api_call": "FAIL",
+                "resolved_data_layer": "BLOCKED",
+                "gtm_variable": "BLOCKED",
+                "tag_configuration": "BLOCKED",
+                "tag_firing": "BLOCKED",
+                "tag_parameter": "BLOCKED",
+                "destination_request_when_applicable": "BLOCKED",
+            }
+            for layer, expected_status in required_statuses.items():
+                actual_status = str(by_layer.get(layer, {}).get("status", "")).upper()
+                if actual_status != expected_status:
+                    context.errors.append(
+                        f"session action {action_id}: absent expected dataLayer source requires "
+                        f"{layer}={expected_status}, got {actual_status or 'blank'}"
+                    )
+            for row in action.get("tag_layer_results", []):
+                if not isinstance(row, dict):
+                    continue
+                layer = str(row.get("layer", ""))
+                if layer not in {
+                    "gtm_variable",
+                    "tag_configuration",
+                    "tag_firing",
+                    "tag_parameter",
+                    "destination_request_when_applicable",
+                }:
+                    continue
+                actual_status = str(row.get("status", "")).upper()
+                if actual_status != "BLOCKED":
+                    context.errors.append(
+                        f"session action {action_id} tag {row.get('tag_id')} layer {layer}: "
+                        "absent upstream dataLayer source requires BLOCKED"
+                    )
+    _validate_action_tag_results(context, action, case_contract)
 
 
 def _validate_attempt_chain(
@@ -536,6 +1167,206 @@ def _validate_actions(context: _ValidationContext) -> None:
         _validate_attempt_chain(case_id, case_actions, context.errors)
 
 
+def _validate_case_applicability_card(
+    context: _ValidationContext,
+    case_id: str,
+    case: dict[str, Any],
+) -> list[str]:
+    card = case.get("layer_applicability")
+    if not isinstance(card, list) or any(not isinstance(row, dict) for row in card):
+        context.errors.append(f"session case {case_id}: layer_applicability must be an array")
+        return []
+    layers = [str(row.get("layer", "")).strip() for row in card]
+    if layers != list(CANONICAL_LAYERS):
+        context.errors.append(
+            f"session case {case_id}: applicability card must contain every canonical "
+            "layer exactly once in canonical order"
+        )
+    for row in card:
+        layer = str(row.get("layer", "")).strip()
+        if row.get("mode") not in LAYER_APPLICABILITY_MODES:
+            context.errors.append(
+                f"session case {case_id} layer {layer}: invalid applicability mode"
+            )
+        for field_name in ("predicate", "reason"):
+            if not nonempty(row.get(field_name)):
+                context.errors.append(
+                    f"session case {case_id} layer {layer}: applicability {field_name} is required"
+                )
+    has_action = any(row.get("case_id") == case_id for row in context.actions)
+    if (
+        case.get("scope_status") == "IN_SCOPE"
+        and (context.final or has_action)
+        and case.get("applicability_status") != "FROZEN"
+    ):
+        context.errors.append(f"session case {case_id}: applicability card is not frozen")
+    return layers
+
+
+def _validate_case_tag_inventory(
+    context: _ValidationContext,
+    case_id: str,
+    case: dict[str, Any],
+) -> list[dict[str, Any]]:
+    inventory = case.get("tag_inventory")
+    if not isinstance(inventory, list) or any(not isinstance(row, dict) for row in inventory):
+        context.errors.append(f"session case {case_id}: tag_inventory must be an array")
+        return []
+    has_action = any(row.get("case_id") == case_id for row in context.actions)
+    if case.get("scope_status") == "IN_SCOPE" and (context.final or has_action):
+        if case.get("tag_inventory_status") != "COMPLETE":
+            context.errors.append(f"session case {case_id}: tag inventory is not COMPLETE")
+        if not nonempty(case.get("tag_inventory_reason")):
+            context.errors.append(f"session case {case_id}: tag inventory reason is required")
+        refs = case.get("tag_inventory_evidence_ids")
+        if not isinstance(refs, list) or not refs:
+            context.errors.append(
+                f"session case {case_id}: tag inventory requires direct evidence IDs"
+            )
+        else:
+            inventory_kinds: set[str] = set()
+            for ref_value in refs:
+                ref = str(ref_value).strip()
+                row = context.evidence.get(ref)
+                if row is None:
+                    context.errors.append(
+                        f"session case {case_id}: unknown tag inventory evidence ID '{ref}'"
+                    )
+                elif row.get("kind") not in {"tag_inventory", "tag_configuration"}:
+                    context.errors.append(
+                        f"session case {case_id}: tag inventory evidence kind must be "
+                        "tag_inventory or tag_configuration"
+                    )
+                else:
+                    inventory_kinds.add(str(row.get("kind")))
+            if not inventory and "tag_inventory" not in inventory_kinds:
+                context.errors.append(
+                    f"session case {case_id}: an empty inventory requires direct tag_inventory "
+                    "evidence proving that no in-scope tag was found"
+                )
+    tag_ids = [str(row.get("tag_id", "")).strip() for row in inventory]
+    duplicates = sorted(
+        tag_id for tag_id, count in Counter(tag_ids).items() if tag_id and count > 1
+    )
+    if duplicates:
+        context.errors.append(
+            f"session case {case_id}: duplicate detected tag IDs " + ", ".join(duplicates)
+        )
+    tag_scope = normalize_tag_scope(case.get("tag_scope"))
+    contracts = case.get("declared_tag_contracts", [])
+    for index, tag in enumerate(inventory, start=1):
+        label = f"session case {case_id} tag inventory row {index}"
+        for field_name in (
+            "tag_id",
+            "tag_name",
+            "container_id",
+            "tag_category",
+            "tag_delivery",
+            "template_type",
+            "scope_status",
+            "scope_reason",
+        ):
+            if not nonempty(tag.get(field_name)):
+                context.errors.append(f"{label}: missing '{field_name}'")
+        if tag.get("tag_category") not in TAG_CATEGORIES:
+            context.errors.append(f"{label}: invalid tag_category")
+        inferred_category = inferred_tag_category(tag)
+        if inferred_category is not None and tag.get("tag_category") != inferred_category:
+            context.errors.append(
+                f"{label}: tag_category contradicts direct vendor/template metadata "
+                f"({inferred_category})"
+            )
+        if tag.get("tag_delivery") not in TAG_DELIVERY_TYPES:
+            context.errors.append(f"{label}: invalid tag_delivery")
+        if tag.get("scope_status") not in TAG_SCOPE_STATUSES:
+            context.errors.append(f"{label}: invalid scope_status")
+        if not isinstance(tag.get("consent_required"), bool):
+            context.errors.append(f"{label}: consent_required must be boolean")
+        if str(tag.get("container_id", "")) not in {
+            str(value) for value in case.get("container_ids", [])
+        }:
+            context.errors.append(f"{label}: container_id is outside the case container set")
+        expected_scope, expected_reason = tag_scope_decision(tag, tag_scope, contracts)
+        if tag.get("scope_status") != expected_scope or tag.get("scope_reason") != expected_reason:
+            context.errors.append(f"{label}: tag-scope decision differs from deterministic policy")
+        refs = tag.get("evidence_ids")
+        if not isinstance(refs, list) or not refs:
+            context.errors.append(f"{label}: evidence_ids are required")
+        else:
+            for ref_value in refs:
+                ref = str(ref_value).strip()
+                evidence = context.evidence.get(ref)
+                if evidence is None:
+                    context.errors.append(f"{label}: unknown evidence ID '{ref}'")
+                elif evidence.get("kind") not in {"tag_inventory", "tag_configuration"}:
+                    context.errors.append(f"{label}: unsupported inventory evidence kind")
+                elif evidence.get("kind") == "tag_configuration" and evidence.get(
+                    "tag_id"
+                ) != tag.get("tag_id"):
+                    context.errors.append(
+                        f"{label}: tag configuration evidence is not bound to this exact tag"
+                    )
+    return inventory
+
+
+def _validate_case_applicability_history(
+    context: _ValidationContext,
+    case_id: str,
+    case: dict[str, Any],
+) -> None:
+    """Validate immutable snapshots retained after controlled late tag discovery."""
+    revision = case.get("inventory_revision", 1)
+    if not isinstance(revision, int) or isinstance(revision, bool) or revision < 1:
+        context.errors.append(f"session case {case_id}: inventory_revision must be positive")
+        return
+    history = case.get("applicability_history", [])
+    if not isinstance(history, list) or any(not isinstance(row, dict) for row in history):
+        context.errors.append(f"session case {case_id}: applicability_history must be an array")
+        return
+    if len(history) != revision - 1:
+        context.errors.append(
+            f"session case {case_id}: applicability history does not reconcile with revision"
+        )
+    expected_revisions = list(range(1, revision))
+    actual_revisions = [row.get("inventory_revision") for row in history]
+    if actual_revisions != expected_revisions:
+        context.errors.append(
+            f"session case {case_id}: applicability history revisions are not contiguous"
+        )
+    for snapshot in history:
+        card = snapshot.get("layer_applicability")
+        if not isinstance(card, list) or [
+            str(row.get("layer", "")) for row in card if isinstance(row, dict)
+        ] != list(CANONICAL_LAYERS):
+            context.errors.append(
+                f"session case {case_id}: historical applicability card is incomplete"
+            )
+        if not isinstance(snapshot.get("tag_inventory"), list):
+            context.errors.append(
+                f"session case {case_id}: historical tag inventory must be retained"
+            )
+        for field_name in ("frozen_at", "superseded_by_action_id", "superseded_reason"):
+            if not nonempty(snapshot.get(field_name)):
+                context.errors.append(
+                    f"session case {case_id}: historical snapshot requires {field_name}"
+                )
+    required_retest = case.get("required_retest_of_action_id")
+    if required_retest not in (None, ""):
+        actions = context.actions_by_case.get(case_id, [])
+        if not actions or required_retest not in {
+            actions[-1].get("action_id"),
+            actions[-1].get("retry_of_action_id"),
+        }:
+            context.errors.append(
+                f"session case {case_id}: required late-discovery retest does not reference "
+                "the retained latest action"
+            )
+        if case.get("execution_status") != "PENDING" or case.get("final_action_id") is not None:
+            context.errors.append(
+                f"session case {case_id}: late discovery must reset execution to PENDING"
+            )
+
+
 def _validate_case_shape(
     context: _ValidationContext,
     case_id: str,
@@ -559,6 +1390,9 @@ def _validate_case_shape(
         context.errors.append(f"session case {case_id}: invalid discovered_from")
     if not isinstance(case.get("material_variant"), dict):
         context.errors.append(f"session case {case_id}: material_variant must be an object")
+    _validate_case_applicability_card(context, case_id, case)
+    _validate_case_tag_inventory(context, case_id, case)
+    _validate_case_applicability_history(context, case_id, case)
     declared_layers = case.get("applicable_layers")
     if not isinstance(declared_layers, list) or any(
         layer not in CANONICAL_LAYERS for layer in declared_layers
@@ -602,16 +1436,28 @@ def _validate_case_result_mapping(
             f"session case {case_id}: requirement_ids do not exactly match "
             "the normalized event group"
         )
-    required_layers = set(
-        applicable_layers(
-            group_requirements,
-            container_count=context.container_count,
-        )
+    if normalize_tag_scope(case.get("tag_scope")) != normalize_tag_scope(
+        context.run.get("tag_scope")
+    ):
+        context.errors.append(f"session case {case_id}: tag scope differs from the run contract")
+    expected_card = layer_applicability(
+        group_requirements,
+        container_count=context.container_count,
+        tag_inventory=[row for row in case.get("tag_inventory", []) if isinstance(row, dict)],
+        activated_conditions=(
+            case.get("conditional_activations")
+            if isinstance(case.get("conditional_activations"), dict)
+            else {}
+        ),
     )
-    missing_layers = sorted(required_layers - set(declared_layers))
-    if missing_layers:
+    if case.get("layer_applicability") != expected_card:
         context.errors.append(
-            f"session case {case_id}: applicable_layers omit " + ", ".join(missing_layers)
+            f"session case {case_id}: frozen applicability card differs from deterministic policy"
+        )
+    required_layers = [row["layer"] for row in expected_card if row.get("mode") == "MANDATORY"]
+    if declared_layers != required_layers:
+        context.errors.append(
+            f"session case {case_id}: applicable_layers do not exactly match mandatory policy"
         )
 
 
@@ -655,10 +1501,10 @@ def _validate_case_execution(
                 for row in completed[-1].get("layer_results", [])
                 if isinstance(row, dict)
             }
-            missing = sorted(set(declared_layers) - recorded_layers)
+            missing = [layer for layer in CANONICAL_LAYERS if layer not in recorded_layers]
             if missing:
                 context.errors.append(
-                    f"session case {case_id}: final action omits layer results "
+                    f"session case {case_id}: final action omits explicit layer results "
                     + ", ".join(missing)
                 )
     if execution_status == "BLOCKED" and (
@@ -990,8 +1836,8 @@ def validate_session(
     """Return structural and final-certification errors for a session ledger."""
     if ledger.get("schema_version") != SESSION_SCHEMA_VERSION:
         return [
-            "session: schema_version must be 2; recreate the session ledger with "
-            "the current preview_session_ledger.py"
+            "session: schema_version must be 3; migrate or recreate the session ledger "
+            "with the current preview_session_ledger.py"
         ]
     errors: list[str] = []
     _validate_session_metadata(ledger, errors)
@@ -1046,11 +1892,26 @@ def validate_session(
             )
             or 1
         ),
+        run=(results or {}).get("run", {})
+        if isinstance((results or {}).get("run", {}), dict)
+        else {},
     )
     _validate_actions(context)
     _validate_cases(context)
     _validate_pushes(context)
     _validate_result_alignment(context)
+    unsafe_session_findings = [
+        finding
+        for finding in session_sensitive_findings(ledger)
+        if str(finding.get("status", "")).strip().upper() in {"FAIL", "REVIEW"}
+    ]
+    if unsafe_session_findings:
+        paths = sorted({str(finding.get("path", "")) for finding in unsafe_session_findings})
+        errors.append(
+            "session contains unredacted sensitive content in exportable evidence at "
+            + ", ".join(paths[:12])
+            + (" and additional paths" if len(paths) > 12 else "")
+        )
     return errors
 
 
@@ -1082,6 +1943,11 @@ def case_action_rows(ledger: dict[str, Any]) -> list[dict[str, Any]]:
                 "action": case.get("action"),
                 "material_variant": case.get("material_variant"),
                 "discovered_from": case.get("discovered_from"),
+                "tag_scope": case.get("tag_scope"),
+                "tag_inventory_status": case.get("tag_inventory_status"),
+                "tag_inventory": case.get("tag_inventory"),
+                "applicability_status": case.get("applicability_status"),
+                "layer_applicability": case.get("layer_applicability"),
                 "applicable_layers": case.get("applicable_layers"),
                 "blocker_id": case.get("blocker_id"),
                 "case_reason": case.get("reason"),
@@ -1095,6 +1961,7 @@ def case_action_rows(ledger: dict[str, Any]) -> list[dict[str, Any]]:
                 "settlement_reason": action.get("settlement_reason"),
                 "observed_business_push_count": action.get("observed_business_push_count"),
                 "layer_results": action.get("layer_results"),
+                "tag_layer_results": action.get("tag_layer_results"),
             }
             for action in case_actions
         )

@@ -45,10 +45,12 @@ Use simple replies for checkpoints:
 Do not require repeated `continue` or `generate report` replies. Proceed
 automatically through analyst-independent work.
 
-An explicit run-wide authorization covers equivalent safe actions within its
-stated scope, environment, and origin. Record the scope with
-`preview_session_ledger.py authorize` and do not ask again for every form or
-lead. It cannot authorize a protected checkpoint.
+A full recette initializes run-wide authority for equivalent ordinary form
+inputs, privacy acknowledgements, opt-ins that are part of the tested
+conversion, safe synthetic identity, and ordinary form submission. Do not ask
+again for every form or lead. Record any additional explicit scope with
+`preview_session_ledger.py authorize`. Neither default nor additional authority
+covers a protected checkpoint or the separate CMP-override approval.
 
 ## Progress updates
 
@@ -83,21 +85,37 @@ Assign final `BLOCKED` only when the analyst cannot or does not complete the
 step, no safe test method exists, or an evidenced external condition prevents
 execution. Never skip the remainder silently.
 
+An ordinary privacy checkbox, opt-in, or form control is not a protected
+checkpoint. If it cannot be operated, retain the failed action window and try
+scroll-into-view, label click, direct-control click, pointer click, keyboard
+toggle, and one clean-state retry. Only then use `UI_CONTROL_BLOCKER`; do not
+mislabel it as consent or missing authorization.
+
 ## Per-event feedback
 
-After completing every applicable interaction case for a planned event, provide
-one aggregate result and continue:
+After completing every applicable interaction case for a planned event,
+provide one aggregate result and continue. Show one status/reason per canonical
+layer, then one subrow per in-scope tag and tag-related layer. Keep excluded
+detected tags visible with their scope reason:
 
 ```text
 Event 07 — add_to_cart: PASS
+- raw_api_call: PASS — exact API Call matched
+- resolved_data_layer: PASS — value/type matched
+- GA4 - add_to_cart / tag_firing: PASS — fired once
+- GA4 - add_to_cart / browser request: PASS — one matching request
+- Meta - AddToCart: OUT_OF_SCOPE — outside analytics-only tag scope
 ```
 
 For a failure:
 
 ```text
 Event 08 — begin_checkout: FAIL
-- ecommerce.items[0].price: expected number 29.90; observed string "29.90"
-- GA4 tag fired once with runtime price string "29.90"
+- raw_api_call: FAIL — items[0].price expected number 29.90; observed string "29.90"
+- GA4 - begin_checkout / tag_firing: PASS — fired once
+- GA4 - begin_checkout / tag_parameter: FAIL — runtime price is string "29.90"
+- GA4 - begin_checkout / browser request: PASS — one matching request
+- Retest: /checkout, CTA "Commander", item=IZZI
 ```
 
 For a blocker:

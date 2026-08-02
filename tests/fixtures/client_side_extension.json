@@ -2,8 +2,10 @@
   "run_patch": {
     "run_id": "RUN-CLIENT-V11-001",
     "included_layers": [
+      "action_boundary",
       "raw_api_call",
       "resolved_data_layer",
+      "concerned_tag_inventory",
       "gtm_variable",
       "tag_configuration",
       "tag_firing",
@@ -602,6 +604,7 @@
     {
       "evidence_id": "EVD-DESTINATION-001",
       "kind": "browser_network_request",
+      "tag_id": "TAG-FIXTURE-001",
       "source": "Browser Network",
       "capture_mode": "direct",
       "action_id": "ACT-001",
@@ -626,6 +629,7 @@
     {
       "evidence_id": "EVD-TRIGGER-001",
       "kind": "trigger_evaluation",
+      "tag_id": "TAG-FIXTURE-001",
       "source": "Tag Assistant",
       "capture_mode": "direct",
       "action_id": "ACT-001",
@@ -638,6 +642,7 @@
     {
       "evidence_id": "EVD-SEQUENCE-001",
       "kind": "tag_sequence",
+      "tag_id": "TAG-FIXTURE-001",
       "source": "Tag Assistant",
       "capture_mode": "direct",
       "action_id": "ACT-001",
@@ -650,6 +655,7 @@
     {
       "evidence_id": "EVD-CONSENT-V2-001",
       "kind": "tag_assistant_consent",
+      "tag_id": "TAG-FIXTURE-001",
       "source": "Tag Assistant",
       "capture_mode": "direct",
       "action_id": "ACT-001",
@@ -702,6 +708,7 @@
     {
       "evidence_id": "EVD-META-CONFIG-001",
       "kind": "tag_configuration",
+      "tag_id": "TAG-FIXTURE-001",
       "source": "Tag Assistant",
       "capture_mode": "direct",
       "action_id": "ACT-001",
@@ -716,6 +723,7 @@
     {
       "evidence_id": "EVD-META-RUNTIME-001",
       "kind": "tag_runtime",
+      "tag_id": "TAG-FIXTURE-001",
       "source": "Tag Assistant",
       "capture_mode": "direct",
       "action_id": "ACT-001",

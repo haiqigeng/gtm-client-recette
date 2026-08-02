@@ -2,6 +2,68 @@
 
 ## Unreleased
 
+## [v2.0.0](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v2.0.0) (2026-08-02)
+
+- Introduce normalized-results and session schema v3 as a hard certification
+  boundary. The v2 migration preserves source order and discovery cases but
+  resets every runtime observation, verdict, anomaly, blocker, and evidence
+  link to fresh `PENDING` work.
+- Bind GTM variable, tag configuration/runtime, browser request, trigger,
+  sequence, and Tag Assistant consent proof to the exact frozen `tag_id`.
+  Reject cross-tag evidence reuse.
+- Require every expected per-tag value, firing expectation, and request
+  behaviour to resolve from an accepted requirement anchor rather than a
+  self-declared matching value.
+- Reconcile destination request count/IDs with the exact referenced,
+  tag-bound browser-network evidence. Require complete network-capture proof
+  for accepted request absence.
+- Extend privacy enforcement across the complete exportable session and
+  per-tag matrix, and refuse workbook generation when those surfaces contain
+  unredacted sensitive content.
+- Add deterministic analytics classification for GA4, Piano, Adobe Analytics,
+  Matomo, Piwik PRO, Snowplow, and Realytics.
+- Add `scaffold-tag-results` for the exact frozen tag-by-eight-layer matrix and
+  `revise-tag-inventory` for versioned late discovery with a mandatory retained
+  retry.
+- Split oversized structured workbook values into explicit continuation rows,
+  reconcile physical row counts, and reject silent Excel cell truncation.
+- Add deterministic release manifests, per-file and tree SHA-256 provenance,
+  artifact verification, and CI enforcement.
+- Reduce the core skill instruction surface below 500 lines by moving detailed
+  commands to a routed operator reference while preserving the exact north
+  star, all 19 canonical layers, all 8 per-tag layers, and full safe synthetic
+  journey authority.
+
+## [v1.4.0](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v1.4.0) (2026-08-01)
+
+- Make the evidence policy independent of tracking-plan column completeness:
+  every planned dataLayer event now requires action, exact API Call, resolved
+  state, tag inventory, GTM variables, tag configuration, firing/count,
+  runtime parameters, browser request, and sensitive-data evidence.
+- Add explicit run tag scopes with `analytics_only` as the default, exact
+  plan-declared media inclusion, optional all-relevant/fixed scopes, visible
+  excluded tags, and a frozen per-case applicability card.
+- Require one result for every canonical layer and every in-scope tag/layer
+  pair. Reject missing analytics tags, silent omissions, blank reasons, false
+  `PASS` value/type comparisons, and network blockers when capture was actually
+  available.
+- Add the `Layer Verdicts` worksheet and per-tag defect rows, bringing the
+  strictly validated workbook to 21 sheets and aligning immediate feedback
+  with final event/layer/tag reporting.
+- Establish default full-recette authority for ordinary safe forms, privacy
+  acknowledgements, tested-conversion opt-ins, and submissions. Keep protected
+  boundaries and CMP overrides separate, and classify exhausted ordinary
+  control failures as `UI_CONTROL_BLOCKER`.
+- Add `import_ga4_tracking_plan_handoff.py` as a primary machine intake for reviewed or approved
+  `ga4-tracking-plan` delivery directories.
+- Verify safe artifact paths, every SHA-256, canonical plan identity, and exact plan versus
+  expected-events inventory before any recette requirement is initialized.
+- Preserve canonical event order, journey and measurement-opportunity identity, trigger, route,
+  component, dataLayer field path, scope, type, requiredness, condition, destination, fixed example,
+  and finite enumeration without reparsing the workbook.
+- Add tamper rejection and ordered field-requirement regressions and route the importer from the
+  core workflow and input contract.
+
 ## [v1.3.0](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v1.3.0) (2026-08-01)
 
 - Correct cross-requirement uniqueness so multiple field requirements tied to

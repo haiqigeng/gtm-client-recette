@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "run": {
     "run_id": "RUN-SYNTHETIC-001",
     "report_title": "Synthetic add-to-cart GTM recette",
@@ -19,16 +19,46 @@
     ],
     "tracking_plan_source": "tracking-plan.xlsx",
     "acceptance_scope": "Full synthetic fixture",
+    "tag_scope": {
+      "mode": "analytics_only",
+      "explicit_tag_names": [],
+      "include_plan_declared_media": true,
+      "reason": "Analytics tags are in scope by default; other detected tags remain visible."
+    },
+    "journey_authority": {
+      "complete_ordinary_journeys": true,
+      "safe_synthetic_data": true,
+      "ordinary_form_inputs": true,
+      "ordinary_privacy_acknowledgements": true,
+      "ordinary_opt_ins_when_part_of_tested_conversion": true,
+      "ordinary_form_submissions": true,
+      "protected_boundaries": [
+        "CREDENTIALS",
+        "GOOGLE_SIGN_IN",
+        "MFA",
+        "CAPTCHA",
+        "EMAIL_VERIFICATION",
+        "SMS_VERIFICATION",
+        "MAGIC_LINK",
+        "REAL_PAYMENT",
+        "EXTERNAL_APPROVAL",
+        "IRREVERSIBLE_ACTION"
+      ]
+    },
     "executed_at": "2026-07-25T10:00:00+00:00",
     "included_layers": [
+      "action_boundary",
       "raw_api_call",
       "resolved_data_layer",
+      "concerned_tag_inventory",
       "gtm_variable",
       "tag_configuration",
       "tag_firing",
       "tag_parameter",
       "consent_when_applicable",
-      "destination_request_when_applicable"
+      "destination_request_when_applicable",
+      "sensitive_data_scan",
+      "business_rules_when_declared"
     ],
     "requirement_inventory": [
       "REQ-001"
@@ -99,7 +129,18 @@
         "expected_destination_type": "number",
         "expected_endpoint_pattern": "^https://www\\.google-analytics\\.com/g/collect",
         "expected_request_behavior": "sent_once",
-        "expected_consent_state": null
+        "expected_consent_state": null,
+        "sensitive_data_policy": {
+          "forbidden_categories": [
+            "email",
+            "phone",
+            "postal_address",
+            "person_name",
+            "ip_address",
+            "sensitive_query_parameter"
+          ],
+          "allowlisted_paths": []
+        }
       },
       "event_observed": true,
       "occurrence_evidence": {
@@ -206,6 +247,23 @@
         "applicable": false,
         "source": "not_in_scope"
       },
+      "sensitive_data_scan": {
+        "applicable": true,
+        "scanned_targets": [
+          "raw_api_call.payload",
+          "resolved_data_layer.snapshot",
+          "tag.runtime_value",
+          "destination_request.request_url",
+          "destination_request.request_body",
+          "destination_request.request_headers",
+          "destination_request.field_value",
+          "journey.url",
+          "journey.action_value"
+        ],
+        "findings": [],
+        "status": "PASS",
+        "evidence_id": "EVD-PII-011"
+      },
       "verdict": {
         "event_occurrence": "PASS",
         "raw_payload": "PASS",
@@ -216,6 +274,7 @@
         "tag_parameter": "PASS",
         "destination_request": "PASS",
         "destination_parameter": "PASS",
+        "sensitive_data": "PASS",
         "consent": null,
         "overall": "PASS",
         "failure_layer": null,
@@ -229,7 +288,8 @@
         "EVD-VAR-011",
         "EVD-TAG-CONFIG-011",
         "EVD-TAG-RUNTIME-011",
-        "EVD-NET-011"
+        "EVD-NET-011",
+        "EVD-PII-011"
       ],
       "notes": "Synthetic validation fixture"
     }
@@ -274,6 +334,7 @@
     {
       "evidence_id": "EVD-VAR-011",
       "kind": "gtm_variable",
+      "tag_id": "TAG-FIXTURE-001",
       "source": "Tag Assistant",
       "capture_mode": "direct",
       "action_id": "ACT-001",
@@ -286,6 +347,7 @@
     {
       "evidence_id": "EVD-TAG-CONFIG-011",
       "kind": "tag_configuration",
+      "tag_id": "TAG-FIXTURE-001",
       "source": "Tag Assistant",
       "capture_mode": "direct",
       "action_id": "ACT-001",
@@ -300,6 +362,7 @@
     {
       "evidence_id": "EVD-TAG-RUNTIME-011",
       "kind": "tag_runtime",
+      "tag_id": "TAG-FIXTURE-001",
       "source": "Tag Assistant",
       "capture_mode": "direct",
       "action_id": "ACT-001",
@@ -314,6 +377,7 @@
     {
       "evidence_id": "EVD-NET-011",
       "kind": "browser_network_request",
+      "tag_id": "TAG-FIXTURE-001",
       "source": "Browser Network",
       "capture_mode": "direct",
       "action_id": "ACT-001",
@@ -322,6 +386,26 @@
       "path_or_url": "evidence/network-011.json",
       "captured_at": "2026-07-25T10:01:03+00:00",
       "description": "Exact decoded GA4 browser request."
+    },
+    {
+      "evidence_id": "EVD-CONSENT-BASELINE-001",
+      "kind": "consent_state",
+      "source": "Tag Assistant",
+      "capture_mode": "direct",
+      "action_id": "ACT-001",
+      "event_index": 11,
+      "path_or_url": "evidence/consent-baseline-011.json",
+      "captured_at": "2026-07-25T10:01:03+00:00",
+      "description": "Natural event-level consent baseline before the action."
+    },
+    {
+      "evidence_id": "EVD-PII-011",
+      "kind": "sensitive_data_scan",
+      "source": "Deterministic Validator",
+      "capture_mode": "deterministic",
+      "path_or_url": "evidence/sensitive-data-011.json",
+      "captured_at": "2026-07-25T10:01:03+00:00",
+      "description": "Redacted sensitive-data scan across the accepted client-side chain."
     }
   ]
 }

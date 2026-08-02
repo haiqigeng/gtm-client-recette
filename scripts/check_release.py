@@ -42,12 +42,15 @@ REQUIRED_EXECUTION_FILES = (
     "scripts/acceptance_contract.py",
     "scripts/layer_contract.py",
     "scripts/evidence_contract.py",
+    "scripts/tag_evidence_contract.py",
     "scripts/execution_contract.py",
     "scripts/event_feedback.py",
     "scripts/build_recette_report.py",
     "scripts/inspect_tracking_plan.py",
     "scripts/init_coverage_ledger.py",
+    "scripts/import_ga4_tracking_plan_handoff.py",
     "scripts/preview_session_ledger.py",
+    "scripts/migrate_schema_v2_to_v3.py",
     "scripts/datalayer_recorder.js",
     "scripts/dom_interaction_census.js",
     "scripts/decode_browser_requests.py",
@@ -59,12 +62,14 @@ REQUIRED_EXECUTION_FILES = (
     "scripts/validate_business_rules.py",
     "scripts/scan_sensitive_data.py",
     "scripts/diff_recette_runs.py",
-    "references/03-judgement/schema-v2.md",
+    "scripts/verify_release_artifact.py",
+    "references/03-judgement/schema-v3.md",
     "references/01-orientation/cross-skill-handoff.md",
     "references/02-execution/journey-inference-and-coverage.md",
     "references/02-execution/tag-assistant-operations.md",
     "references/02-execution/interaction-and-capture-playbook.md",
     "references/02-execution/incremental-evidence-workflow.md",
+    "references/02-execution/operator-command-reference.md",
     "references/02-execution/client-side-destinations-and-containers.md",
     "references/02-execution/client-side-runtime-contexts.md",
     "references/03-judgement/conditional-business-and-privacy-rules.md",
@@ -197,8 +202,26 @@ def _check_skill_contract(errors: list[str]) -> None:
         errors.append("SKILL.md does not contain the exact approved north star")
     if "Do not preload the complete reference library." not in skill:
         errors.append("SKILL.md does not enforce progressive reference loading")
+    if len(skill.splitlines()) > 500:
+        errors.append("SKILL.md exceeds the 500-line progressive-disclosure budget")
     if "core execution contract" not in skill:
         errors.append("SKILL.md does not route to the compact execution contract")
+    for required in (
+        "It never decides which evidence layers are inspected.",
+        "--tag-scope analytics_only",
+        "complete-tag-inventory",
+        "import-tag-results",
+        "UI_CONTROL_BLOCKER",
+        "one row/status for every canonical layer",
+    ):
+        if required not in skill:
+            errors.append(f"SKILL.md is missing deterministic recette contract {required!r}")
+
+    workbook = (ROOT / "references/03-judgement/workbook-architecture.md").read_text(
+        encoding="utf-8"
+    )
+    if "6. `Layer Verdicts`" not in workbook or "Keep all 21 sheets" not in workbook:
+        errors.append("workbook contract must expose the Layer Verdicts sheet and 21-sheet total")
 
 
 def _check_required_resources(errors: list[str]) -> None:

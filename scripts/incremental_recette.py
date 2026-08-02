@@ -189,6 +189,7 @@ def validate_event(
     }
     if session is not None:
         output["feedback"] = feedback_for_event(view, event_group_id, session)
+        output["status"] = output["feedback"]["status"]
     return output
 
 

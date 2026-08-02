@@ -2,7 +2,8 @@
 
 A recette is complete only when:
 
-- the plan interpretation and two ordered inventories are established;
+- the plan interpretation, ordered requirement/event inventories, run tag
+  scope, and ordinary-journey authority are established;
 - every in-scope event and every applicable interaction, placement, branch, and
   material finite value was attempted in original plan order;
 - small finite domains affecting payload or occurrence were exhausted and any
@@ -23,9 +24,15 @@ A recette is complete only when:
 - every occurred planned dataLayer event has exact raw Tag Assistant API Call
   and separate resolved Data Layer evidence; a planned non-dataLayer signal has
   exact source evidence;
-- every applicable field, type, GTM variable, concerned tag, firing condition,
-  runtime/outbound parameter, destination, trigger/sequence, and consent
-  condition has its own verdict;
+- every case has a complete detected-tag inventory and immutable applicability
+  card whose canonical layers are resolved as mandatory or explicit
+  conditional `NOT_APPLICABLE`;
+- every planned dataLayer event has independent action, raw, resolved,
+  tag-inventory, GTM-variable, tag-configuration, firing/count, runtime,
+  browser-request, and sensitive-data verdicts even when the plan has no tag
+  columns;
+- every in-scope tag has one result per tag-related layer, and every excluded
+  detected tag remains visible with its scope reason;
 - the run has a redacted sensitive-data scan and every declared
   cross-field rule has a deterministic result;
 - applicable conditional branches, multi-container ownership, SPA/auto-event
@@ -37,7 +44,9 @@ A recette is complete only when:
 - relevant unexpected, duplicate, premature, delayed, wrong-order, and
   wrong-context events and tags are recorded;
 - continuous event verdicts and the final ordered event summary are delivered;
-- schema-v2 strict validation passes;
+- immediate and final feedback exposes every event, layer, and in-scope tag,
+  with reason/evidence/retest for each non-PASS row;
+- schema-v3 strict validation passes;
 - the detailed XLSX opens and passes workbook reload checks.
 
 Any missing gate leaves the run incomplete; name the exact missing or blocked

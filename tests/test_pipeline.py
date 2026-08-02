@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
 import tempfile
 import unittest
+from argparse import Namespace
 from copy import deepcopy
 from pathlib import Path
 
@@ -18,7 +20,12 @@ SCRIPTS = ROOT / "scripts"
 FIXTURES = ROOT / "tests" / "fixtures"
 sys.path.insert(0, str(SCRIPTS))
 
-from build_recette_report import REQUIRED_SHEETS, build_workbook  # noqa: E402
+from build_recette_report import (  # noqa: E402
+    REQUIRED_SHEETS,
+    build_workbook,
+    layer_verdict_rows,
+    tag_rows,
+)
 from client_side_rules import (  # noqa: E402
     evaluate_business_rule,
     path_value,
@@ -31,10 +38,29 @@ from execution_contract import (  # noqa: E402
     PROTECTED_AUTHORIZATION_EXCLUSIONS,
     validate_session,
 )
+from import_ga4_tracking_plan_handoff import (  # noqa: E402
+    HandoffError,
+    interpreted_requirements,
+    verify_delivery,
+)
 from incremental_recette import apply_event, status_rows, validate_event  # noqa: E402
 from inspect_tracking_plan import inspect_xlsx  # noqa: E402
-from layer_contract import applicable_layers  # noqa: E402
+from layer_contract import (  # noqa: E402
+    CANONICAL_LAYERS,
+    TAG_RESULT_LAYERS,
+    applicable_layers,
+    declared_tag_contracts,
+    inferred_tag_category,
+    layer_applicability,
+    tag_scope_decision,
+)
+from migrate_schema_v2_to_v3 import migrate_results  # noqa: E402
+from preview_session_ledger import (  # noqa: E402
+    revise_tag_inventory,
+    scaffold_tag_results,
+)
 from recette_schema import ReportValidationError, event_rollup, validate  # noqa: E402
+from verify_release_artifact import verify_archive  # noqa: E402
 
 
 def fixture(name: str = "valid_full.json") -> dict:
@@ -43,6 +69,22 @@ def fixture(name: str = "valid_full.json") -> dict:
 
 def requirement(data: dict) -> dict:
     return data["requirements"][0]
+
+
+def value_type(value: object) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, (int, float)):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, list):
+        return "array"
+    if isinstance(value, dict):
+        return "object"
+    return type(value).__name__
 
 
 def client_side_fixture() -> dict:
@@ -80,33 +122,304 @@ def execution_fixture(data: dict | None = None) -> dict:
     data = data or fixture()
     req = requirement(data)
     boundary = req["action_boundary"]
-    applicable = applicable_layers(
+    expectation = req.get("expectation", {})
+    tag = req.get("tag") or {}
+    destination = req.get("destination_request") or {}
+    tag_name = tag.get("name") or expectation.get("tag_name") or "Synthetic concerned tag"
+    tag_id = "TAG-FIXTURE-001"
+    tag_container = (
+        tag.get("container_id") or req.get("container_id") or data["run"]["container_id"]
+    )
+    vendor_family = tag.get("vendor_family") or expectation.get("vendor_family")
+    tag_category = "analytics" if vendor_family in {None, "", "ga4"} else "media"
+    tag_delivery = expectation.get("tag_delivery", "browser_request")
+    configuration_evidence_id = tag.get("configuration_evidence_id", "EVD-TAG-CONFIG-011")
+    runtime_evidence_id = tag.get("runtime_evidence_id", "EVD-TAG-RUNTIME-011")
+    destination_evidence_id = destination.get("evidence_id", "EVD-NET-011")
+    if destination.get("request_count", 0) == 0 and tag_delivery == "browser_request":
+        destination_evidence_id = "EVD-NET-CAPTURE-001"
+        if not any(
+            row.get("evidence_id") == destination_evidence_id for row in data.get("evidence", [])
+        ):
+            data.setdefault("evidence", []).append(
+                {
+                    "evidence_id": destination_evidence_id,
+                    "kind": "browser_network_capture",
+                    "source": "Browser Network",
+                    "capture_mode": "direct",
+                    "action_id": "ACT-001",
+                    "container_id": tag_container,
+                    "path_or_url": "evidence/network-capture-001.json",
+                    "captured_at": "2026-07-25T10:01:03+00:00",
+                    "description": "Complete browser network capture for the action window.",
+                }
+            )
+    consent_evidence_id = (req.get("consent") or {}).get("evidence_id", "EVD-CONSENT-BASELINE-001")
+    sensitive_evidence_id = (req.get("sensitive_data_scan") or {}).get("evidence_id", "EVD-PII-011")
+    tag_inventory = [
+        {
+            "tag_id": tag_id,
+            "tag_name": tag_name,
+            "container_id": tag_container,
+            "tag_category": tag_category,
+            "tag_delivery": tag_delivery,
+            "vendor_family": vendor_family,
+            "destination_id": tag.get("destination_id") or expectation.get("destination_id"),
+            "template_type": tag.get("template_type", "GA4 Event"),
+            "consent_required": bool(expectation.get("consent_contract")),
+            "evidence_ids": [configuration_evidence_id],
+        }
+    ]
+    tag_inventory[0]["scope_status"], tag_inventory[0]["scope_reason"] = tag_scope_decision(
+        tag_inventory[0],
+        data["run"]["tag_scope"],
+        declared_tag_contracts(data["requirements"]),
+    )
+    applicability_card = layer_applicability(
         data["requirements"],
         container_count=len(data["run"]["containers"]),
+        tag_inventory=tag_inventory,
     )
+    applicable = [row["layer"] for row in applicability_card if row["mode"] == "MANDATORY"]
     evidence_for_layer = {
+        "action_boundary": ["EVD-ACTION-001"],
         "raw_api_call": ["EVD-RAW-011"],
         "resolved_data_layer": ["EVD-DL-011"],
+        "concerned_tag_inventory": [configuration_evidence_id],
         "gtm_variable": ["EVD-VAR-011"],
-        "tag_configuration": ["EVD-TAG-CONFIG-011"],
-        "tag_firing": ["EVD-TAG-RUNTIME-011"],
-        "tag_parameter": ["EVD-TAG-RUNTIME-011"],
-        "destination_request_when_applicable": ["EVD-NET-011"],
+        "tag_configuration": [configuration_evidence_id],
+        "tag_firing": [runtime_evidence_id],
+        "tag_parameter": [runtime_evidence_id],
+        "destination_request_when_applicable": [destination_evidence_id],
+        "sensitive_data_scan": [sensitive_evidence_id],
+        "business_rules_when_declared": ["EVD-RAW-011"],
+        "consent_when_applicable": [consent_evidence_id],
+        "source_signal_when_no_data_layer_push": [
+            (req.get("source_signal") or {}).get("evidence_id", "EVD-ACTION-001")
+        ],
+        "trigger_logic_when_applicable": [
+            (req.get("trigger_evaluation") or {}).get("evidence_id", runtime_evidence_id)
+        ],
+        "tag_sequence_when_applicable": [
+            (req.get("tag_sequence") or {}).get("evidence_id", configuration_evidence_id)
+        ],
+        "client_checks_when_applicable": [
+            next(
+                (
+                    row.get("evidence_id")
+                    for row in req.get("client_checks", [])
+                    if isinstance(row, dict) and row.get("evidence_id")
+                ),
+                "EVD-ACTION-001",
+            )
+        ],
+        "regression_when_baseline_provided": [
+            (req.get("regression") or {}).get("evidence_id", "EVD-ACTION-001")
+        ],
+        "container_context_when_applicable": [configuration_evidence_id],
+        "conditional_scenarios_when_applicable": [
+            (req.get("scenario") or {}).get("evidence_id", "EVD-ACTION-001")
+        ],
     }
     layer_results = [
         {
-            "layer": layer,
-            "status": "PASS",
-            "reason": f"{layer} matched the exact planned value.",
-            "evidence_ids": evidence_for_layer[layer],
+            "layer": decision["layer"],
+            "status": "PASS" if decision["mode"] == "MANDATORY" else "NOT_APPLICABLE",
+            "reason": (
+                f"{decision['layer']} matched the exact accepted evidence."
+                if decision["mode"] == "MANDATORY"
+                else f"Predicate false: {decision['predicate']}"
+            ),
+            "evidence_ids": evidence_for_layer.get(decision["layer"], ["EVD-ACTION-001"]),
             "semantic_ambiguity": None,
             "blocker_id": None,
+            "predicate_result": None if decision["mode"] == "MANDATORY" else False,
             "recorded_at": "2026-07-25T10:01:04+00:00",
         }
-        for layer in applicable
+        for decision in applicability_card
     ]
+    resolved_value = (req.get("resolved_data_layer") or {}).get("field_value")
+    variable_value = (req.get("gtm_variable") or {}).get("field_value")
+    runtime_value = tag.get("runtime_value")
+    configured_expected = expectation.get("expected_tag_configuration")
+    configured_actual = tag.get("configured_value")
+    expects_request = expectation.get("expected_request_behavior") not in {"absent", "blocked"}
+    request_observed = destination.get("request_count", 0) > 0
+    value_anchor = (
+        {
+            "source": "raw_data_layer_mapping",
+            "requirement_id": req["requirement_id"],
+            "path": "resolved_data_layer.field_value",
+        }
+        if (req.get("resolved_data_layer") or {}).get("field_state") != "absent"
+        else {
+            "source": "explicit_acceptance_rule",
+            "requirement_id": req["requirement_id"],
+            "path": "expectation.expected_firing",
+            "transform": "absence_null",
+        }
+    )
+    runtime_anchor = (
+        {
+            "source": "resolved_gtm_variable_contract",
+            "requirement_id": req["requirement_id"],
+            "path": "gtm_variable.field_value",
+        }
+        if (req.get("gtm_variable") or {}).get("field_state") != "absent"
+        else {
+            "source": "explicit_acceptance_rule",
+            "requirement_id": req["requirement_id"],
+            "path": "expectation.expected_firing",
+            "transform": "absence_null",
+        }
+    )
+    tag_evidence = {
+        "gtm_variable": (
+            ["EVD-VAR-011"],
+            {
+                "variables": [
+                    {
+                        "name": (req.get("gtm_variable") or {}).get("name") or "resolved input",
+                        "expected_anchor": value_anchor,
+                        "expected_value": resolved_value,
+                        "expected_type": value_type(resolved_value),
+                        "actual_value": variable_value,
+                        "actual_type": value_type(variable_value),
+                        "status": "PASS",
+                    }
+                ]
+            },
+        ),
+        "tag_configuration": (
+            [configuration_evidence_id],
+            {
+                "configuration": [
+                    {
+                        "name": tag.get("configuration_field") or "tag configuration",
+                        "expected_anchor": {
+                            "source": "tracking_plan",
+                            "requirement_id": req["requirement_id"],
+                            "path": "expectation.expected_tag_configuration",
+                        },
+                        "expected_value": configured_expected,
+                        "expected_type": value_type(configured_expected),
+                        "actual_value": configured_actual,
+                        "actual_type": value_type(configured_actual),
+                        "status": "PASS",
+                    }
+                ],
+            },
+        ),
+        "tag_firing": (
+            [runtime_evidence_id],
+            {
+                "expected_firing": tag.get("expected_firing"),
+                "expected_firing_anchor": {
+                    "source": "tracking_plan",
+                    "requirement_id": req["requirement_id"],
+                    "path": "expectation.expected_firing",
+                },
+                "actual_firing": tag.get("actual_firing"),
+                "fire_count": tag.get("fire_count", 0),
+            },
+        ),
+        "tag_parameter": (
+            [runtime_evidence_id],
+            {
+                "parameters": [
+                    {
+                        "name": tag.get("configuration_field") or "runtime parameter",
+                        "expected_anchor": runtime_anchor,
+                        "expected_value": variable_value,
+                        "expected_type": value_type(variable_value),
+                        "actual_value": runtime_value,
+                        "actual_type": value_type(runtime_value),
+                        "status": "PASS",
+                    }
+                ],
+                "runtime_state": tag.get("runtime_state"),
+                "runtime_type": tag.get("runtime_type"),
+            },
+        ),
+        "destination_request_when_applicable": (
+            [destination_evidence_id],
+            {
+                "request_count": destination.get("request_count", 0),
+                "request_ids": (
+                    [destination.get("request_id")]
+                    if request_observed and destination.get("request_id")
+                    else []
+                ),
+                "request_behavior": destination.get("request_behavior"),
+                "expected_request_behavior": expectation.get("expected_request_behavior"),
+                "expected_request_behavior_anchor": {
+                    "source": "tracking_plan",
+                    "requirement_id": req["requirement_id"],
+                    "path": "expectation.expected_request_behavior",
+                },
+                "local_only_configuration_proved": tag_delivery == "local_only",
+                "parameters": [
+                    {
+                        "name": "matching request occurrence",
+                        "expected_anchor": {
+                            "source": "explicit_acceptance_rule",
+                            "requirement_id": req["requirement_id"],
+                            "path": "expectation.expected_request_behavior",
+                            "transform": "request_expected",
+                        },
+                        "expected_value": expects_request,
+                        "expected_type": "boolean",
+                        "actual_value": request_observed,
+                        "actual_type": "boolean",
+                        "status": "PASS",
+                    }
+                ],
+            },
+        ),
+        "consent_when_applicable": (
+            [consent_evidence_id],
+            {"predicate_reason": "No consent condition is configured for this tag."},
+        ),
+        "trigger_logic_when_applicable": (
+            [runtime_evidence_id],
+            {"predicate_reason": "Expected firing and count matched."},
+        ),
+        "tag_sequence_when_applicable": (
+            [configuration_evidence_id],
+            {"predicate_reason": "No GTM sequence is configured."},
+        ),
+    }
+    tag_layer_results = []
+    mandatory_tag_layers = {
+        row["layer"] for row in applicability_card if row["mode"] == "MANDATORY"
+    }
+    for layer in TAG_RESULT_LAYERS:
+        evidence_ids, details = tag_evidence[layer]
+        active = layer in mandatory_tag_layers
+        tag_layer_results.append(
+            {
+                "action_id": "ACT-001",
+                "tag_id": tag_id,
+                "tag_name": tag_name,
+                "container_id": tag_container,
+                "tag_category": tag_category,
+                "tag_delivery": tag_delivery,
+                "layer": layer,
+                "status": "PASS" if active else "NOT_APPLICABLE",
+                "reason": (
+                    "Exact per-tag evidence matched."
+                    if active
+                    else "The event-level conditional predicate is false."
+                ),
+                "details": details,
+                "evidence_ids": evidence_ids,
+                "semantic_ambiguity": None,
+                "blocker_id": None,
+                "recorded_at": "2026-07-25T10:01:04+00:00",
+            }
+        )
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "created_at": "2026-07-25T09:55:00+00:00",
         "updated_at": "2026-07-25T10:02:00+00:00",
         "profile_path": "profiles/run-synthetic-001",
@@ -142,8 +455,19 @@ def execution_fixture(data: dict | None = None) -> dict:
                 "execution_status": "EXECUTED",
                 "reason": None,
                 "authorization_ids": [],
+                "tag_scope": deepcopy(data["run"]["tag_scope"]),
+                "declared_tag_contracts": declared_tag_contracts(data["requirements"]),
+                "source_expectations": [deepcopy(req["expectation"])],
+                "tag_inventory_status": "COMPLETE",
+                "tag_inventory_reason": "Container and Preview inventory completed before action.",
+                "tag_inventory_evidence_ids": [configuration_evidence_id],
+                "tag_inventory": deepcopy(tag_inventory),
+                "conditional_activations": {},
+                "applicability_status": "FROZEN",
+                "layer_applicability": deepcopy(applicability_card),
+                "applicability_frozen_at": "2026-07-25T09:59:00+00:00",
                 "applicable_layers": applicable,
-                "container_ids": ["GTM-TEST"],
+                "container_ids": [tag_container],
                 "registered_at": "2026-07-25T09:58:00+00:00",
                 "final_action_id": "ACT-001",
             }
@@ -160,17 +484,19 @@ def execution_fixture(data: dict | None = None) -> dict:
                 "material_variant": {"quantity": 1},
                 "action": "click",
                 "attempt_number": 1,
+                "inventory_revision": 1,
                 "retry_of_action_id": None,
                 "preview_connected_before": True,
                 "target_ready_before": True,
                 "last_event_before": boundary["last_event_before"],
                 "consent_state_before": "analytics_storage=granted",
                 "browser_context_id": "desktop-default",
-                "container_ids": ["GTM-TEST"],
+                "container_ids": [tag_container],
                 "action_timestamp": boundary["action_timestamp"],
                 "quiet_window_ms": boundary["quiet_window_ms"],
                 "timeout_ms": boundary["timeout_ms"],
                 "layer_results": layer_results,
+                "tag_layer_results": tag_layer_results,
                 "first_event_after": boundary["first_event_after"],
                 "settled_final_event": boundary["settled_final_event"],
                 "expected_seen": True,
@@ -256,7 +582,7 @@ def configure_absent_event(data: dict, blocker_status: str | None = None) -> dic
     req["verdict"].update(
         {
             "event_occurrence": "FAIL" if blocker_status is None else blocker_status,
-            "raw_payload": component,
+            "raw_payload": "FAIL" if blocker_status is None else blocker_status,
             "resolved_data_layer": component,
             "gtm_variable": component,
             "tag_configuration": component,
@@ -460,9 +786,21 @@ class PipelineTests(unittest.TestCase):
             )
             workbook.close()
 
-    def test_applicability_does_not_imply_tag_layers(self) -> None:
+    def test_data_layer_applicability_implies_the_full_tag_chain(self) -> None:
         data = fixture("valid_limited_layers.json")
-        self.assertEqual([], validate(data, strict=True))
+        layers = applicable_layers(data["requirements"])
+        for layer in (
+            "resolved_data_layer",
+            "concerned_tag_inventory",
+            "gtm_variable",
+            "tag_configuration",
+            "tag_firing",
+            "tag_parameter",
+            "destination_request_when_applicable",
+        ):
+            self.assertIn(layer, layers)
+        with self.assertRaises(ReportValidationError):
+            validate(data, strict=True)
         self.assertIsNone(requirement(data).get("tag"))
 
     def test_valid_full_client_side_extension_and_workbook(self) -> None:
@@ -995,6 +1333,7 @@ class PipelineTests(unittest.TestCase):
                 {
                     "evidence_id": "EVD-GA4-CONFIG-002",
                     "kind": "tag_configuration",
+                    "tag_id": "TAG-REQ-002",
                     "source": "Tag Assistant",
                     "capture_mode": "direct",
                     "action_id": "ACT-001",
@@ -1009,6 +1348,7 @@ class PipelineTests(unittest.TestCase):
                 {
                     "evidence_id": "EVD-GA4-RUNTIME-002",
                     "kind": "tag_runtime",
+                    "tag_id": "TAG-REQ-002",
                     "source": "Tag Assistant",
                     "capture_mode": "direct",
                     "action_id": "ACT-001",
@@ -1023,6 +1363,7 @@ class PipelineTests(unittest.TestCase):
                 {
                     "evidence_id": "EVD-GA4-NET-002",
                     "kind": "browser_network_request",
+                    "tag_id": "TAG-REQ-002",
                     "source": "Browser Network",
                     "capture_mode": "direct",
                     "action_id": "ACT-001",
@@ -1078,7 +1419,7 @@ class PipelineTests(unittest.TestCase):
     def test_schema_v1_is_rejected_actionably(self) -> None:
         data = fixture()
         data["schema_version"] = 1
-        self.assert_invalid(data, "re-normalized from source evidence")
+        self.assert_invalid(data, "must be migrated or re-normalized")
 
     def test_missing_acceptance_source_is_rejected(self) -> None:
         data = fixture()
@@ -1103,7 +1444,7 @@ class PipelineTests(unittest.TestCase):
     def test_browser_interception_cannot_replace_preview_dependent_api_call(self) -> None:
         data = fixture()
         requirement(data)["raw_api_call"]["capture_source"] = "browser_interception"
-        self.assert_invalid(data, "Preview-dependent evidence requires exact Tag Assistant")
+        self.assert_invalid(data, "planned dataLayer acceptance requires exact Tag Assistant")
 
     def test_fixed_value_mismatch_cannot_hide_behind_pass(self) -> None:
         data = fixture()
@@ -1258,9 +1599,27 @@ class PipelineTests(unittest.TestCase):
 
     def test_expected_event_absence_with_settled_boundary_is_valid_failure(self) -> None:
         data = fixture()
-        configure_absent_event(data)
+        req = configure_absent_event(data)
         self.assertEqual([], validate(data, strict=True))
+        self.assertEqual("FAIL", req["verdict"]["raw_payload"])
+        self.assertEqual("BLOCKED", req["verdict"]["resolved_data_layer"])
         self.assertEqual("FAIL", event_rollup(data)[0]["status"])
+
+    def test_session_rejects_missing_source_without_raw_fail_and_blocked_chain(self) -> None:
+        data = fixture()
+        session = execution_fixture(data)
+        action = session["actions"][0]
+        action["expected_seen"] = False
+        action["observed_business_push_count"] = 0
+        session["business_pushes"] = []
+        errors = validate_session(session, results=data, final=True)
+        self.assertTrue(
+            any(
+                "absent expected dataLayer source requires raw_api_call=FAIL" in error
+                for error in errors
+            ),
+            errors,
+        )
 
     def test_duplicate_push_cannot_pass_an_expected_once_rule(self) -> None:
         data = fixture()
@@ -1309,6 +1668,23 @@ class PipelineTests(unittest.TestCase):
     def test_protected_blocker_with_handoff_is_valid(self) -> None:
         data = fixture()
         add_blocker(data, "EMAIL_VERIFICATION", help_requested=True)
+        self.assertEqual([], validate(data, strict=True))
+
+    def test_ui_control_blocker_requires_complete_recovery_attempts(self) -> None:
+        data = fixture()
+        add_blocker(data, "UI_CONTROL_BLOCKER", help_requested=False)
+        self.assert_invalid(data, "UI_CONTROL_BLOCKER requires attempted_methods")
+
+        data = fixture()
+        add_blocker(data, "UI_CONTROL_BLOCKER", help_requested=False)
+        data["blockers"][0]["attempted_methods"] = [
+            "scroll_into_view",
+            "label_click",
+            "direct_control",
+            "pointer_click",
+            "keyboard_toggle",
+            "clean_state_retry",
+        ]
         self.assertEqual([], validate(data, strict=True))
 
     def test_http_403_is_blocked_not_not_tested(self) -> None:
@@ -1515,11 +1891,283 @@ class PipelineTests(unittest.TestCase):
                 "PENDING",
                 ledger["requirements"][0]["verdict"]["overall"],
             )
+            self.assertEqual("analytics_only", ledger["run"]["tag_scope"]["mode"])
+            self.assertTrue(ledger["run"]["journey_authority"]["complete_ordinary_journeys"])
+            self.assertTrue(ledger["run"]["journey_authority"]["ordinary_form_submissions"])
 
     def test_final_execution_contract_accepts_complete_case_and_push_stream(self) -> None:
         data = fixture()
         session = execution_fixture(data)
         self.assertEqual([], validate_session(session, results=data, final=True))
+
+    def test_analytics_scope_keeps_detected_media_visible_out_of_scope(self) -> None:
+        data = fixture()
+        session = execution_fixture(data)
+        case = session["cases"][0]
+        media_evidence = deepcopy(
+            next(row for row in data["evidence"] if row.get("evidence_id") == "EVD-TAG-CONFIG-011")
+        )
+        media_evidence.update(
+            {
+                "evidence_id": "EVD-META-CONFIG-OUT",
+                "tag_id": "TAG-META-DETECTED",
+                "tag_name": "Meta - AddToCart",
+            }
+        )
+        data["evidence"].append(media_evidence)
+        media_tag = {
+            "tag_id": "TAG-META-DETECTED",
+            "tag_name": "Meta - AddToCart",
+            "container_id": "GTM-TEST",
+            "tag_category": "media",
+            "tag_delivery": "browser_request",
+            "vendor_family": "meta",
+            "destination_id": "META-OTHER",
+            "template_type": "gallery_template",
+            "consent_required": True,
+            "evidence_ids": ["EVD-META-CONFIG-OUT"],
+        }
+        media_tag["scope_status"], media_tag["scope_reason"] = tag_scope_decision(
+            media_tag,
+            data["run"]["tag_scope"],
+            case["declared_tag_contracts"],
+        )
+        self.assertEqual("OUT_OF_SCOPE", media_tag["scope_status"])
+        case["tag_inventory"].append(media_tag)
+        case["layer_applicability"] = layer_applicability(
+            data["requirements"],
+            container_count=1,
+            tag_inventory=case["tag_inventory"],
+        )
+        case["applicable_layers"] = [
+            row["layer"] for row in case["layer_applicability"] if row["mode"] == "MANDATORY"
+        ]
+        self.assertEqual([], validate_session(session, results=data, final=True))
+        feedback = event_feedback(data, session)[0]
+        excluded = next(
+            row for row in feedback["tag_feedback"] if row["tag_id"] == "TAG-META-DETECTED"
+        )
+        self.assertEqual("OUT_OF_SCOPE", excluded["scope_status"])
+        self.assertEqual(2, len(tag_rows(data, session)))
+
+    def test_tracking_plan_tag_fields_do_not_control_runtime_tag_layers(self) -> None:
+        data = fixture()
+        session = execution_fixture(data)
+        req = requirement(data)
+        for field in (
+            "tag_name",
+            "tag_delivery",
+            "expected_firing",
+            "tag_configuration_field",
+            "expected_tag_configuration",
+            "vendor_family",
+            "destination_id",
+            "destination_event_name",
+            "destination_id_parameter_path",
+            "destination_event_parameter_path",
+            "destination_parameter_path",
+            "expected_destination_value",
+            "expected_destination_type",
+            "expected_endpoint_pattern",
+            "expected_request_behavior",
+        ):
+            req["expectation"].pop(field, None)
+        req["tag"] = None
+        req["destination_request"] = None
+        session["cases"][0]["declared_tag_contracts"] = []
+        session["cases"][0]["source_expectations"] = [deepcopy(req["expectation"])]
+        self.assertEqual([], validate(data, strict=True))
+        errors = validate_session(session, results=data, final=True)
+        self.assertTrue(any("expected anchor path is absent" in error for error in errors))
+        self.assertFalse(any("omitted per-tag layers" in error for error in errors))
+
+    def test_exact_plan_declared_media_is_in_scope_under_analytics_default(self) -> None:
+        tag = {
+            "tag_name": "Meta - Purchase",
+            "tag_category": "media",
+            "vendor_family": "meta",
+            "destination_id": "META-123",
+        }
+        status, reason = tag_scope_decision(
+            tag,
+            {"mode": "analytics_only", "include_plan_declared_media": True},
+            [
+                {
+                    "tag_name": "Meta - Purchase",
+                    "vendor_family": "meta",
+                    "destination_id": "META-123",
+                }
+            ],
+        )
+        self.assertEqual("IN_SCOPE", status)
+        self.assertIn("explicitly declared", reason)
+
+    def test_known_vendor_metadata_prevents_tag_category_scope_manipulation(self) -> None:
+        self.assertEqual(
+            "analytics",
+            inferred_tag_category({"vendor_family": "ga4", "template_type": "GA4 Event"}),
+        )
+        self.assertEqual(
+            "media",
+            inferred_tag_category({"vendor_family": "meta", "template_type": "Gallery template"}),
+        )
+        data = fixture()
+        session = execution_fixture(data)
+        session["cases"][0]["tag_inventory"][0]["tag_category"] = "media"
+        errors = validate_session(session, results=data, final=True)
+        self.assertTrue(
+            any(
+                "tag_category contradicts direct vendor/template metadata" in error
+                for error in errors
+            ),
+            errors,
+        )
+
+    def test_empty_analytics_tag_inventory_requires_explicit_failure_chain(self) -> None:
+        data = fixture()
+        session = execution_fixture(data)
+        data["evidence"].append(
+            {
+                "evidence_id": "EVD-TAG-INVENTORY-EMPTY",
+                "kind": "tag_inventory",
+                "source": "GTM read-only",
+                "capture_mode": "direct",
+                "container_id": "GTM-TEST",
+                "path_or_url": "evidence/tag-inventory-empty.json",
+                "captured_at": "2026-07-25T10:01:03+00:00",
+                "description": "Complete concerned-tag search found no in-scope analytics tag.",
+            }
+        )
+        case = session["cases"][0]
+        case["tag_inventory"] = []
+        case["tag_inventory_evidence_ids"] = ["EVD-TAG-INVENTORY-EMPTY"]
+        case["layer_applicability"] = layer_applicability(
+            data["requirements"], container_count=1, tag_inventory=[]
+        )
+        case["applicable_layers"] = [
+            row["layer"] for row in case["layer_applicability"] if row["mode"] == "MANDATORY"
+        ]
+        action = session["actions"][0]
+        action["tag_layer_results"] = []
+        status_by_layer = {
+            "concerned_tag_inventory": "FAIL",
+            "tag_configuration": "FAIL",
+            "tag_firing": "FAIL",
+            "gtm_variable": "BLOCKED",
+            "tag_parameter": "BLOCKED",
+            "destination_request_when_applicable": "BLOCKED",
+        }
+        for row in action["layer_results"]:
+            if row["layer"] in status_by_layer:
+                row["status"] = status_by_layer[row["layer"]]
+                row["reason"] = "No in-scope analytics tag was identified for the event."
+                row["evidence_ids"] = ["EVD-TAG-INVENTORY-EMPTY"]
+                row["blocker_id"] = "NO_IN_SCOPE_TAG" if row["status"] == "BLOCKED" else None
+        req = requirement(data)
+        req["verdict"].update(
+            {
+                "gtm_variable": "BLOCKED",
+                "tag_configuration": "FAIL",
+                "tag_firing": "FAIL",
+                "tag_parameter": "BLOCKED",
+                "destination_request": "BLOCKED",
+                "destination_parameter": "BLOCKED",
+                "overall": "FAIL",
+                "failure_layer": "tag_configuration",
+                "mismatch": "No in-scope analytics tag was identified.",
+            }
+        )
+        req["evidence_ids"].append("EVD-TAG-INVENTORY-EMPTY")
+        self.assertEqual([], validate(data, strict=True))
+        self.assertEqual([], validate_session(session, results=data, final=True))
+
+    def test_available_network_capture_without_match_cannot_be_blocked(self) -> None:
+        data = fixture()
+        session = execution_fixture(data)
+        action = session["actions"][0]
+        destination = next(
+            row
+            for row in action["tag_layer_results"]
+            if row["layer"] == "destination_request_when_applicable"
+        )
+        destination.update(
+            {
+                "status": "BLOCKED",
+                "reason": "No matching request was observed in an available capture.",
+                "blocker_id": "NETWORK",
+            }
+        )
+        destination["details"].update(
+            {"request_count": 0, "request_ids": [], "capture_unavailable": False}
+        )
+        aggregate = next(
+            row
+            for row in action["layer_results"]
+            if row["layer"] == "destination_request_when_applicable"
+        )
+        aggregate.update({"status": "BLOCKED", "blocker_id": "NETWORK"})
+        errors = validate_session(session, results=data, final=True)
+        self.assertTrue(
+            any("available capture with no match is FAIL" in error for error in errors),
+            errors,
+        )
+
+    def test_per_tag_runtime_parameter_false_pass_is_rejected(self) -> None:
+        data = fixture()
+        session = execution_fixture(data)
+        parameter = next(
+            row
+            for row in session["actions"][0]["tag_layer_results"]
+            if row["layer"] == "tag_parameter"
+        )
+        parameter["details"]["parameters"][0]["actual_value"] = "29.9"
+        parameter["details"]["parameters"][0]["actual_type"] = "string"
+        errors = validate_session(session, results=data, final=True)
+        self.assertTrue(
+            any("contradicts exact value/type comparison" in error for error in errors),
+            errors,
+        )
+
+    def test_feedback_and_workbook_rows_expose_every_event_and_tag_layer(self) -> None:
+        data = fixture()
+        session = execution_fixture(data)
+        feedback = event_feedback(data, session)[0]
+        self.assertEqual(len(CANONICAL_LAYERS), len(feedback["layer_feedback"]))
+        self.assertEqual(len(TAG_RESULT_LAYERS), len(feedback["tag_feedback"][0]["layers"]))
+        self.assertEqual(
+            list(TAG_RESULT_LAYERS),
+            [row["layer"] for row in feedback["tag_feedback"][0]["layers"]],
+        )
+        rows = layer_verdict_rows(data, session)
+        self.assertEqual(len(CANONICAL_LAYERS) + len(TAG_RESULT_LAYERS), len(rows))
+        self.assertEqual(
+            list(CANONICAL_LAYERS),
+            [row["layer"] for row in rows[: len(CANONICAL_LAYERS)]],
+        )
+        self.assertEqual(
+            list(TAG_RESULT_LAYERS),
+            [row["layer"] for row in rows[len(CANONICAL_LAYERS) :]],
+        )
+        self.assertTrue(all(str(row.get("status", "")).strip() for row in rows))
+        self.assertTrue(all(str(row.get("reason", "")).strip() for row in rows))
+
+    def test_false_consent_predicate_still_requires_natural_baseline_evidence(self) -> None:
+        data = fixture()
+        session = execution_fixture(data)
+        consent = next(
+            row
+            for row in session["actions"][0]["layer_results"]
+            if row["layer"] == "consent_when_applicable"
+        )
+        consent["evidence_ids"] = ["EVD-ACTION-001"]
+        errors = validate_session(session, results=data, final=True)
+        self.assertTrue(
+            any(
+                "consent_when_applicable: no direct evidence of the required kind" in error
+                for error in errors
+            ),
+            errors,
+        )
 
     def test_run_authorization_is_reusable_but_credentials_remain_ephemeral(self) -> None:
         data = fixture()
@@ -1598,7 +2246,7 @@ class PipelineTests(unittest.TestCase):
         ]
         errors = validate_session(session, results=data, final=True)
         self.assertTrue(
-            any("applicable_layers omit" in error for error in errors),
+            any("omits explicit layer results" in error for error in errors),
             errors,
         )
 
@@ -1827,6 +2475,42 @@ class PipelineTests(unittest.TestCase):
                 "tracking_plan",
             )
             run(
+                "register-tag",
+                str(ledger),
+                "--case-id",
+                "CASE-ADD-DESKTOP",
+                "--tag-id",
+                "TAG-GA4-ADD",
+                "--tag-name",
+                "GA4 - Event - add_to_cart",
+                "--container-id",
+                "GTM-TEST",
+                "--tag-category",
+                "analytics",
+                "--tag-delivery",
+                "browser_request",
+                "--vendor-family",
+                "ga4",
+                "--destination-id",
+                "G-TEST123",
+                "--template-type",
+                "GA4 Event",
+                "--consent-required",
+                "false",
+                "--evidence-id",
+                "EVD-TAG-CONFIG-011",
+            )
+            run(
+                "complete-tag-inventory",
+                str(ledger),
+                "--case-id",
+                "CASE-ADD-DESKTOP",
+                "--reason",
+                "Container and Preview tag inventory completed.",
+                "--evidence-id",
+                "EVD-TAG-CONFIG-011",
+            )
+            run(
                 "begin-action",
                 str(ledger),
                 "--action-id",
@@ -2001,6 +2685,292 @@ class PipelineTests(unittest.TestCase):
             )
             self.assertNotEqual(0, invalid.returncode)
             self.assertIn("--completion-signal", invalid.stderr)
+
+    def test_ga4_tracking_plan_handoff_initializes_exact_ordered_requirements(self) -> None:
+        plan = {
+            "events": [
+                {
+                    "event_name": "generate_lead",
+                    "classification": "official",
+                    "journey_ids": ["lead_generation"],
+                    "measurement_opportunity_ids": ["lead_success"],
+                    "trigger": "Confirmed lead success.",
+                    "locations": [
+                        {"url_pattern": "https://example.test/quote", "component": "quote form"}
+                    ],
+                    "data_layer": {
+                        "clear": ["event_data"],
+                        "push": {
+                            "event": "generate_lead",
+                            "event_data": {"form_name": "quote_request"},
+                        },
+                    },
+                    "parameters": [
+                        {
+                            "name": "form_name",
+                            "scope": "event",
+                            "type": "string",
+                            "requirement": "required",
+                            "data_layer_path": "event_data.form_name",
+                            "destination": "ga4_event_parameter",
+                            "allowed_values": ["quote_request"],
+                        }
+                    ],
+                }
+            ]
+        }
+        expected = {
+            "events": [
+                {
+                    "event_name": "generate_lead",
+                    "measurement_opportunity_ids": ["lead_success"],
+                }
+            ]
+        }
+        with tempfile.TemporaryDirectory() as raw:
+            delivery = Path(raw)
+            plan_path = delivery / "plan.json"
+            expected_path = delivery / "expected-events.json"
+            plan_path.write_text(json.dumps(plan), encoding="utf-8")
+            expected_path.write_text(json.dumps(expected), encoding="utf-8")
+            plan_hash = hashlib.sha256(plan_path.read_bytes()).hexdigest()
+            expected_hash = hashlib.sha256(expected_path.read_bytes()).hexdigest()
+            handoff = {
+                "handoff_version": "1.0.0",
+                "skill": {"name": "ga4-tracking-plan", "version": "2.5.0"},
+                "approval": {"state": "reviewed"},
+                "plan": {
+                    "canonical_sha256": plan_hash,
+                    "target_sites": ["https://example.test/"],
+                },
+                "artifacts": [
+                    {
+                        "path": "plan.json",
+                        "role": "canonical_tracking_plan",
+                        "sha256": plan_hash,
+                    },
+                    {
+                        "path": "expected-events.json",
+                        "role": "runtime_expected_events_contract",
+                        "sha256": expected_hash,
+                    },
+                ],
+            }
+            (delivery / "handoff.json").write_text(json.dumps(handoff), encoding="utf-8")
+            verified_handoff, verified_plan, verified_expected = verify_delivery(delivery)
+            imported = interpreted_requirements(verified_handoff, verified_plan, verified_expected)
+            self.assertEqual(len(imported["requirements"]), 2)
+            self.assertEqual(
+                [item["source"]["plan_order"] for item in imported["requirements"]],
+                [1, 2],
+            )
+            self.assertEqual(
+                imported["requirements"][1]["expectation"]["expected_value"],
+                ["quote_request"],
+            )
+            expected_path.write_text("{}", encoding="utf-8")
+            with self.assertRaisesRegex(HandoffError, "hash-mismatched"):
+                verify_delivery(delivery)
+
+    def test_per_tag_evidence_cannot_be_reused_for_another_tag(self) -> None:
+        data = fixture()
+        session = execution_fixture(data)
+        case = session["cases"][0]
+        case["tag_inventory"][0]["tag_id"] = "TAG-OTHER"
+        for row in session["actions"][0]["tag_layer_results"]:
+            row["tag_id"] = "TAG-OTHER"
+        errors = validate_session(session, results=data, final=True)
+        self.assertTrue(any("not bound to this exact tag" in error for error in errors))
+
+    def test_self_asserted_equal_comparison_is_rejected_by_anchor(self) -> None:
+        data = fixture()
+        session = execution_fixture(data)
+        row = next(
+            item
+            for item in session["actions"][0]["tag_layer_results"]
+            if item["layer"] == "tag_configuration"
+        )
+        comparison = row["details"]["configuration"][0]
+        comparison["expected_value"] = "{{Fake - Variable}}"
+        comparison["actual_value"] = "{{Fake - Variable}}"
+        errors = validate_session(session, results=data, final=True)
+        self.assertTrue(
+            any(
+                "expected value differs from its accepted source anchor" in error
+                for error in errors
+            )
+        )
+
+    def test_browser_request_ids_must_reconcile_with_direct_evidence(self) -> None:
+        data = fixture()
+        session = execution_fixture(data)
+        row = next(
+            item
+            for item in session["actions"][0]["tag_layer_results"]
+            if item["layer"] == "destination_request_when_applicable"
+        )
+        row["details"]["request_ids"] = ["NET-FABRICATED"]
+        errors = validate_session(session, results=data, final=True)
+        self.assertTrue(any("request_ids do not reconcile" in error for error in errors))
+
+    def test_session_per_tag_sensitive_value_blocks_export_contract(self) -> None:
+        data = fixture()
+        session = execution_fixture(data)
+        row = next(
+            item
+            for item in session["actions"][0]["tag_layer_results"]
+            if item["layer"] == "tag_parameter"
+        )
+        row["details"]["diagnostic"] = "raw-person@example.test"
+        errors = validate_session(session, results=data, final=True)
+        self.assertTrue(
+            any("session contains unredacted sensitive content" in error for error in errors)
+        )
+        with (
+            tempfile.TemporaryDirectory() as tempdir,
+            self.assertRaisesRegex(ReportValidationError, "unredacted sensitive content"),
+        ):
+            build_workbook(data, Path(tempdir) / "unsafe.xlsx", session=session)
+
+    def test_schema_v2_migration_preserves_order_but_resets_proof(self) -> None:
+        legacy = fixture()
+        legacy["schema_version"] = 2
+        migrated = migrate_results(legacy)
+        self.assertEqual(3, migrated["schema_version"])
+        self.assertEqual(
+            legacy["run"]["requirement_inventory"], migrated["run"]["requirement_inventory"]
+        )
+        self.assertEqual([], migrated["evidence"])
+        self.assertEqual([], migrated["unexpected"])
+        self.assertTrue(
+            all(row["verdict"]["overall"] == "PENDING" for row in migrated["requirements"])
+        )
+        self.assertTrue(
+            all(row["journey"]["execution_status"] == "PENDING" for row in migrated["requirements"])
+        )
+
+    def test_analytics_vendor_taxonomy_covers_common_non_ga4_tags(self) -> None:
+        for vendor in (
+            "Piano Analytics",
+            "Adobe Analytics",
+            "Matomo",
+            "Piwik PRO",
+            "Snowplow",
+            "Realytics",
+        ):
+            with self.subTest(vendor=vendor):
+                self.assertEqual(
+                    "analytics",
+                    inferred_tag_category(
+                        {"vendor_family": vendor, "template_type": f"{vendor} event"}
+                    ),
+                )
+
+    def test_scaffold_tag_results_emits_exact_eight_layer_matrix(self) -> None:
+        session = execution_fixture(fixture())
+        session["actions"][0]["state"] = "OPEN"
+        with tempfile.TemporaryDirectory() as tempdir:
+            output = Path(tempdir) / "tag-results.json"
+            scaffold_tag_results(
+                session,
+                Namespace(action_id="ACT-001", output=output),
+            )
+            rows = json.loads(output.read_text(encoding="utf-8"))["tag_layer_results"]
+        self.assertEqual(list(TAG_RESULT_LAYERS), [row["layer"] for row in rows])
+        self.assertTrue(all(row["status"] == "PENDING" for row in rows))
+        self.assertTrue(all(row["tag_id"] == "TAG-FIXTURE-001" for row in rows))
+
+    def test_late_tag_discovery_versions_inventory_and_forces_retest(self) -> None:
+        data = fixture()
+        session = execution_fixture(data)
+        data["evidence"].append(
+            {
+                "evidence_id": "EVD-LATE-TAG",
+                "kind": "tag_configuration",
+                "source": "Tag Assistant",
+                "capture_mode": "direct",
+                "action_id": "ACT-001",
+                "event_index": 11,
+                "container_id": "GTM-TEST",
+                "tag_id": "TAG-LATE-PIANO",
+                "tag_name": "Piano - add_to_cart",
+                "configuration_field": "event_name",
+                "path_or_url": "evidence/late-piano.json",
+                "captured_at": "2026-07-25T10:01:03+00:00",
+                "description": "Late direct tag inventory evidence.",
+            }
+        )
+        revise_tag_inventory(
+            session,
+            Namespace(
+                case_id="CASE-001",
+                tag_id="TAG-LATE-PIANO",
+                tag_name="Piano - add_to_cart",
+                container_id="GTM-TEST",
+                tag_category="analytics",
+                tag_delivery="browser_request",
+                vendor_family="piano",
+                destination_id="PA-TEST",
+                template_type="Piano Analytics Event",
+                consent_required="false",
+                evidence_id=["EVD-LATE-TAG"],
+                reason="Late direct Preview discovery requires a new attempt.",
+            ),
+        )
+        case = session["cases"][0]
+        self.assertEqual(2, case["inventory_revision"])
+        self.assertEqual(1, len(case["applicability_history"]))
+        self.assertEqual("PENDING", case["execution_status"])
+        self.assertIsNone(case["final_action_id"])
+        self.assertEqual("ACT-001", case["required_retest_of_action_id"])
+        self.assertEqual([], validate_session(session, results=data, final=False))
+
+    def test_workbook_splits_oversized_structured_cells_without_truncation(self) -> None:
+        data = fixture()
+        session = execution_fixture(data)
+        row = next(
+            item
+            for item in session["actions"][0]["tag_layer_results"]
+            if item["layer"] == "tag_parameter"
+        )
+        row["details"]["large_safe_diagnostic"] = "x" * 40000
+        with tempfile.TemporaryDirectory() as tempdir:
+            output = Path(tempdir) / "large.xlsx"
+            build_workbook(data, output, session=session)
+            workbook = load_workbook(output, read_only=True)
+            values = [
+                cell.value
+                for sheet_row in workbook["Layer Verdicts"].iter_rows()
+                for cell in sheet_row
+                if isinstance(cell.value, str)
+            ]
+            workbook.close()
+        self.assertTrue(any(value.startswith("[part 1/2]") for value in values))
+        self.assertTrue(any(value.startswith("[part 2/2]") for value in values))
+        self.assertTrue(all(len(value) <= 32767 for value in values))
+
+    def test_release_archive_manifest_is_hash_verified(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            archives = []
+            for directory in ("first", "second"):
+                archive = Path(tempdir) / directory / "gtm-preview-recette-v2.0.0.zip"
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        str(SCRIPTS / "build_skill_package.py"),
+                        "--output",
+                        str(archive),
+                    ],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(0, completed.returncode, completed.stderr)
+                archives.append(archive)
+            manifest = verify_archive(archives[0])
+            self.assertEqual(archives[0].read_bytes(), archives[1].read_bytes())
+        self.assertEqual("v2.0.0", manifest["release"])
+        self.assertIn("SKILL.md", manifest["files"])
 
 
 if __name__ == "__main__":

@@ -2,9 +2,10 @@
 
 ## Vendor-neutral acceptance model
 
-Treat the tracking plan or explicit acceptance rule as the source of truth.
-Vendor profiles help decode browser evidence; they do not add, rename, or
-remove client requirements.
+Treat the tracking plan or explicit acceptance rule as the source of accepted
+event and parameter semantics. It does not select evidence layers. Vendor
+profiles help decode browser evidence; they do not add, rename, or remove
+accepted values.
 
 Supported client-side vendor families are:
 
@@ -19,12 +20,25 @@ Supported client-side vendor families are:
 - `x_ads`;
 - `custom`.
 
-Use one atomic requirement per concerned tag, destination ID, and parameter.
-When one event must reach two GA4 measurement IDs, two pixels, or an analytics
-and media destination, keep separate rows under the same event group. This
-makes a partial delivery visible.
+When the acceptance source explicitly names a tag, destination ID, or
+parameter, use one atomic requirement per accepted comparison. When those
+columns are absent, do not invent plan values: discover concerned runtime tags
+and retain their independent evidence as per-tag session/workbook subrows.
+When one event must reach two accepted destinations, keep separate rows under
+the same event group. This makes partial delivery visible.
 
-Declare `tag_delivery` before execution:
+Use `analytics_only` tag scope by default. Include exact plan-declared media
+destinations, every relevant client-side tag only on explicit request, or an
+explicit fixed tag set. Every detected excluded tag remains visible as
+`OUT_OF_SCOPE` with its reason.
+
+Derive category deterministically when direct metadata is unambiguous: GA4 or
+Google Analytics is analytics; Google Ads, Floodlight, Meta, LinkedIn, TikTok,
+Pinterest, Microsoft Ads/UET, and X/Twitter advertising are media. A declared
+category that contradicts known vendor/template metadata is invalid. For an
+ambiguous custom template, retain the evidence-backed category and rationale.
+
+Declare `tag_delivery` for every detected tag before freezing the case:
 
 - `browser_request` for a tag whose accepted client-side effect is an
   analytics/media request;
@@ -33,6 +47,10 @@ Declare `tag_delivery` before execution:
 
 Do not infer local-only merely because Preview hides a value. A fired
 browser-sending tag always requires a same-action first-party network check.
+After the source/tag executed, if capture is available and no matching request
+exists, use `FAIL`. Reserve `BLOCKED` for unavailable capture or an explicitly
+failed upstream source. Use local-only `NOT_APPLICABLE` only after positive
+configuration proof.
 
 For each destination normalize:
 
@@ -98,8 +116,11 @@ validator can reconcile each decoded claim with the retained browser request:
 }
 ```
 
-The destination ID, vendor event name, and parameter value/type must match
-both the tracking-plan expectation and their exact raw request locations.
+When supplied, the destination ID, vendor event name, and parameter value/type
+must match both the tracking-plan expectation and their exact raw request
+locations. Otherwise compare them with the exact resolved in-scope tag runtime
+values and preserve any semantic gap as `REVIEW`, never a fabricated plan
+expectation.
 Repeated query keys remain arrays and cannot silently pass as one scalar. A
 declared destination or destination parameter requires its component verdict;
 removing the verdict cannot preserve an overall `PASS`.
@@ -156,7 +177,8 @@ Use roles:
 
 If two containers both own or fire the same accepted destination, record a
 `container_conflict` client check and relevant unexpected duplicate. Do not
-build an event-by-every-tag matrix.
+build an unrelated every-container/every-tag matrix; do build the exact
+per-event matrix for all in-scope tags under the declared tag scope.
 
 When multiple simultaneous Preview connections are unreliable:
 

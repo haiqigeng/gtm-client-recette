@@ -10,46 +10,37 @@ from typing import Any
 
 from acceptance_contract import worst_status
 from execution_contract import case_action_rows
+from layer_contract import TAG_RESULT_LAYERS
 
 VERDICT_TO_LAYER = {
     "event_occurrence": "event_occurrence",
-    "source_signal": "source_signal",
+    "source_signal": "source_signal_when_no_data_layer_push",
     "raw_payload": "raw_api_call",
     "resolved_data_layer": "resolved_data_layer",
     "gtm_variable": "gtm_variable",
     "tag_configuration": "tag_configuration",
     "tag_firing": "tag_firing",
     "tag_parameter": "tag_parameter",
-    "destination_request": "destination_request",
-    "destination_parameter": "destination_parameter",
-    "trigger_logic": "trigger_logic",
-    "tag_sequence": "tag_sequence",
-    "consent": "consent",
-    "business_rule": "business_rule",
-    "sensitive_data": "sensitive_data",
-    "client_checks": "client_checks",
-    "regression": "regression",
+    "destination_request": "destination_request_when_applicable",
+    "destination_parameter": "destination_request_when_applicable",
+    "trigger_logic": "trigger_logic_when_applicable",
+    "tag_sequence": "tag_sequence_when_applicable",
+    "consent": "consent_when_applicable",
+    "business_rule": "business_rules_when_declared",
+    "sensitive_data": "sensitive_data_scan",
+    "client_checks": "client_checks_when_applicable",
+    "regression": "regression_when_baseline_provided",
 }
 
-EXECUTION_TO_FEEDBACK_LAYER = {
-    "raw_api_call": "raw_api_call",
-    "resolved_data_layer": "resolved_data_layer",
-    "gtm_variable": "gtm_variable",
-    "tag_configuration": "tag_configuration",
-    "tag_firing": "tag_firing",
-    "tag_parameter": "tag_parameter",
-    "consent_when_applicable": "consent",
-    "source_signal_when_no_data_layer_push": "source_signal",
-    "destination_request_when_applicable": "destination_request",
-    "trigger_logic_when_applicable": "trigger_logic",
-    "tag_sequence_when_applicable": "tag_sequence",
-    "business_rules_when_declared": "business_rule",
-    "sensitive_data_scan": "sensitive_data",
-    "client_checks_when_applicable": "client_checks",
-    "regression_when_baseline_provided": "regression",
-    "container_context_when_applicable": "container_context",
-    "conditional_scenarios_when_applicable": "conditional_scenarios",
-}
+EXECUTION_TO_FEEDBACK_LAYER = {layer: layer for layer in VERDICT_TO_LAYER.values()}
+EXECUTION_TO_FEEDBACK_LAYER.update(
+    {
+        "action_boundary": "action_boundary",
+        "concerned_tag_inventory": "concerned_tag_inventory",
+        "container_context_when_applicable": "container_context_when_applicable",
+        "conditional_scenarios_when_applicable": "conditional_scenarios_when_applicable",
+    }
+)
 
 
 def status(value: Any) -> str:
@@ -145,9 +136,9 @@ def _collect_final_action_layers(
         layer_name = str(layer_result.get("layer", ""))
         feedback_layer = EXECUTION_TO_FEEDBACK_LAYER.get(layer_name, layer_name)
         layer_result_status = status(layer_result.get("status"))
-        if layer_result_status:
+        if layer_result_status and layer_result_status != "NOT_APPLICABLE":
             layer_statuses[feedback_layer].append(layer_result_status)
-        if layer_result_status != "PASS":
+        if layer_result_status not in {"PASS", "NOT_APPLICABLE"}:
             affected_case_ids.add(case_id)
             reason = str(layer_result.get("reason") or "").strip()
             if reason:
@@ -185,6 +176,108 @@ def _collect_case_feedback(
             evidence_ids,
         )
     return unique_cases, affected_case_ids
+
+
+def _layer_feedback_rows(cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    output: list[dict[str, Any]] = []
+    for case in cases:
+        if case.get("execution_status") == "EXECUTED" and case.get("action_id") != case.get(
+            "final_action_id"
+        ):
+            continue
+        for row in case.get("layer_results") or []:
+            if not isinstance(row, dict):
+                continue
+            output.append(
+                {
+                    "case_id": case.get("case_id"),
+                    "action_id": case.get("action_id"),
+                    "layer": str(row.get("layer", "")),
+                    "status": status(row.get("status")),
+                    "reason": str(row.get("reason") or "").strip(),
+                    "predicate_result": row.get("predicate_result"),
+                    "evidence_ids": sorted(
+                        str(value).strip()
+                        for value in row.get("evidence_ids", [])
+                        if str(value).strip()
+                    ),
+                }
+            )
+    return output
+
+
+def _tag_feedback_rows(
+    session: dict[str, Any] | None,
+    group_id: str,
+) -> list[dict[str, Any]]:
+    if not isinstance(session, dict):
+        return []
+    cases = [
+        row
+        for row in session.get("cases", [])
+        if isinstance(row, dict) and str(row.get("event_group_id", "")) == group_id
+    ]
+    actions = {
+        str(row.get("action_id", "")): row
+        for row in session.get("actions", [])
+        if isinstance(row, dict)
+    }
+    output: list[dict[str, Any]] = []
+    for case in cases:
+        action = actions.get(str(case.get("final_action_id", "")), {})
+        results_by_tag: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for result in action.get("tag_layer_results", []) or []:
+            if isinstance(result, dict):
+                results_by_tag[str(result.get("tag_id", ""))].append(result)
+        for tag in case.get("tag_inventory", []) or []:
+            if not isinstance(tag, dict):
+                continue
+            tag_id = str(tag.get("tag_id", ""))
+            layers = [
+                {
+                    "layer": row.get("layer"),
+                    "status": status(row.get("status")),
+                    "reason": str(row.get("reason") or "").strip(),
+                    "evidence_ids": sorted(
+                        str(value).strip()
+                        for value in row.get("evidence_ids", [])
+                        if str(value).strip()
+                    ),
+                    "details": row.get("details") or {},
+                }
+                for row in sorted(
+                    results_by_tag.get(tag_id, []),
+                    key=lambda result: (
+                        TAG_RESULT_LAYERS.index(str(result.get("layer")))
+                        if str(result.get("layer")) in TAG_RESULT_LAYERS
+                        else len(TAG_RESULT_LAYERS)
+                    ),
+                )
+            ]
+            output.append(
+                {
+                    "case_id": case.get("case_id"),
+                    "action_id": action.get("action_id"),
+                    "tag_id": tag_id,
+                    "tag_name": tag.get("tag_name"),
+                    "tag_category": tag.get("tag_category"),
+                    "tag_delivery": tag.get("tag_delivery"),
+                    "scope_status": tag.get("scope_status"),
+                    "scope_reason": tag.get("scope_reason"),
+                    "evidence_ids": sorted(
+                        str(value).strip()
+                        for value in tag.get("evidence_ids", [])
+                        if str(value).strip()
+                    ),
+                    "status": (
+                        worst_status(row.get("status") for row in results_by_tag.get(tag_id, []))
+                        if tag.get("scope_status") == "IN_SCOPE"
+                        else "NOT_APPLICABLE"
+                    ),
+                    "layers": layers,
+                }
+            )
+    return output
 
 
 def _case_counts(cases: Iterable[dict[str, Any]]) -> dict[str, int]:
@@ -237,6 +330,8 @@ def event_feedback(
             reasons,
             evidence_ids,
         )
+        layer_feedback = _layer_feedback_rows(cases)
+        tag_feedback = _tag_feedback_rows(session, group_id)
         mapped_unexpected = unexpected_by_group.get(group_id, [])
         for unexpected in mapped_unexpected:
             unexpected_status = status(unexpected.get("status"))
@@ -262,6 +357,9 @@ def event_feedback(
                 for evidence_id in unexpected_evidence
                 if str(evidence_id).strip()
             )
+        session_statuses = [
+            row.get("status") for row in layer_feedback if row.get("status") != "NOT_APPLICABLE"
+        ]
         normalized_status = worst_status(
             [
                 requirement.get("verdict", {}).get("overall")
@@ -269,6 +367,7 @@ def event_feedback(
                 if isinstance(requirement.get("verdict"), dict)
             ]
             + [unexpected.get("status") for unexpected in mapped_unexpected]
+            + session_statuses
         )
         retest_cases = [
             case
@@ -278,6 +377,19 @@ def event_feedback(
                 and (not affected_case_ids or case_id in affected_case_ids)
             )
         ]
+        visible_layers: dict[str, list[str]] = defaultdict(list)
+        for row in layer_feedback:
+            visible_layers[str(row.get("layer", ""))].append(str(row.get("status", "")))
+        verified_layers = {
+            layer: (
+                worst_status(value for value in values if value != "NOT_APPLICABLE")
+                if any(value != "NOT_APPLICABLE" for value in values)
+                else "NOT_APPLICABLE"
+            )
+            for layer, values in sorted(visible_layers.items())
+        }
+        for layer, values in layer_statuses.items():
+            verified_layers.setdefault(layer, worst_status(values))
         output.append(
             {
                 "plan_order": inventory.get("plan_order"),
@@ -286,9 +398,9 @@ def event_feedback(
                 "status": normalized_status,
                 "requirement_count": len(requirements),
                 "case_counts": _case_counts(unique_cases.values()),
-                "verified_layers": {
-                    layer: worst_status(values) for layer, values in sorted(layer_statuses.items())
-                },
+                "verified_layers": verified_layers,
+                "layer_feedback": layer_feedback,
+                "tag_feedback": tag_feedback,
                 "reason": " | ".join(dict.fromkeys(reasons)),
                 "retest": " ".join(_retest_instruction(case) for case in retest_cases),
                 "evidence_ids": sorted(evidence_ids),
