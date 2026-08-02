@@ -21,7 +21,10 @@ consent, Tag Assistant, and tracking-plan terminology.
 - Did the exact raw `dataLayer.push` contain the required value, type, and
   structure?
 - Did resolved Data Layer and GTM variables retain the correct state?
-- Did only the concerned tags fire or remain blocked as specified?
+- Was the declared tag scope applied independently of plan-column completeness,
+  with all detected exclusions still visible?
+- Did every in-scope analytics or explicitly included media/client tag expose
+  its configuration, firing/count, runtime values/types, and browser request?
 - Did static configuration map to the correct runtime tag parameter?
 - Did every analytics or media destination receive the correct browser request,
   ID, parameter, value, and type?
@@ -38,6 +41,8 @@ consent, Tag Assistant, and tracking-plan terminology.
 - Which protected or environmental blocker prevented execution?
 - Were ordinary form/authentication gates completed and protected gates handed
   to the analyst instead of skipped?
+- Were ordinary privacy controls and tested-conversion opt-ins completed
+  without being misclassified as consent/authorization blockers?
 - Which requirements are pass, fail, blocked, review, or deliberately outside
   scope?
 

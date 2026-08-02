@@ -13,7 +13,7 @@ from client_side_rules import evaluate_report_business_rules
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("input", type=Path, help="Normalized schema-v2 recette JSON.")
+    parser.add_argument("input", type=Path, help="Normalized schema-v3 recette JSON.")
     parser.add_argument("--output", type=Path, help="Optional JSON result path.")
     return parser.parse_args()
 

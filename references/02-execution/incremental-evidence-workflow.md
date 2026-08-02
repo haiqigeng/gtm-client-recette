@@ -8,14 +8,14 @@
 4. [Apply and validate an event](#apply-and-validate-an-event)
 5. [Resume and finish](#resume-and-finish)
 
-Use one recette workflow. `acceptance_scope`, source-bound requirements and
-their applicability determine which evidence links are required; do not create
-run modes.
+Use one recette workflow. `acceptance_scope` defines accepted semantics; the
+deterministic layer policy defines the evidence links. A tracking plan never
+selects or removes evidence layers. Do not create run modes.
 
 ## Initialize once
 
 Inspect the plan, interpret source-bound requirements, then initialize the
-plan-ordered schema-v2 working file:
+plan-ordered schema-v3 working file:
 
 ```powershell
 python -B scripts/inspect_tracking_plan.py tracking-plan.xlsx plan-inspection.json
@@ -29,11 +29,15 @@ python -B scripts/init_coverage_ledger.py interpreted-requirements.json working-
   --container-id GTM-XXXX `
   --workspace Recette `
   --tracking-plan-source tracking-plan.xlsx `
-  --acceptance-scope "All requirements in the supplied tracking plan"
+  --acceptance-scope "All requirements in the supplied tracking plan" `
+  --tag-scope analytics_only
 ```
 
-The initializer infers applicable evidence layers from each expectation. It
-does not create a different workflow for a smaller acceptance boundary.
+The initializer applies the mandatory core chain to every planned dataLayer
+event, independently of plan tag columns. It does not create a different
+workflow for a smaller acceptance boundary. Use
+`--tag-scope all_relevant_client_side_tags` only when explicitly requested, or
+`--tag-scope explicit_tag_set --explicit-tag "Exact tag name"` for a fixed set.
 
 ## Open and checkpoint the browser session
 
@@ -62,9 +66,35 @@ python -B scripts/preview_session_ledger.py register-case session.json `
   --discovered-from tracking_plan
 ```
 
-The command derives the case's requirement IDs, client container ownership,
-and applicable layers from the normalized event. Register separate cases for
-each placement, responsive instance, branch, and finite material value.
+The command derives the case's requirement IDs and client container ownership.
+Register separate cases for each placement, responsive instance, branch, and
+finite material value. Then inventory all detected tags and freeze the
+mandatory/conditional applicability card before `begin-action`:
+
+```powershell
+python -B scripts/preview_session_ledger.py register-tag session.json `
+  --case-id CASE-ADD-HEADER-Q1 `
+  --tag-id TAG-GA4-ADD `
+  --tag-name "GA4 - add_to_cart" `
+  --container-id GTM-XXXX `
+  --tag-category analytics `
+  --tag-delivery browser_request `
+  --vendor-family ga4 `
+  --destination-id G-XXXX `
+  --template-type "GA4 Event" `
+  --consent-required true `
+  --evidence-id EVD-TAG-INVENTORY-001
+
+python -B scripts/preview_session_ledger.py complete-tag-inventory session.json `
+  --case-id CASE-ADD-HEADER-Q1 `
+  --reason "Tag Assistant and container inventory completed" `
+  --evidence-id EVD-TAG-INVENTORY-001
+```
+
+Repeat `register-tag` for detected excluded tags too. Their scope status and
+reason are computed from the run contract. An empty inventory still requires
+direct inventory evidence and becomes an explicit failure chain for a planned
+dataLayer event.
 
 Before each interaction, open one action. Record and classify every business
 push visible after the previous cursor. Settle only after the relevant stream
@@ -91,6 +121,10 @@ python -B scripts/preview_session_ledger.py record-push session.json `
   --page-state "Basket count is 1" `
   --evidence-id EVD-RAW-011 `
   --container-id GTM-XXXX
+
+python -B scripts/preview_session_ledger.py import-tag-results `
+  session.json action-001-tag-results.json `
+  --action-id ACT-001
 
 python -B scripts/preview_session_ledger.py settle-action session.json `
   --action-id ACT-001 `
@@ -119,10 +153,13 @@ python -B scripts/preview_session_ledger.py record-layer session.json `
   --evidence-id EVD-NET-011
 ```
 
-Repeat `record-layer` for every applicable layer declared on the case. Evidence
-IDs must refer to direct structured capture tied to the same action and, when
-applicable, event index and container. A screenshot is optional and cannot
-replace these records.
+The imported file contains exactly one row for every in-scope tag and every
+tag-related layer. Repeat `record-layer` for every canonical layer on the
+frozen card. A mandatory row uses a normal verdict. A conditional row requires
+`--predicate-result true|false`; false requires `NOT_APPLICABLE`. Evidence IDs
+must refer to direct structured capture tied to the same action and, when
+applicable, event index, tag, request, and container. A screenshot is optional
+and cannot replace these records.
 
 `connection_epoch` is `1` for the initial Preview connection and increments
 when a settled disconnect/reconnect causes event indexes to restart. The
@@ -148,8 +185,10 @@ For one bounded retry, begin a new action with
 `--retry-of-action-id <retained-action-id>`. Never reuse an action ID or merge
 the failed and repeated windows.
 
-If the analyst authorizes a class of safe gated actions for the run, record it
-once. Do not record any credential:
+Full-recette initialization already authorizes ordinary fields, privacy
+acknowledgements, tested-conversion opt-ins, safe synthetic data, and ordinary
+form submission. Do not ask again. Record only additional safe scope once, and
+never record any credential:
 
 ```powershell
 python -B scripts/preview_session_ledger.py authorize session.json `
@@ -172,17 +211,18 @@ tracking-plan requirement
 -> occurrence and chronology
 -> raw dataLayer/API Call or accepted source signal
 -> resolved Data Layer
--> GTM variable
--> tag configuration
--> firing/non-firing and count
--> runtime tag parameter
--> browser destination request
+-> detected tag inventory and scope
+-> each in-scope tag's GTM variables
+-> each tag configuration
+-> each firing/non-firing result and count
+-> each runtime tag parameter
+-> each browser-sending tag's destination request
 -> verdict
 ```
 
-Every applicable component keeps its own status. A correct earlier link cannot
-repair a later mismatch, and a later browser request cannot repair an earlier
-payload/configuration failure.
+Every canonical layer and in-scope tag/layer pair keeps its own status. A
+correct earlier link cannot repair a later mismatch, and a later browser
+request cannot repair an earlier payload/configuration failure.
 
 Create an event patch:
 
@@ -245,9 +285,10 @@ return:
 ```text
 Event 07 — add_to_cart: FAIL
 - Cases: 4/4 executed
-- Tag firing: PASS, once per action
-- Runtime price: FAIL; expected number 29.90, observed string "29.90"
-- Browser request: PASS; one request with decoded numeric value 29.9
+- raw_api_call: PASS; exact payload matched
+- GA4 - add_to_cart / Tag firing: PASS, once per action
+- GA4 - add_to_cart / Runtime price: FAIL; expected number 29.90, observed string "29.90"
+- GA4 - add_to_cart / Browser request: PASS; one request with decoded numeric value 29.9
 - Retest: product page, header "Add to cart", quantity=1
 ```
 
@@ -279,6 +320,6 @@ python -B scripts/build_recette_report.py `
 ```
 
 Do not complete a run with a `PENDING` case, open action, unclassified or
-unaccounted business push, missing applicable layer, mismatched normalized
+unaccounted business push, missing canonical or per-tag layer, mismatched normalized
 action boundary, failed incremental validation, sensitive raw evidence, or a
 workbook that fails reload checks.

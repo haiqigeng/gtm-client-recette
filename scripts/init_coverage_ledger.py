@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create a plan-ordered schema-v2 coverage ledger from interpreted requirements."""
+"""Create a plan-ordered schema-v3 coverage ledger from interpreted requirements."""
 
 from __future__ import annotations
 
@@ -10,7 +10,12 @@ from pathlib import Path
 from typing import Any
 
 from acceptance_contract import expects_absence
-from layer_contract import CANONICAL_LAYERS, applicable_layers
+from layer_contract import (
+    CANONICAL_LAYERS,
+    TAG_SCOPE_MODES,
+    applicable_layers,
+    normalize_tag_scope,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -46,13 +51,26 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tracking-plan-source", required=True)
     parser.add_argument("--acceptance-scope", required=True)
     parser.add_argument(
-        "--included-layer",
+        "--tag-scope",
+        choices=tuple(sorted(TAG_SCOPE_MODES)),
+        default="analytics_only",
+        help=(
+            "Concerned-tag scope. Analytics-only is the operational default; exact "
+            "plan-declared media tags remain included."
+        ),
+    )
+    parser.add_argument(
+        "--explicit-tag",
         action="append",
         default=[],
-        choices=tuple(CANONICAL_LAYERS),
+        help="Exact concerned tag name; required only with --tag-scope explicit_tag_set.",
+    )
+    parser.add_argument(
+        "--do-not-complete-ordinary-journeys",
+        action="store_true",
         help=(
-            "Additional accepted evidence layer. Applicable layers are inferred "
-            "from the requirements; this option may be repeated."
+            "Opt out of the default authority to complete ordinary journeys with safe "
+            "synthetic data. Protected boundaries always remain excluded."
         ),
     )
     parser.add_argument("--client", default="")
@@ -107,7 +125,8 @@ def initialize_requirement(row: dict[str, Any]) -> dict[str, Any]:
     )
     expectation.setdefault("source_mechanism", "data_layer_push")
     requirement["expectation"] = expectation
-    has_destination = "destination_request_when_applicable" in applicable_layers([requirement])
+    mandatory_layers = set(applicable_layers([requirement]))
+    has_destination = "destination_request_when_applicable" in mandatory_layers
     requirement.update(
         {
             "browser_context_id": requirement.get("browser_context_id", "desktop-default"),
@@ -165,12 +184,12 @@ def initialize_requirement(row: dict[str, Any]) -> dict[str, Any]:
                 ),
                 "raw_payload": "PENDING",
                 "resolved_data_layer": "PENDING",
-                "gtm_variable": "PENDING" if expectation.get("variable_name") else None,
-                "tag_configuration": ("PENDING" if expectation.get("tag_name") else None),
-                "tag_firing": "PENDING" if expectation.get("tag_name") else None,
-                "tag_parameter": (
-                    "PENDING" if expectation.get("tag_configuration_field") else None
+                "gtm_variable": ("PENDING" if "gtm_variable" in mandatory_layers else None),
+                "tag_configuration": (
+                    "PENDING" if "tag_configuration" in mandatory_layers else None
                 ),
+                "tag_firing": "PENDING" if "tag_firing" in mandatory_layers else None,
+                "tag_parameter": "PENDING" if "tag_parameter" in mandatory_layers else None,
                 "destination_request": "PENDING" if has_destination else None,
                 "destination_parameter": (
                     "PENDING" if expectation.get("destination_parameter_path") else None
@@ -190,7 +209,9 @@ def initialize_requirement(row: dict[str, Any]) -> dict[str, Any]:
                     if expectation.get("business_rules") and not expects_absence(expectation)
                     else None
                 ),
-                "sensitive_data": ("PENDING" if expectation.get("sensitive_data_policy") else None),
+                "sensitive_data": (
+                    "PENDING" if "sensitive_data_scan" in mandatory_layers else None
+                ),
                 "client_checks": None,
                 "regression": None,
                 "overall": "PENDING",
@@ -222,6 +243,10 @@ def event_inventory(requirements: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def main() -> int:
     args = parse_args()
+    if args.tag_scope == "explicit_tag_set" and not args.explicit_tag:
+        raise ValueError("--tag-scope explicit_tag_set requires at least one --explicit-tag.")
+    if args.tag_scope != "explicit_tag_set" and args.explicit_tag:
+        raise ValueError("--explicit-tag is valid only with --tag-scope explicit_tag_set.")
     requirements = [
         initialize_requirement(row)
         for row in sorted(
@@ -257,12 +282,9 @@ def main() -> int:
         requirements,
         container_count=len(containers),
     )
-    for layer in args.included_layer:
-        if layer not in included_layers:
-            included_layers.append(layer)
     included_layers.sort(key=CANONICAL_LAYERS.index)
     result = {
-        "schema_version": 2,
+        "schema_version": 3,
         "run": {
             "run_id": args.run_id,
             "report_title": args.title,
@@ -287,6 +309,34 @@ def main() -> int:
             ],
             "tracking_plan_source": args.tracking_plan_source,
             "acceptance_scope": args.acceptance_scope,
+            "tag_scope": normalize_tag_scope(
+                {
+                    "mode": args.tag_scope,
+                    "explicit_tag_names": list(dict.fromkeys(args.explicit_tag)),
+                }
+            ),
+            "journey_authority": {
+                "complete_ordinary_journeys": not args.do_not_complete_ordinary_journeys,
+                "safe_synthetic_data": True,
+                "ordinary_form_inputs": not args.do_not_complete_ordinary_journeys,
+                "ordinary_privacy_acknowledgements": not args.do_not_complete_ordinary_journeys,
+                "ordinary_opt_ins_when_part_of_tested_conversion": (
+                    not args.do_not_complete_ordinary_journeys
+                ),
+                "ordinary_form_submissions": not args.do_not_complete_ordinary_journeys,
+                "protected_boundaries": [
+                    "CREDENTIALS",
+                    "GOOGLE_SIGN_IN",
+                    "MFA",
+                    "CAPTCHA",
+                    "EMAIL_VERIFICATION",
+                    "SMS_VERIFICATION",
+                    "MAGIC_LINK",
+                    "REAL_PAYMENT",
+                    "EXTERNAL_APPROVAL",
+                    "IRREVERSIBLE_ACTION",
+                ],
+            },
             "executed_at": datetime.now(UTC).isoformat(timespec="seconds"),
             "included_layers": included_layers,
             "requirement_inventory": [row["requirement_id"] for row in requirements],

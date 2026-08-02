@@ -4,7 +4,9 @@
 
 ```text
 Plan / acceptance source:
-Acceptance scope / applicable evidence layers:
+Acceptance scope:
+Tag scope / exact explicit tags:
+Ordinary-journey authority / protected exclusions:
 Target environment and URL:
 GTM account / client-side containers / workspaces:
 Container ownership by concerned tag:
@@ -25,7 +27,9 @@ Known limitations:
 ```text
 Event group / case ID:
 Element / placement / material variant:
-Discovery source / scope / applicable layers:
+Discovery source / scope:
+Detected tag inventory / in-scope and excluded tags:
+Frozen applicability card / mandatory and conditional predicates:
 Action ID:
 Retry of action ID:
 Attempt number:
@@ -46,7 +50,8 @@ Quiet window / timeout:
 Relevant stream settled:
 Settlement reason:
 Observed business-push count:
-Per-layer results / evidence IDs:
+Every canonical layer result / predicate / evidence IDs:
+Every in-scope tag/layer result / value/type / evidence IDs:
 Action-boundary evidence ID:
 ```
 
@@ -67,9 +72,9 @@ Occurrence verdict / evidence IDs:
 ```text
 Event <plan order> — <event name>: <status>
 - Cases executed / applicable / limited:
-- Raw push / resolved state / GTM variable:
-- Tag configuration / firing count / runtime parameters:
-- Browser request / destination identity / decoded parameters:
+- One row per canonical layer: status / reason / evidence:
+- One subrow per in-scope tag and tag layer: status / value/type / evidence:
+- Detected out-of-scope tags / reason:
 - <affected placement/value and expected versus observed result>
 - <destination/trigger/consent/business/privacy/client/regression result when applicable>
 - Exact retest URL / placement / element / interaction / variant for non-PASS:
@@ -112,6 +117,7 @@ Deterministic results / evidence:
 
 ```text
 Run-wide safe authorization ID / scope, if applicable:
+Default ordinary-journey authority used:
 Checkpoint:
 Journey reached:
 Safe preceding steps completed:

@@ -582,7 +582,6 @@ class ContractEdgeTests(unittest.TestCase):
 
     def test_conditional_absence_can_pass_schema_and_session_contracts(self) -> None:
         data = fixture()
-        session = execution_fixture(data)
         req = requirement(data)
         req["expectation"]["expected_occurrence"] = {
             "rule": "conditional",
@@ -661,32 +660,10 @@ class ContractEdgeTests(unittest.TestCase):
 
         layers = applicable_layers(data["requirements"], container_count=1)
         data["run"]["included_layers"] = layers
-        session["cases"][0]["applicable_layers"] = layers
+        session = execution_fixture(data)
         session["business_pushes"] = []
         session["actions"][0]["observed_business_push_count"] = 0
         session["actions"][0]["expected_seen"] = False
-        evidence_for_layer = {
-            "raw_api_call": ["EVD-ACTION-001"],
-            "resolved_data_layer": ["EVD-DL-011"],
-            "gtm_variable": ["EVD-VAR-011"],
-            "tag_configuration": ["EVD-TAG-CONFIG-011"],
-            "tag_firing": ["EVD-TAG-RUNTIME-011"],
-            "tag_parameter": ["EVD-TAG-RUNTIME-011"],
-            "destination_request_when_applicable": ["EVD-NET-011"],
-            "conditional_scenarios_when_applicable": ["EVD-SCENARIO-OUT"],
-        }
-        session["actions"][0]["layer_results"] = [
-            {
-                "layer": layer,
-                "status": "PASS",
-                "reason": "Confirmed expected conditional absence.",
-                "evidence_ids": evidence_for_layer[layer],
-                "semantic_ambiguity": None,
-                "blocker_id": None,
-                "recorded_at": "2026-07-25T10:01:04+00:00",
-            }
-            for layer in layers
-        ]
         self.assertEqual([], evaluate_report_business_rules(data))
         self.assertEqual([], validate(data, strict=True))
         self.assertEqual([], validate_session(session, results=data, final=True))

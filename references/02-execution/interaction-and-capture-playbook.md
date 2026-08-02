@@ -117,6 +117,12 @@ completed, classify the case `BLOCKED`; do not call the expected event missing
 from implementation. If the interaction completed and the relevant stream
 settled without the event, the occurrence can be `FAIL`.
 
+For an ordinary checkbox, privacy acknowledgement, opt-in, or form control,
+use the specific recovery order before blocking: scroll into view, associated
+label click, direct-control click, pointer click, keyboard toggle, then one
+clean-state retry. Record `UI_CONTROL_BLOCKER` only after all six attempts; it
+is not a consent or authorization boundary.
+
 ## Use the supplemental dataLayer journal
 
 Install `scripts/datalayer_recorder.js` with a browser-context init script
@@ -218,6 +224,12 @@ python -B scripts/decode_browser_requests.py requests.json decoded-requests.json
 The decoder preserves repeated query keys, parses JSON and form bodies, marks
 newline-delimited batches, retains body length/hash, and excludes
 secret-bearing headers. Use `--retain-raw-body` only in quarantined evidence.
+
+For every in-scope browser-sending tag, decide the request layer explicitly.
+After the source/tag executed, if capture is active and no same-action matching
+request appears, use `FAIL`. Use `BLOCKED` only when capture itself is
+unavailable or the upstream planned source already failed. Use local-only
+`NOT_APPLICABLE` only with positive tag-configuration proof.
 Run the sensitive-data scanner before normalization.
 
 Compare request count, endpoint, destination ID, vendor event name, and every

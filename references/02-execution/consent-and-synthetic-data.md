@@ -3,11 +3,12 @@
 ## Natural consent first
 
 Capture the natural/default event-level consent state before interacting with
-the CMP.
+the CMP for every case, even when consent is not an acceptance requirement.
 
 - For a normal functional journey with no consent acceptance requirement, use
-  the site's ordinary choice needed to run the journey and mark consent checks
-  `NOT_TESTED`.
+  the site's ordinary choice needed to run the journey. Retain the baseline and
+  mark the conditional consent layer `NOT_APPLICABLE` only after its predicate
+  is recorded false.
 - For required refused, partial, accepted, or preference-change scenarios,
   apply the specified choice and verify the resulting event-level state before
   executing the action.
@@ -91,6 +92,10 @@ For an in-scope journey:
 - leave optional marketing, profiling, partner-sharing, newsletter, and
   communication choices unchecked unless that opt-in is the tested conversion.
 
+Required privacy acknowledgements and an opt-in that is itself part of the
+tested conversion are ordinary journey controls, not new authorization or
+consent checkpoints.
+
 Use `scripts/generate_synthetic_profile.py` as a safe starting point. Adapt only
 to the form's validated format and prefer a client-provided test range when a
 phone number is required.
@@ -117,12 +122,24 @@ evidence, or the workbook. If an existing or protected account is required,
 prepare the exact login state and ask the analyst to sign in inside the
 dedicated browser.
 
-One explicit run-wide authorization applies to all equivalent safe actions in
-its declared scope. It does not need to be requested again per event. Supported
-scopes distinguish safe synthetic identity, ordinary form submission,
-non-production leads, explicitly approved reversible production submissions,
-and CMP overrides. Every scope excludes MFA, CAPTCHA, verification, real
+Starting a full recette establishes run-wide authority for all equivalent safe
+ordinary actions in its declared origin and environment: synthetic identity,
+form fields, privacy acknowledgements, tested-conversion opt-ins, and ordinary
+submission. It does not need to be requested again per event. Additional scopes
+may cover non-production leads or explicitly approved reversible production
+submissions. CMP overrides always retain their own separate approval. Every
+scope excludes credentials/protected sign-in, MFA, CAPTCHA, verification, real
 payment, external approval, and irreversible action.
+
+## Ordinary UI-control recovery
+
+Do not treat an inoperable checkbox, privacy control, or submit control as a
+consent or authorization blocker. Preserve its failed action window, then try
+all safe control paths: scroll into view, click the associated label, click the
+control directly, use a pointer click, use the keyboard toggle, and retry once
+from clean state. If none works, use `UI_CONTROL_BLOCKER` with every attempted
+method and evidence. Tracking observed during failed attempts remains eligible
+as premature or wrong-context evidence.
 
 ## Protected journey handoff
 

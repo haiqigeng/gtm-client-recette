@@ -46,8 +46,9 @@ only when that context is applicable.
 Use `scripts/dom_interaction_census.js` and
 [interaction-and-capture-playbook.md](interaction-and-capture-playbook.md)
 when a repeated or specialized surface needs deterministic discovery. The
-census proposes cases; the tracking plan determines applicability and every
-accepted case still requires a real isolated browser interaction.
+census proposes cases; the tracking plan supports event semantics and journey
+relevance, while the deterministic runtime policy determines evidence layers.
+Every accepted case still requires a real isolated browser interaction.
 
 Test every safe, finite, practical instance. Express a repeated family as one
 parameterized case with an instance list, not as many hand-written scenarios,
@@ -57,7 +58,8 @@ A distinct failure, payload shape, placement, or trigger condition remains
 separate.
 
 Register every instance with a stable `case_id`, event group, element,
-placement, material variant, URL, discovery source, and applicable layer list.
+placement, material variant, URL, and discovery source. Inventory detected tags
+and freeze its full mandatory/conditional applicability card before execution.
 Each attempt then references that case. A retry receives a new action ID and
 retains the failed prior attempt.
 
@@ -94,6 +96,13 @@ verdict or before production submission, unresolved consequential effects,
 account mutation, real payment, or an irreversible effect. In a confirmed
 non-production environment, complete ordinary synthetic lead, registration,
 and conversion submissions by default.
+
+Full-recette authority includes ordinary form inputs, privacy acknowledgements,
+opt-ins that are part of the tested conversion, and ordinary submission with
+safe synthetic data. Do not repeatedly ask for these. An inoperable ordinary
+control becomes `UI_CONTROL_BLOCKER` only after scroll, label, direct-control,
+pointer, keyboard, and clean-state recovery attempts; it is not a consent or
+authorization boundary.
 
 ## Do not manufacture negative journeys
 

@@ -72,7 +72,8 @@ python -B scripts/decode_browser_requests.py requests.json decoded-requests.json
 
 Inspect and validate the resumable session ledger, including case census,
 interaction outcome, completion signal, retry lineage, classified push count,
-applicable layers, and settlement reason:
+tag scope/inventory, immutable applicability card, canonical/per-tag layers,
+and settlement reason:
 
 ```powershell
 python -B scripts/preview_session_ledger.py status session.json
@@ -85,6 +86,8 @@ Bulk-import a captured action window, or prepare a safe non-PASS retest:
 
 ```powershell
 python -B scripts/preview_session_ledger.py import-pushes session.json pushes.json
+python -B scripts/preview_session_ledger.py import-tag-results `
+  session.json tag-results.json --action-id ACT-001
 python -B scripts/build_retest_manifest.py results.json session.json retest.json
 python -B scripts/preview_session_ledger.py import-cases new-session.json retest.json `
   --results new-results.json

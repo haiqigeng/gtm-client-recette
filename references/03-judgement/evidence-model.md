@@ -2,10 +2,13 @@
 
 ## Authoritative evidence
 
-For every applicable requirement use:
+For every planned dataLayer event use the complete chain; the plan does not
+select or remove these evidence surfaces:
 
+- independent website action boundary;
 - Tag Assistant event `API Call`: exact object passed to `dataLayer.push`;
 - Tag Assistant `Data Layer`: resolved state at that event;
+- complete concerned-tag inventory with scope decisions;
 - Tag Assistant `Variables`: resolved GTM-variable values;
 - `Tags Fired` and `Tags Not Fired`;
 - tag detail: configuration, runtime parameters, fire count, and direct error;
@@ -14,6 +17,14 @@ For every applicable requirement use:
 - first-party browser-network capture for accepted analytics/media destination,
   ID, request count, endpoint, and outbound parameters;
 - direct browser-console evidence for Custom JavaScript/HTML errors.
+
+Apply the tag-related rows to every in-scope tag. Keep detected out-of-scope
+tags visible with their inventory evidence and scope reason.
+
+Every tag-specific direct evidence row carries the exact frozen `tag_id` in
+addition to its name/container fields. Never reuse one tag's variable,
+configuration, runtime, request, trigger, sequence, or Tag Assistant consent
+evidence for another tag.
 
 ## Supplemental evidence
 
@@ -32,6 +43,12 @@ GTM state, variables, tag configuration, firing, or runtime parameters.
 Network capture is authoritative only for what the browser attempted to send.
 It does not prove vendor receipt, processing, attribution, reporting, or
 server-side forwarding.
+
+After the source/tag executed, an available network capture with no matching
+request is direct negative evidence and therefore `FAIL` for an expected
+browser send. `BLOCKED` requires evidence that capture was unavailable or that
+the upstream planned source already failed. A `local_only` request layer is
+`NOT_APPLICABLE` only with positive tag-configuration evidence.
 
 When the journal shows a push that Tag Assistant does not, follow the
 recorder/Preview discrepancy protocol in the Tag Assistant operations
@@ -101,7 +118,12 @@ decision. A direct row also carries the applicable structured linkage:
 - `event_index` for event-bound capture;
 - `container_id` for GTM evidence;
 - `request_id` for browser-network evidence;
+- `tag_id` for every tag-specific direct capture;
 - `tag_name` and `configuration_field` for tag configuration/runtime evidence.
+
+Privacy-scan the normalized requirement and every exportable session surface,
+including per-tag comparisons/details, case/action context, and business-push
+context. Any unredacted sensitive value blocks validation and export.
 
 The values being accepted remain in the normalized requirement and direct
 artifact; do not reconstruct them from a tag name, evidence description, or
@@ -116,8 +138,8 @@ Use the canonical `source` value accepted for each primary kind:
 | `action_boundary`, `browser_interception`, `navigation` | `Playwright` |
 | `api_call`, `resolved_data_layer`, `gtm_variable`, `tag_runtime`, `trigger_evaluation`, `tag_sequence`, `tag_assistant_consent` | `Tag Assistant` |
 | `consent_state` | `Tag Assistant` or `Playwright` |
-| `tag_configuration` | `Tag Assistant` or `GTM read-only` |
-| `browser_network_request` | `Browser Network` |
+| `tag_configuration`, `tag_inventory` | `Tag Assistant` or `GTM read-only` |
+| `browser_network_request`, `browser_network_capture` | `Browser Network` |
 | `browser_console`, `console_error` | `Browser Console` |
 | `vendor_helper` | `Vendor Helper` |
 | `business_rule_evaluation`, `sensitive_data_scan`, `previous_run_comparison` | `Deterministic Validator` |

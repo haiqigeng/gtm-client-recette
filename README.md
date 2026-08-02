@@ -6,24 +6,29 @@
 
 ## Current release
 
-[v1.3.0](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v1.3.0) is
+[v2.0.0](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v2.0.0) is
 the current supported release. Download the validated package:
-[gtm-preview-recette-v1.3.0.zip](https://github.com/haiqigeng/gtm-preview-recette/releases/download/v1.3.0/gtm-preview-recette-v1.3.0.zip).
+[gtm-preview-recette-v2.0.0.zip](https://github.com/haiqigeng/gtm-preview-recette/releases/download/v2.0.0/gtm-preview-recette-v2.0.0.zip).
 
-v1.3.0 is the operator-utility and verdict-safety release. It fixes occurrence
-identity so one captured push is not counted once per tested field, preserves
-conclusive duplicate failures across mixed evidence surfaces, treats ambiguous
-short media keys contextually, and blocks conclusive verdicts when the exact
-compared value is truncated or unreadable. Preview reconnects now use explicit
-session/action epochs, while bulk push imports are transactional.
+v2.0.0 introduces schema v3 with exact per-tag evidence identity, accepted
+expectation anchors, browser-request reconciliation, full session privacy
+scanning, controlled late tag discovery, deterministic tag-result scaffolding,
+safe Excel continuation rows, and hash-verifiable release provenance. It also
+retains the direct, hash-verified intake for reviewed or approved
+`ga4-tracking-plan` deliveries. It consumes canonical `plan.json` and
+`expected-events.json`, preserves exact event order, journey and measurement-
+opportunity identity, dataLayer paths, types, requiredness, conditions, and
+finite expectations, and creates the interpreted requirements used by the
+existing coverage-ledger initializer. The XLSX remains the human review
+surface and is no longer reinterpreted when the machine contract is present.
 
-Long browser sessions can durably acknowledge and prune persisted recorder
-rows without resetting chronology. Focused retests can reuse discovery and
-journey instructions, but never inherit verdicts, evidence, authorization,
-consent, or prior PASS status. Optional Audit facts and Configuration change
-manifests are registered by digest as supporting-only context. The validated
-workbook adds an actionable Defect Register and can emit concise defect and
-stakeholder sidecars from the same source evidence.
+It also makes layer selection deterministic. Every planned dataLayer event now
+requires the complete raw/resolved/tag/runtime/browser-send chain regardless
+of tracking-plan tag columns. Each case freezes a mandatory/conditional
+applicability card, inventories detected tags under an explicit scope, records
+one verdict per layer and per in-scope tag, and keeps excluded detected tags
+visible. Full-recette authority covers ordinary safe form journeys without
+repeated prompts, while CMP overrides and protected boundaries remain separate.
 
 An expert-only workflow for testing an existing client-side Google Tag Manager
 implementation against a tracking plan. It coordinates Playwright, GTM Preview,
@@ -57,22 +62,26 @@ The workflow is organized into three layers:
 
 Strict validation reconciles destination IDs, vendor event names, and tested
 parameters with their raw browser-request paths. It also rejects omitted
-applicable verdicts, inconsistent trigger/consent/client-check claims,
+canonical or per-tag verdicts, missing tag scope/inventory, inconsistent
+trigger/consent/client-check claims,
 incomplete privacy scans, provenance-free evidence, and unreconciled
 baseline comparisons. Final certification additionally cross-checks the
 normalized result against the session's interaction cases, attempts, layer
 results, classified push counts, and direct evidence linkage. Literal vendor
 keys such as `ep.value` are supported through quoted request paths.
 
-There is one operational recette workflow, not separate dataLayer-only,
-analytics-only, or media-only run types. Each confirmed tracking-plan
-requirement determines its applicable evidence layers. The central comparison
-remains:
+There is one operational recette workflow, not a separate dataLayer-only mode.
+The tracking plan supplies expected values and optional journey hints; it never
+selects evidence layers. Tag scope is a separate declared policy:
+`analytics_only` by default, exact plan-declared media destinations when
+present, all relevant client-side tags only on explicit request, or a fixed tag
+set. The central comparison remains:
 
 ```text
-tracking plan -> raw push/API Call -> resolved Data Layer -> GTM variable
--> concerned tag configuration -> firing/non-firing -> runtime tag value
--> decoded browser send -> verdict
+tracking plan -> raw push/API Call -> resolved Data Layer
+-> concerned-tag inventory and scope -> each in-scope tag's GTM variables
+-> configuration -> firing/non-firing/count -> runtime tag values/types
+-> decoded browser send -> per-layer/per-tag verdict -> event verdict
 ```
 
 Every link keeps its own status. A correct dataLayer payload therefore cannot
@@ -97,14 +106,16 @@ invent arbitrary negative journeys; it detects duplicate, premature, delayed,
 wrong-order, and wrong-context events while reconciling the planned positive
 journey, then reproduces an anomaly only when useful.
 
-An encountered ordinary form, sign-up, login, lead, or account gate remains
-part of the journey. Confirmed non-production lead, registration, and
-conversion submissions use synthetic data by default. Synthetic credentials
-may be used ephemerally in the same controlled run and reused for login, but
-are never stored or shown in chat. Run-wide authorization avoids repeated
-prompts for equivalent safe actions. Protected credentials, MFA, CAPTCHA,
-verification links/codes, real payment, and irreversible actions stay under
-analyst control.
+An encountered ordinary form, sign-up, login preparation, lead, or account
+gate remains part of the journey. Ordinary fields, privacy acknowledgements,
+tested-conversion opt-ins, and submissions use safe synthetic data without
+repeated prompts. An inoperable checkbox is a `UI_CONTROL_BLOCKER` only after
+all safe control/retry methods, not a consent or authorization boundary.
+Synthetic credentials may be used ephemerally in the same controlled run and
+reused for login, but are never stored or shown in chat. Protected credentials
+or sign-in, MFA, CAPTCHA, verification links/codes, real payment, external
+approval, and irreversible actions stay under analyst control. CMP simulation
+keeps its separate one-time approval.
 
 ## Inputs And Outputs
 
@@ -114,9 +125,9 @@ an internal test matrix without forcing a new template. XLSX hyperlinks,
 comments, merged/hidden structure, and embedded images are retained during
 inspection so supplied journey guidance is not lost.
 
-The required output is a concise XLSX validation matrix backed by 20 validated
-worksheets, including the Defect Register, interaction cases, and the observed
-business-push stream.
+The required output is a concise XLSX validation matrix backed by 21 validated
+worksheets, including the Defect Register, interaction cases, Layer Verdicts,
+and the observed business-push stream.
 Each row shows the tracking-plan value, raw/resolved client signal, GTM/tag
 configuration, runtime and outbound values, component verdicts, exact
 mismatch, and evidence.
@@ -159,6 +170,17 @@ python -B scripts/incremental_recette.py validate-event normalized-results.json 
   --event-group-id EVG-001 `
   --session-ledger session.json
 python -B scripts/preview_session_ledger.py import-pushes session.json pushes.json
+python -B scripts/preview_session_ledger.py scaffold-tag-results session.json `
+  --action-id ACT-001 --output tag-results.json
+```
+
+Migrate legacy v2 discovery without inheriting proof, and verify a packaged
+release or local installation against its SHA-256 manifest:
+
+```powershell
+python -B scripts/migrate_schema_v2_to_v3.py old-results.json normalized-results.json `
+  --legacy-session old-session.json --case-manifest retest-cases.json
+python -B scripts/verify_release_artifact.py dist/gtm-preview-recette-v2.0.0.zip
 ```
 
 Evaluate declared client-side rules, scan for redacted sensitive-data findings,

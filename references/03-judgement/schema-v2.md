@@ -1,4 +1,9 @@
-# Normalized Results Schema V2
+# Legacy normalized results schema v2
+
+This document is retained only to interpret older artifacts. Do not create a
+new v2 run. Migrate discovery context with `migrate_schema_v2_to_v3.py`, then
+recapture every action, verdict, and evidence link under
+[schema v3](schema-v3.md).
 
 ## Contents
 
@@ -42,6 +47,10 @@ and evidence. Do not mechanically promote incomplete v1 rows to schema-v2
   `acceptance_scope`;
 - `executed_at`;
 - `included_layers`;
+- `tag_scope`: `analytics_only`, `all_relevant_client_side_tags`, or
+  `explicit_tag_set`, with exact fixed names when used;
+- `journey_authority`: explicit default authority for ordinary safe journeys
+  and the immutable protected-boundary list;
 - `requirement_inventory`: every requirement ID in original source order;
 - `event_inventory`: every event group in original plan order.
 
@@ -74,14 +83,18 @@ Use this event inventory shape:
 }
 ```
 
-Use one recette workflow. `acceptance_scope`, source-bound expectations, and
-per-requirement applicability determine the required evidence links. Do not
-add a run-mode field.
+Use one recette workflow. `acceptance_scope` defines what is being accepted;
+the deterministic layer contract defines the evidence links. The plan provides
+expected values and optional journey hints but never removes runtime layers.
+Do not add a run-mode field.
 
-Enumerate every applicable base and extension layer in `included_layers`:
+Enumerate every mandatory base and activated extension layer in
+`included_layers`:
 
+- `action_boundary`;
 - `raw_api_call`;
 - `resolved_data_layer`;
+- `concerned_tag_inventory`;
 - `gtm_variable`;
 - `tag_configuration`;
 - `tag_firing`;
@@ -98,10 +111,12 @@ Enumerate every applicable base and extension layer in `included_layers`:
 - `container_context_when_applicable`;
 - `conditional_scenarios_when_applicable`.
 
-The validator derives required layers from in-scope expectations and rejects
-an omitted applicable layer. Extra names outside the supported set are also
-invalid. An unavailable layer remains explicit in the requirement status and
-cannot be silently substituted.
+For a planned dataLayer event, the validator always requires the complete core
+chain regardless of plan-column completeness. The session ledger stores every
+canonical layer on an immutable applicability card. A `MANDATORY` row needs a
+normal verdict; a `CONDITIONAL` row needs its boolean predicate and becomes
+`NOT_APPLICABLE` only when false. Extra or omitted names are invalid. An
+unavailable layer remains explicit and cannot be silently substituted.
 
 If a directly compared `field_value`, configured value, runtime value, or
 destination value contains `snapshot_truncated`, `snapshot_failed`, or
@@ -191,7 +206,8 @@ or unexpected occurrences to their own evidence.
 
 Each session case records stable `case_id`, event group, exact requirement IDs,
 URL, element, placement, action, material variant, discovery source, scope,
-execution status, applicable layers, container IDs, and authorization IDs. Its
+execution status, run-level tag scope, complete detected-tag inventory,
+immutable applicability card, container IDs, and authorization IDs. Its
 attempts retain contiguous attempt numbers and retry lineage. Final validation
 requires every in-scope case to be `EXECUTED` or explicitly `BLOCKED`.
 
@@ -284,10 +300,11 @@ a non-empty completion signal, and a failed or uncertain interaction cannot
 support a missing-event occurrence `FAIL`. Final certification requires the
 normalized boundary to match the retained session action exactly.
 
-The session action also records `observed_business_push_count` and one
-`layer_results` row for every layer declared applicable to the completed case.
-The explicit count must equal the classified business-push rows assigned to
-the action.
+The session action also records `observed_business_push_count`, one
+`layer_results` row for every canonical layer, and one `tag_layer_results` row
+for every in-scope tag multiplied by every tag-related layer. Conditional false
+rows use `NOT_APPLICABLE`; blank or omitted rows are invalid. The explicit push
+count must equal the classified business-push rows assigned to the action.
 
 Each session business-push row records `stream_id`, positive
 `connection_epoch`, and `event_index`. Their combination is unique.
@@ -377,7 +394,22 @@ Allowed types are `string`, `number`, `boolean`, `array`, `object`, `null`,
 
 ### Concerned tag
 
-Use `applicable: true` only for a concerned tag. Record:
+The normalized requirement retains plan-declared tag expectations when they
+exist. The session ledger is the authoritative runtime inventory and must not
+depend on those plan columns. Before the action, record each detected tag's:
+
+- stable tag ID, name, container, template, category, and delivery type;
+- vendor/destination identity when observable;
+- consent-setting presence;
+- `IN_SCOPE` or `OUT_OF_SCOPE` decision and deterministic reason; and
+- direct inventory/configuration evidence.
+
+An empty inventory requires positive direct evidence. For a planned dataLayer
+event, no in-scope analytics tag is an explicit inventory/configuration/firing
+`FAIL`, with unavailable runtime/request descendants `BLOCKED`.
+
+Use normalized `applicable: true` only for a plan-declared concerned tag.
+Record:
 
 - `relevance`: expected fire, expected block, relevant unexpected firing, or
   explanation of a wanted non-fire;
@@ -387,7 +419,8 @@ Use `applicable: true` only for a concerned tag. Record:
 - separate configuration and runtime evidence IDs;
 - non-firing reason and source when applicable.
 
-Do not add unrelated tags.
+Do not add unrelated tags to the in-scope comparison matrix. Keep every
+detected excluded tag visible in the inventory and workbook.
 
 Add `container_id`, `vendor_family`, `destination_id`, and `template_type` when
 applicable. Preserve direct execution/console errors separately from firing.
@@ -409,6 +442,11 @@ supplementary and browser evidence does not certify vendor ingestion. The
 validator derives query values from `request_url` and resolves structured body
 or header paths; every decoded ID, event, and parameter claim must reconcile
 with that raw request evidence.
+
+For a browser-sending in-scope tag, available capture with zero matching
+requests is `FAIL`. `BLOCKED` requires explicit `capture_unavailable: true`.
+A local-only request row is `NOT_APPLICABLE` only with
+`local_only_configuration_proved: true`.
 
 ### Trigger and sequence
 
@@ -476,15 +514,35 @@ JavaScript, container conflicts, and tag dependencies.
 `regression` is applicable only with a supplied baseline and records baseline
 and current acceptance status, change classification, and evidence.
 
+Resolve conditional layers with these explicit predicates:
+
+- consent: concerned-tag consent settings, declared consent acceptance,
+  non-granted event state, or behaviour that differs by consent;
+- trigger: unexpected non-fire/fire/count or an explicit trigger/exception
+  rule;
+- sequence: configured GTM sequencing or an explicit order rule;
+- source signal: intentionally no custom dataLayer push;
+- business: ecommerce or a declared cross-field rule;
+- client checks: detected/declared SPA, iframe, cross-domain, responsive,
+  Custom JavaScript, linker, cookie, dependency, or related client feature;
+- container context: more than one client-side container;
+- scenario: finite material or conditional branch; and
+- regression: supplied prior accepted baseline.
+
+Natural consent baseline capture remains required even when the consent
+predicate resolves false.
+
 Every applicable extension requires its own component verdict. A normalized
 row cannot omit destination, trigger, sequence, consent, business-rule,
 sensitive-data, client-check, or regression evidence/verdict while preserving
 an overall `PASS`.
 
-The same rule applies to base layers: required raw API Call, resolved Data
-Layer, GTM variable, tag configuration, tag firing, and runtime parameter each
-retain their own component verdict. `tag_parameter` never substitutes for
-`tag_configuration`.
+The same rule applies to base layers: action boundary, required raw API Call,
+resolved Data Layer, tag inventory, GTM variable, tag configuration, tag
+firing, runtime parameter, request, and sensitive-data scan each retain their
+own verdict. Every in-scope tag has its own variable/configuration/firing/
+parameter/request/consent/trigger/sequence subrows. `tag_parameter` never
+substitutes for `tag_configuration`.
 
 ### Evidence catalogue binding
 
@@ -541,6 +599,11 @@ For a protected checkpoint, record whether analyst intervention was required,
 requested, and completed. A final protected `BLOCKED` is invalid when help was
 never requested.
 
+An ordinary checkbox or form control is not protected. Use
+`UI_CONTROL_BLOCKER` only after recording all attempted methods:
+`scroll_into_view`, `label_click`, `direct_control`, `pointer_click`,
+`keyboard_toggle`, and `clean_state_retry`.
+
 Keep relevant unplanned, duplicate, premature, delayed, wrong-order, and
 wrong-context business pushes, plus unexpected concerned tags, in `unexpected`.
 Include the case/action identity, event index, page/state context,
@@ -569,7 +632,11 @@ Strict mode rejects:
 - incomplete or duplicate inventories;
 - missing, pending, or unexecuted session cases and open actions;
 - observed push counts that differ from classified stream rows;
-- missing per-case applicable layer results;
+- missing tag scope, incomplete tag inventory, or a detected tag absent from
+  both in-scope and visible out-of-scope inventory;
+- missing per-case canonical layer results, false conditional predicates not
+  marked `NOT_APPLICABLE`, or blank status/reason;
+- missing per-tag subrows for an in-scope tag or subrows for an excluded tag;
 - normalized action boundaries that differ from session actions;
 - requirements stored out of plan order;
 - missing source references;

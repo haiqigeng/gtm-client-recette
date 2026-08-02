@@ -32,6 +32,10 @@ client plan and must never become an acceptance source for another website.
 
 ## Controlled observations
 
+The run uses `analytics_only`. Before each action, Tag Assistant inventory finds
+the concerned GA4 tag and one unrelated Meta tag; the Meta tag remains visible
+as `OUT_OF_SCOPE`. The complete applicability card is frozen before execution.
+
 1. Opening the homepage before `/products` unexpectedly pushes
    `view_item_list` with `item_list_name="homepage"`.
 2. `/products` pushes the expected list event once.
@@ -50,13 +54,18 @@ Event 01 — view_item_list: FAIL
 
 Event 02 — add_to_cart: FAIL
 - Cases: 2/2 executed.
-- Raw payload and firing count pass for both.
-- card:beta runtime price fails: expected number 29.90; observed string "29.90".
+- raw_api_call: PASS for both.
+- resolved_data_layer: PASS for both.
+- GA4 - add_to_cart / tag_configuration: PASS.
+- GA4 - add_to_cart / tag_firing: PASS once per action.
+- GA4 - add_to_cart / tag_parameter: FAIL on card:beta; expected number 29.90; observed string "29.90".
+- GA4 - add_to_cart / browser request: FAIL on card:beta for the same type mismatch.
+- Meta - AddToCart: OUT_OF_SCOPE — detected outside analytics-only scope.
 
 Event 03 — generate_lead: PASS
 - Synthetic journey submitted.
-- Raw payload, GTM variable, tag configuration, firing, runtime parameter and
-  browser request agree with the plan.
+- Every canonical layer and each GA4 tag subrow is explicit and PASS or an
+  evidenced conditional NOT_APPLICABLE.
 ```
 
 The `add_to_cart` result illustrates the dependency rule: a correct raw
@@ -67,7 +76,8 @@ is planned, but its incompatible homepage occurrence still fails.
 ## Normalized shape
 
 Each event is represented by source-bound requirement rows. The second event
-has separate component verdicts:
+has separate component verdicts, while the session ledger additionally retains
+one row per canonical layer and each in-scope tag/layer pair:
 
 ```json
 {

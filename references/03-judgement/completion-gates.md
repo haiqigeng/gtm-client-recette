@@ -22,19 +22,32 @@ Strict semantic validation rejects:
   omitted from the verdict because their payload was valid;
 - placeholder or prose raw payloads;
 - planned dataLayer events without exact Tag Assistant API Call evidence;
-- required raw/resolved/variable/tag-configuration layers without their own
-  component verdicts;
+- a tracking-plan column being used to omit a runtime evidence layer;
+- missing action/raw/resolved/tag-inventory/variable/configuration/firing/
+  runtime/request/sensitive verdicts for a planned dataLayer event;
+- a case without an immutable complete applicability card, a canonical layer
+  row, or an explicit conditional predicate result;
+- blank layer status/reason, or a false conditional predicate not marked
+  `NOT_APPLICABLE`;
 - non-dataLayer events without exact source evidence;
 - raw and resolved evidence collapsed together;
 - `PASS` without actual value, state, type, and evidence;
 - fixed mismatches hidden behind `PASS`;
 - undocumented transformations;
+- missing run tag scope, incomplete concerned-tag inventory, or a detected tag
+  retained as neither in-scope nor visibly out-of-scope;
+- in-scope tags without every variable/configuration/firing/runtime/request/
+  consent/trigger/sequence subrow;
+- excluded tags given in-scope results, or a planned dataLayer event with no
+  in-scope analytics tag that is not explicitly failed;
 - concerned tags without configuration/firing evidence;
 - a concerned tag without an explicit `browser_request` or `local_only`
   delivery declaration;
 - a browser-sending tag without destination/event identity, endpoint, request
   count, decoded parameters, or a first-party request tied to the action and
   client container;
+- a missing browser request marked `BLOCKED` while capture was available, or a
+  local-only `NOT_APPLICABLE` without positive configuration proof;
 - runtime parameter `PASS` without runtime value and type;
 - destination `PASS` without browser-network evidence, with an omitted
   component verdict, or with a decoded vendor, destination ID, event name,
@@ -55,6 +68,10 @@ Strict semantic validation rejects:
 - an encountered ordinary gate skipped without analyst exclusion or evidenced
   consequence, including an unsubmitted ordinary conversion on a confirmed
   non-production environment;
+- an ordinary privacy acknowledgement or tested-conversion opt-in treated as a
+  consent/authorization checkpoint;
+- `UI_CONTROL_BLOCKER` without scroll, label, direct-control, pointer,
+  keyboard, and clean-state retry evidence;
 - final protected `BLOCKED` when analyst help was never requested;
 - natural CMP and override evidence merged together;
 - session override without explicit approval, session-only scope, non-PASS

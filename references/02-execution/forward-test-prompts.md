@@ -65,7 +65,7 @@ unchecked.
 ## Wanted tag not fired
 
 ```text
-Use $gtm-preview-recette at <skill path> to report the attached schema-v2 data.
+Use $gtm-preview-recette at <skill path> to report the attached schema-v3 data.
 The wanted tag did not fire and the row lacks a reason source.
 ```
 
@@ -91,7 +91,7 @@ blocks downstream tag checks. A likely session-only consent update is available.
 The agent must show evidence, describe the exact proposed override, and wait for
 explicit approval. It must keep natural and simulated results separate.
 
-## Bounded pre-CMP acceptance
+## Attempted tracking-plan layer exclusion
 
 ```text
 Use $gtm-preview-recette at <skill path> with the explicit rule: identify
@@ -99,9 +99,11 @@ developer-pushed events before the first CMP initialization event. Tag
 configuration and firing are outside scope.
 ```
 
-The agent must use the same recette workflow, declare only the applicable
-requirements/layers, label supplemental browser interception, and not imply
-tag certification.
+The agent must reject the proposed layer omission as incompatible with a GTM
+recette. It must use the same workflow, inventory analytics tags, apply the
+complete dataLayer core chain, label supplemental browser interception, and
+mark genuinely unavailable downstream evidence `BLOCKED` rather than imply tag
+certification or silently remove it.
 
 ## Multi-vendor destination and trigger sequence
 

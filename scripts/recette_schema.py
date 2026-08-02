@@ -44,12 +44,14 @@ from evidence_contract import (
 from layer_contract import (
     CANONICAL_LAYERS,
     TAG_DELIVERY_TYPES,
+    TAG_SCOPE_MODES,
     applicable_layers,
     is_browser_sending_tag,
+    normalize_tag_scope,
 )
 from supporting_artifacts import validate_supporting_artifacts
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 MATCH_RULES = {
     "equals",
     "absent",
@@ -123,6 +125,12 @@ SOURCE_CAPTURE_SOURCES = {
 }
 VENDOR_FAMILIES = {
     "ga4",
+    "piano",
+    "adobe_analytics",
+    "matomo",
+    "piwik_pro",
+    "snowplow",
+    "realytics",
     "google_ads",
     "floodlight",
     "meta",
@@ -199,9 +207,11 @@ EVIDENCE_KIND_SOURCES = {
     "resolved_data_layer": {"Tag Assistant"},
     "gtm_variable": {"Tag Assistant"},
     "tag_configuration": {"Tag Assistant", "GTM read-only"},
+    "tag_inventory": {"Tag Assistant", "GTM read-only"},
     "tag_runtime": {"Tag Assistant"},
     "browser_interception": {"Playwright"},
     "browser_network_request": {"Browser Network"},
+    "browser_network_capture": {"Browser Network"},
     "browser_console": {"Browser Console"},
     "console_error": {"Browser Console"},
     "scenario_branch": {"Playwright", "Analyst supplied"},
@@ -245,6 +255,7 @@ TAG_RELEVANCE = {
 }
 REASON_SOURCES = {"preview", "console", "consent", "inferred", "not_established"}
 PROTECTED_BLOCKERS = {
+    "CREDENTIALS",
     "GOOGLE_SIGN_IN",
     "MFA",
     "CAPTCHA",
@@ -255,6 +266,26 @@ PROTECTED_BLOCKERS = {
     "EXTERNAL_APPROVAL",
     "IRREVERSIBLE_ACTION",
 }
+PROTECTED_JOURNEY_BOUNDARIES = (
+    "CREDENTIALS",
+    "GOOGLE_SIGN_IN",
+    "MFA",
+    "CAPTCHA",
+    "EMAIL_VERIFICATION",
+    "SMS_VERIFICATION",
+    "MAGIC_LINK",
+    "REAL_PAYMENT",
+    "EXTERNAL_APPROVAL",
+    "IRREVERSIBLE_ACTION",
+)
+UI_CONTROL_RECOVERY_METHODS = (
+    "scroll_into_view",
+    "label_click",
+    "direct_control",
+    "pointer_click",
+    "keyboard_toggle",
+    "clean_state_retry",
+)
 
 COMPARED_VALUE_COMPONENTS = (
     ("raw_api_call", "field_value", "raw_payload"),
@@ -267,13 +298,16 @@ COMPARED_VALUE_COMPONENTS = (
     ("source_signal", "payload", "source_signal"),
 )
 BASE_LAYERS = {
+    "action_boundary",
     "raw_api_call",
     "resolved_data_layer",
+    "concerned_tag_inventory",
     "gtm_variable",
     "tag_configuration",
     "tag_firing",
     "tag_parameter",
-    "consent_when_applicable",
+    "destination_request_when_applicable",
+    "sensitive_data_scan",
 }
 CLIENT_SIDE_OPTIONAL_LAYERS = set(CANONICAL_LAYERS) - BASE_LAYERS
 PLACEHOLDER_VALUES = {"...", "…", "<omitted>", "[omitted]", "<placeholder>", "[placeholder]"}
@@ -2042,12 +2076,12 @@ def _validate_sensitive_data(
         errors.append(f"{label}: sensitive_data_scan requires scanned_targets")
     else:
         expected_targets = set(requirement_sensitive_targets(requirement))
-        if (
-            len(scanned_targets) != len(set(map(str, scanned_targets)))
-            or set(map(str, scanned_targets)) != expected_targets
+        recorded_targets = set(map(str, scanned_targets))
+        if len(scanned_targets) != len(recorded_targets) or not expected_targets.issubset(
+            recorded_targets
         ):
             errors.append(
-                f"{label}: sensitive_data_scan.scanned_targets must exactly cover "
+                f"{label}: sensitive_data_scan.scanned_targets must cover every "
                 "client-side sensitive surfaces"
             )
     if not _is_nonempty_string(scan.get("evidence_id")):
@@ -2289,13 +2323,186 @@ def _validate_capture_limitations(
             )
 
 
+def _validate_run_execution_policy(run: dict[str, Any], errors: list[str]) -> None:
+    tag_scope = run.get("tag_scope")
+    if not isinstance(tag_scope, dict):
+        errors.append("run: tag_scope must be an explicit object")
+    else:
+        normalized = normalize_tag_scope(tag_scope)
+        mode = normalized.get("mode")
+        if mode not in TAG_SCOPE_MODES:
+            errors.append("run: unsupported tag_scope.mode")
+        if not _is_nonempty_string(normalized.get("reason")):
+            errors.append("run: tag_scope.reason is required")
+        names = normalized.get("explicit_tag_names")
+        if not isinstance(names, list) or any(not _is_nonempty_string(item) for item in names):
+            errors.append("run: tag_scope.explicit_tag_names must be a string array")
+            names = []
+        if len(set(names)) != len(names):
+            errors.append("run: tag_scope.explicit_tag_names contains duplicates")
+        if mode == "explicit_tag_set" and not names:
+            errors.append("run: explicit_tag_set requires at least one exact tag name")
+        if mode != "explicit_tag_set" and names:
+            errors.append("run: explicit tag names are valid only for explicit_tag_set")
+        if normalized.get("include_plan_declared_media") is not True:
+            errors.append("run: exact plan-declared media tags cannot be silently excluded")
+
+    authority = run.get("journey_authority")
+    if not isinstance(authority, dict):
+        errors.append("run: journey_authority must be an explicit object")
+        return
+    for field in (
+        "complete_ordinary_journeys",
+        "safe_synthetic_data",
+        "ordinary_form_inputs",
+        "ordinary_privacy_acknowledgements",
+        "ordinary_opt_ins_when_part_of_tested_conversion",
+        "ordinary_form_submissions",
+    ):
+        if not isinstance(authority.get(field), bool):
+            errors.append(f"run: journey_authority.{field} must be boolean")
+    if authority.get("complete_ordinary_journeys") is True:
+        for field in (
+            "safe_synthetic_data",
+            "ordinary_form_inputs",
+            "ordinary_privacy_acknowledgements",
+            "ordinary_opt_ins_when_part_of_tested_conversion",
+            "ordinary_form_submissions",
+        ):
+            if authority.get(field) is not True:
+                errors.append(f"run: complete_ordinary_journeys=true requires {field}=true")
+    if authority.get("protected_boundaries") != list(PROTECTED_JOURNEY_BOUNDARIES):
+        errors.append("run: journey_authority protected boundaries were altered")
+
+
+def _validate_evidence_catalog(
+    evidence: list[dict[str, Any]], errors: list[str]
+) -> tuple[set[str], dict[str, dict[str, Any]]]:
+    """Validate evidence provenance/link fields and return its indexed catalogue."""
+    evidence_catalog = [str(row.get("evidence_id", "")).strip() for row in evidence]
+    for index, value in enumerate(evidence_catalog, start=1):
+        if not value:
+            errors.append(f"evidence row {index}: missing evidence_id")
+    for index, row in enumerate(evidence, start=1):
+        evidence_label = str(row.get("evidence_id", "")).strip() or str(index)
+        for field_name in ("kind", "source", "path_or_url", "captured_at", "description"):
+            if not _is_nonempty_string(row.get(field_name)):
+                errors.append(f"evidence {evidence_label}: missing provenance field '{field_name}'")
+        kind = row.get("kind")
+        source_name = row.get("source")
+        if kind not in EVIDENCE_KIND_SOURCES:
+            errors.append(f"evidence {evidence_label}: unsupported evidence kind")
+        elif source_name not in EVIDENCE_KIND_SOURCES[kind]:
+            errors.append(f"evidence {evidence_label}: source is incompatible with kind '{kind}'")
+        capture_mode = row.get("capture_mode")
+        if capture_mode not in CAPTURE_MODES:
+            errors.append(
+                f"evidence {evidence_label}: capture_mode must identify direct, "
+                "deterministic, analyst_supplied, or supplemental evidence"
+            )
+        if kind in DIRECT_CAPTURE_KINDS and capture_mode != "direct":
+            errors.append(
+                f"evidence {evidence_label}: browser/Preview evidence must be a "
+                "direct structured capture, not reconstructed or inferred"
+            )
+        if kind in DETERMINISTIC_CAPTURE_KINDS and capture_mode != "deterministic":
+            errors.append(
+                f"evidence {evidence_label}: validator evidence requires capture_mode=deterministic"
+            )
+        if kind in ANALYST_CAPTURE_KINDS and capture_mode not in {"analyst_supplied", "direct"}:
+            errors.append(
+                f"evidence {evidence_label}: analyst evidence requires "
+                "capture_mode=analyst_supplied or direct"
+            )
+        if kind in ACTION_BOUND_EVIDENCE_KINDS and not _is_nonempty_string(row.get("action_id")):
+            errors.append(f"evidence {evidence_label}: direct action evidence requires action_id")
+        if kind in EVENT_INDEX_EVIDENCE_KINDS and (
+            not isinstance(row.get("event_index"), int) or isinstance(row.get("event_index"), bool)
+        ):
+            errors.append(f"evidence {evidence_label}: direct event evidence requires event_index")
+        if kind in CONTAINER_BOUND_EVIDENCE_KINDS and not _is_nonempty_string(
+            row.get("container_id")
+        ):
+            errors.append(f"evidence {evidence_label}: direct GTM evidence requires container_id")
+        if kind in {
+            "gtm_variable",
+            "tag_configuration",
+            "tag_runtime",
+            "browser_network_request",
+            "trigger_evaluation",
+            "tag_sequence",
+            "tag_assistant_consent",
+        } and not _is_nonempty_string(row.get("tag_id")):
+            errors.append(f"evidence {evidence_label}: tag-specific evidence requires tag_id")
+        if kind in {"tag_configuration", "tag_runtime"}:
+            for link_field in ("tag_name", "configuration_field"):
+                if not _is_nonempty_string(row.get(link_field)):
+                    errors.append(f"evidence {evidence_label}: tag evidence requires {link_field}")
+        if kind == "tag_configuration" and source_name == "Tag Assistant":
+            if not _is_nonempty_string(row.get("action_id")):
+                errors.append(
+                    f"evidence {evidence_label}: Tag Assistant configuration requires action_id"
+                )
+            if not isinstance(row.get("event_index"), int):
+                errors.append(
+                    f"evidence {evidence_label}: Tag Assistant configuration requires event_index"
+                )
+        if kind == "browser_network_request" and not _is_nonempty_string(row.get("request_id")):
+            errors.append(
+                f"evidence {evidence_label}: browser request evidence requires request_id"
+            )
+        captured_at = row.get("captured_at")
+        if _is_nonempty_string(captured_at):
+            try:
+                parsed_captured_at = datetime.fromisoformat(str(captured_at).replace("Z", "+00:00"))
+            except ValueError:
+                errors.append(f"evidence {evidence_label}: captured_at must be ISO 8601")
+            else:
+                if parsed_captured_at.tzinfo is None:
+                    errors.append(f"evidence {evidence_label}: captured_at must include timezone")
+        if _contains_placeholder(row):
+            errors.append(f"evidence {evidence_label}: provenance contains placeholder content")
+        provenance_findings = scan_sensitive_value(
+            {
+                "source": row.get("source"),
+                "source_detail": row.get("source_detail"),
+                "path_or_url": row.get("path_or_url"),
+                "description": row.get("description"),
+            },
+            root_path=f"evidence.{evidence_label}",
+            policy={"forbidden_categories": DEFAULT_FORBIDDEN_CATEGORIES},
+        )
+        if any(
+            status_of(finding.get("status")) in {"FAIL", "REVIEW"}
+            for finding in provenance_findings
+        ):
+            errors.append(
+                f"evidence {evidence_label}: provenance contains sensitive content; "
+                "retain only a redacted description/path"
+            )
+    duplicates = sorted(
+        item
+        for item, count in Counter(item for item in evidence_catalog if item).items()
+        if count > 1
+    )
+    if duplicates:
+        errors.append("evidence: duplicate IDs " + ", ".join(duplicates))
+    known = {item for item in evidence_catalog if item}
+    indexed = {
+        str(row.get("evidence_id", "")).strip(): row
+        for row in evidence
+        if str(row.get("evidence_id", "")).strip()
+    }
+    return known, indexed
+
+
 def semantic_errors(data: dict[str, Any]) -> list[str]:
     """Return every structural and semantic validation error."""
     errors: list[str] = []
     if data.get("schema_version") != SCHEMA_VERSION:
         return [
-            "schema_version must be 2; schema-v1 or observation-only results must be "
-            "re-normalized from source evidence into the schema-v2 requirement model"
+            "schema_version must be 3; older results must be migrated or re-normalized "
+            "without inheriting prior PASS evidence"
         ]
 
     run = data.get("run")
@@ -2323,6 +2530,7 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
     if run.get("environment_class") not in {"test", "preprod", "staging", "production"}:
         errors.append("run: environment_class must be test, preprod, staging, or production")
     _validate_run_client_context(run, errors)
+    _validate_run_execution_policy(run, errors)
     errors.extend(validate_supporting_artifacts(run.get("supporting_artifacts")))
     if "observation-only" in (
         f"{run.get('tracking_plan_source', '')} {run.get('acceptance_scope', '')}".lower()
@@ -2372,115 +2580,7 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
             + ", ".join(missing_declared_layers)
         )
 
-    evidence_catalog = [str(row.get("evidence_id", "")).strip() for row in evidence]
-    empty_evidence_rows = [
-        index for index, value in enumerate(evidence_catalog, start=1) if not value
-    ]
-    for index in empty_evidence_rows:
-        errors.append(f"evidence row {index}: missing evidence_id")
-    for index, row in enumerate(evidence, start=1):
-        evidence_label = str(row.get("evidence_id", "")).strip() or str(index)
-        for field in ("kind", "source", "path_or_url", "captured_at", "description"):
-            if not _is_nonempty_string(row.get(field)):
-                errors.append(f"evidence {evidence_label}: missing provenance field '{field}'")
-        kind = row.get("kind")
-        source_name = row.get("source")
-        if kind not in EVIDENCE_KIND_SOURCES:
-            errors.append(f"evidence {evidence_label}: unsupported evidence kind")
-        elif source_name not in EVIDENCE_KIND_SOURCES[kind]:
-            errors.append(f"evidence {evidence_label}: source is incompatible with kind '{kind}'")
-        capture_mode = row.get("capture_mode")
-        if capture_mode not in CAPTURE_MODES:
-            errors.append(
-                f"evidence {evidence_label}: capture_mode must identify direct, "
-                "deterministic, analyst_supplied, or supplemental evidence"
-            )
-        if kind in DIRECT_CAPTURE_KINDS and capture_mode != "direct":
-            errors.append(
-                f"evidence {evidence_label}: browser/Preview evidence must be a "
-                "direct structured capture, not reconstructed or inferred"
-            )
-        if kind in DETERMINISTIC_CAPTURE_KINDS and capture_mode != "deterministic":
-            errors.append(
-                f"evidence {evidence_label}: validator evidence requires capture_mode=deterministic"
-            )
-        if kind in ANALYST_CAPTURE_KINDS and capture_mode not in {
-            "analyst_supplied",
-            "direct",
-        }:
-            errors.append(
-                f"evidence {evidence_label}: analyst evidence requires "
-                "capture_mode=analyst_supplied or direct"
-            )
-        if kind in ACTION_BOUND_EVIDENCE_KINDS and not _is_nonempty_string(row.get("action_id")):
-            errors.append(f"evidence {evidence_label}: direct action evidence requires action_id")
-        if kind in EVENT_INDEX_EVIDENCE_KINDS and (
-            not isinstance(row.get("event_index"), int) or isinstance(row.get("event_index"), bool)
-        ):
-            errors.append(f"evidence {evidence_label}: direct event evidence requires event_index")
-        if kind in CONTAINER_BOUND_EVIDENCE_KINDS and not _is_nonempty_string(
-            row.get("container_id")
-        ):
-            errors.append(f"evidence {evidence_label}: direct GTM evidence requires container_id")
-        if kind in {"tag_configuration", "tag_runtime"}:
-            for link_field in ("tag_name", "configuration_field"):
-                if not _is_nonempty_string(row.get(link_field)):
-                    errors.append(f"evidence {evidence_label}: tag evidence requires {link_field}")
-        if kind == "tag_configuration" and source_name == "Tag Assistant":
-            if not _is_nonempty_string(row.get("action_id")):
-                errors.append(
-                    f"evidence {evidence_label}: Tag Assistant configuration requires action_id"
-                )
-            if not isinstance(row.get("event_index"), int):
-                errors.append(
-                    f"evidence {evidence_label}: Tag Assistant configuration requires event_index"
-                )
-        if kind == "browser_network_request" and not _is_nonempty_string(row.get("request_id")):
-            errors.append(
-                f"evidence {evidence_label}: browser request evidence requires request_id"
-            )
-        captured_at = row.get("captured_at")
-        if _is_nonempty_string(captured_at):
-            try:
-                parsed_captured_at = datetime.fromisoformat(str(captured_at).replace("Z", "+00:00"))
-            except ValueError:
-                errors.append(f"evidence {evidence_label}: captured_at must be ISO 8601")
-            else:
-                if parsed_captured_at.tzinfo is None:
-                    errors.append(f"evidence {evidence_label}: captured_at must include timezone")
-        if _contains_placeholder(row):
-            errors.append(f"evidence {evidence_label}: provenance contains placeholder content")
-        provenance_findings = scan_sensitive_value(
-            {
-                "source": row.get("source"),
-                "source_detail": row.get("source_detail"),
-                "path_or_url": row.get("path_or_url"),
-                "description": row.get("description"),
-            },
-            root_path=f"evidence.{evidence_label}",
-            policy={"forbidden_categories": DEFAULT_FORBIDDEN_CATEGORIES},
-        )
-        if any(
-            status_of(finding.get("status")) in {"FAIL", "REVIEW"}
-            for finding in provenance_findings
-        ):
-            errors.append(
-                f"evidence {evidence_label}: provenance contains sensitive content; "
-                "retain only a redacted description/path"
-            )
-    duplicate_evidence = sorted(
-        item
-        for item, count in Counter(item for item in evidence_catalog if item).items()
-        if count > 1
-    )
-    if duplicate_evidence:
-        errors.append("evidence: duplicate IDs " + ", ".join(duplicate_evidence))
-    known_evidence = {item for item in evidence_catalog if item}
-    evidence_by_id = {
-        str(row.get("evidence_id", "")).strip(): row
-        for row in evidence
-        if str(row.get("evidence_id", "")).strip()
-    }
+    known_evidence, evidence_by_id = _validate_evidence_catalog(evidence, errors)
     regression_context = run.get("regression_context")
     if regression_context is not None:
         if not isinstance(regression_context, dict):
@@ -2531,6 +2631,26 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
                 errors.append(
                     f"blocker {blocker_id}: analyst help must be requested before final BLOCKED"
                 )
+        if blocker.get("type") == "UI_CONTROL_BLOCKER":
+            if blocker.get("analyst_intervention_required") is True:
+                errors.append(
+                    f"blocker {blocker_id}: an ordinary UI control blocker is not a "
+                    "protected analyst checkpoint"
+                )
+            methods = blocker.get("attempted_methods")
+            if not isinstance(methods, list):
+                errors.append(
+                    f"blocker {blocker_id}: UI_CONTROL_BLOCKER requires attempted_methods"
+                )
+            else:
+                missing_methods = [
+                    method for method in UI_CONTROL_RECOVERY_METHODS if method not in methods
+                ]
+                if missing_methods:
+                    errors.append(
+                        f"blocker {blocker_id}: UI control recovery omitted "
+                        + ", ".join(missing_methods)
+                    )
 
     requirement_ids = [str(row.get("requirement_id", "")).strip() for row in requirements]
     duplicate_requirements = sorted(
@@ -2921,9 +3041,9 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
         if observed:
             source_mechanism = expectation.get("source_mechanism", "data_layer_push")
             raw_required = source_mechanism == "data_layer_push" and "raw_api_call" in active_layers
-            resolved_applicable = expectation.get(
+            resolved_applicable = source_mechanism == "data_layer_push" or expectation.get(
                 "resolved_data_layer_applicable",
-                source_mechanism in {"data_layer_push", "gtm_native_event", "gtm_auto_event"},
+                source_mechanism in {"gtm_native_event", "gtm_auto_event"},
             )
             resolved_required = resolved_applicable and "resolved_data_layer" in active_layers
             raw = requirement.get("raw_api_call")
@@ -2941,19 +3061,10 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
                 )
                 if isinstance(raw, dict) and raw.get("capture_source") not in RAW_SOURCES:
                     errors.append(f"{label}: invalid raw capture_source")
-                if (
-                    isinstance(raw, dict)
-                    and raw.get("capture_source") != "tag_assistant_api_call"
-                    and (
-                        resolved_required
-                        or bool(expectation.get("variable_name"))
-                        or bool(expectation.get("tag_name"))
-                        or bool(expectation.get("tag_configuration_field"))
-                    )
-                ):
+                if isinstance(raw, dict) and raw.get("capture_source") != "tag_assistant_api_call":
                     errors.append(
-                        f"{label}: Preview-dependent evidence requires exact "
-                        "Tag Assistant API Call evidence"
+                        f"{label}: planned dataLayer acceptance requires exact Tag Assistant "
+                        "API Call evidence; browser interception is supplemental only"
                     )
                 if isinstance(raw, dict) and status_of(verdict.get("raw_payload")) == "PASS":
                     match = _matches_expectation(expectation, raw)
@@ -3000,24 +3111,27 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
             source_mechanism = expectation.get("source_mechanism", "data_layer_push")
             downstream_components: list[str] = []
             if source_mechanism == "data_layer_push":
-                downstream_components.append("raw_payload")
+                if status_of(verdict.get("raw_payload")) != "FAIL":
+                    errors.append(
+                        f"{label}: absent expected dataLayer event requires raw_payload=FAIL"
+                    )
             else:
                 downstream_components.append("source_signal")
-            if expectation.get(
+            if source_mechanism == "data_layer_push" or expectation.get(
                 "resolved_data_layer_applicable",
-                source_mechanism in {"data_layer_push", "gtm_native_event", "gtm_auto_event"},
+                source_mechanism in {"gtm_native_event", "gtm_auto_event"},
             ):
                 downstream_components.append("resolved_data_layer")
-            if expectation.get("variable_name"):
-                downstream_components.append("gtm_variable")
-            if expectation.get("expected_tag_configuration") not in (None, ""):
-                downstream_components.append("tag_configuration")
-            if expectation.get("tag_name"):
-                downstream_components.append("tag_firing")
-            if expectation.get("tag_configuration_field"):
-                downstream_components.append("tag_parameter")
-            if expectation.get("expected_request_behavior") not in (None, ""):
-                downstream_components.append("destination_request")
+            if source_mechanism == "data_layer_push":
+                downstream_components.extend(
+                    [
+                        "gtm_variable",
+                        "tag_configuration",
+                        "tag_firing",
+                        "tag_parameter",
+                        "destination_request",
+                    ]
+                )
             if expectation.get("destination_parameter_path") not in (None, ""):
                 downstream_components.append("destination_parameter")
             if expectation.get("trigger_contract") is not None:

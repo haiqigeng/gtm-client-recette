@@ -17,7 +17,7 @@ from client_side_rules import (
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("input", type=Path, help="Normalized schema-v2 recette JSON.")
+    parser.add_argument("input", type=Path, help="Normalized schema-v3 recette JSON.")
     parser.add_argument("--policy", type=Path, help="Optional sensitive-data policy JSON.")
     parser.add_argument("--output", type=Path, help="Optional redacted result JSON.")
     return parser.parse_args()

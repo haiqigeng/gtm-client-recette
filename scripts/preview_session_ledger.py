@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -20,7 +21,18 @@ from execution_contract import (
     SESSION_SCHEMA_VERSION,
     validate_session,
 )
-from layer_contract import CANONICAL_LAYERS, applicable_layers
+from layer_contract import (
+    CANONICAL_LAYERS,
+    CONDITIONAL_PREDICATES,
+    TAG_CATEGORIES,
+    TAG_DELIVERY_TYPES,
+    TAG_RESULT_LAYERS,
+    declared_tag_contracts,
+    inferred_tag_category,
+    layer_applicability,
+    normalize_tag_scope,
+    tag_scope_decision,
+)
 
 ROLES = {
     "gtm_workspace",
@@ -78,6 +90,21 @@ def parse_variant(values: list[str]) -> dict[str, Any]:
         if key in output:
             raise SystemExit(f"Duplicate material variant key: {key}")
         output[key] = parsed
+    return output
+
+
+def parse_condition_activations(values: list[str]) -> dict[str, str]:
+    """Parse explicit conditional-layer activations with non-empty reasons."""
+    output: dict[str, str] = {}
+    for value in values:
+        layer, separator, reason = value.partition("=")
+        layer = layer.strip()
+        reason = reason.strip()
+        if not separator or layer not in CONDITIONAL_PREDICATES or not reason:
+            raise SystemExit("--activate-condition must use CONDITIONAL_LAYER=concrete reason.")
+        if layer in output:
+            raise SystemExit(f"Duplicate conditional-layer activation: {layer}")
+        output[layer] = reason
     return output
 
 
@@ -152,6 +179,37 @@ def parser() -> argparse.ArgumentParser:
         default=[],
         choices=CANONICAL_LAYERS,
     )
+    register_case.add_argument(
+        "--activate-condition",
+        action="append",
+        default=[],
+        metavar="LAYER=REASON",
+        help="Pre-activate a conditional layer from detected site/runtime configuration.",
+    )
+
+    register_tag = subparsers.add_parser("register-tag")
+    register_tag.add_argument("ledger", type=Path)
+    register_tag.add_argument("--case-id", required=True)
+    register_tag.add_argument("--tag-id", required=True)
+    register_tag.add_argument("--tag-name", required=True)
+    register_tag.add_argument("--container-id", required=True)
+    register_tag.add_argument(
+        "--tag-category", choices=tuple(sorted(TAG_CATEGORIES)), required=True
+    )
+    register_tag.add_argument(
+        "--tag-delivery", choices=tuple(sorted(TAG_DELIVERY_TYPES)), required=True
+    )
+    register_tag.add_argument("--vendor-family")
+    register_tag.add_argument("--destination-id")
+    register_tag.add_argument("--template-type", required=True)
+    register_tag.add_argument("--consent-required", choices=("true", "false"), required=True)
+    register_tag.add_argument("--evidence-id", action="append", required=True)
+
+    complete_inventory = subparsers.add_parser("complete-tag-inventory")
+    complete_inventory.add_argument("ledger", type=Path)
+    complete_inventory.add_argument("--case-id", required=True)
+    complete_inventory.add_argument("--reason", required=True)
+    complete_inventory.add_argument("--evidence-id", action="append", required=True)
 
     close_case = subparsers.add_parser("close-case")
     close_case.add_argument("ledger", type=Path)
@@ -233,6 +291,40 @@ def parser() -> argparse.ArgumentParser:
     layer.add_argument("--evidence-id", action="append", required=True)
     layer.add_argument("--semantic-ambiguity")
     layer.add_argument("--blocker-id")
+    layer.add_argument(
+        "--predicate-result",
+        choices=("true", "false"),
+        help="Required for a conditional layer; false requires NOT_APPLICABLE.",
+    )
+
+    import_tag_results = subparsers.add_parser("import-tag-results")
+    import_tag_results.add_argument("ledger", type=Path)
+    import_tag_results.add_argument("tag_results", type=Path)
+    import_tag_results.add_argument("--action-id", required=True)
+
+    scaffold_tags = subparsers.add_parser("scaffold-tag-results")
+    scaffold_tags.add_argument("ledger", type=Path)
+    scaffold_tags.add_argument("--action-id", required=True)
+    scaffold_tags.add_argument("--output", type=Path, required=True)
+
+    revise_inventory = subparsers.add_parser("revise-tag-inventory")
+    revise_inventory.add_argument("ledger", type=Path)
+    revise_inventory.add_argument("--case-id", required=True)
+    revise_inventory.add_argument("--tag-id", required=True)
+    revise_inventory.add_argument("--tag-name", required=True)
+    revise_inventory.add_argument("--container-id", required=True)
+    revise_inventory.add_argument(
+        "--tag-category", choices=tuple(sorted(TAG_CATEGORIES)), required=True
+    )
+    revise_inventory.add_argument(
+        "--tag-delivery", choices=tuple(sorted(TAG_DELIVERY_TYPES)), required=True
+    )
+    revise_inventory.add_argument("--vendor-family")
+    revise_inventory.add_argument("--destination-id")
+    revise_inventory.add_argument("--template-type", required=True)
+    revise_inventory.add_argument("--consent-required", choices=("true", "false"), required=True)
+    revise_inventory.add_argument("--evidence-id", action="append", required=True)
+    revise_inventory.add_argument("--reason", required=True)
 
     settle = subparsers.add_parser("settle-action")
     settle.add_argument("ledger", type=Path)
@@ -333,18 +425,21 @@ def register_case(ledger: dict[str, Any], args: argparse.Namespace) -> None:
     )
     if unknown_authorizations:
         raise SystemExit("Unknown authorization IDs: " + ", ".join(unknown_authorizations))
+    if args.include_layer or args.exclude_layer:
+        raise SystemExit(
+            "Manual layer inclusion/exclusion is obsolete. Core layers are mandatory; "
+            "use --activate-condition LAYER=REASON only for detected conditional predicates."
+        )
     containers = [
         row for row in results.get("run", {}).get("containers", []) if isinstance(row, dict)
     ]
-    layers = applicable_layers(
+    activated_conditions = parse_condition_activations(getattr(args, "activate_condition", []))
+    applicability = layer_applicability(
         group_requirements,
         container_count=len(containers) or 1,
+        activated_conditions=activated_conditions,
     )
-    layers = [
-        layer
-        for layer in CANONICAL_LAYERS
-        if (layer in layers or layer in args.include_layer) and layer not in args.exclude_layer
-    ]
+    layers = [row["layer"] for row in applicability if row["mode"] == "MANDATORY"]
     container_ids = sorted(
         {
             str(
@@ -373,12 +468,355 @@ def register_case(ledger: dict[str, Any], args: argparse.Namespace) -> None:
             ),
             "reason": str(args.reason or "").strip() or None,
             "authorization_ids": list(dict.fromkeys(args.authorization_id)),
+            "tag_scope": normalize_tag_scope(results.get("run", {}).get("tag_scope")),
+            "declared_tag_contracts": declared_tag_contracts(group_requirements),
+            "source_expectations": [dict(row.get("expectation", {})) for row in group_requirements],
+            "tag_inventory_status": "PENDING",
+            "inventory_revision": 1,
+            "applicability_history": [],
+            "tag_inventory_reason": None,
+            "tag_inventory_evidence_ids": [],
+            "tag_inventory": [],
+            "conditional_activations": activated_conditions,
+            "applicability_status": "DRAFT",
+            "layer_applicability": applicability,
             "applicable_layers": layers,
             "container_ids": container_ids,
             "registered_at": now(),
             "final_action_id": None,
         }
     )
+
+
+def register_tag(ledger: dict[str, Any], args: argparse.Namespace) -> None:
+    """Register one detected concerned tag before the case action begins."""
+    case = find_unique(ledger.get("cases", []), "case_id", args.case_id)
+    if case.get("applicability_status") != "DRAFT":
+        raise SystemExit("Tag inventory is frozen for this case.")
+    if any(
+        row.get("tag_id") == args.tag_id
+        for row in case.get("tag_inventory", [])
+        if isinstance(row, dict)
+    ):
+        raise SystemExit(f"Duplicate tag_id in case {args.case_id}: {args.tag_id}")
+    if args.container_id not in case.get("container_ids", []):
+        raise SystemExit("Detected tag container is outside the case container set.")
+    tag = {
+        "tag_id": args.tag_id,
+        "tag_name": args.tag_name,
+        "container_id": args.container_id,
+        "tag_category": args.tag_category,
+        "tag_delivery": args.tag_delivery,
+        "vendor_family": str(args.vendor_family or "").strip() or None,
+        "destination_id": str(args.destination_id or "").strip() or None,
+        "template_type": args.template_type,
+        "consent_required": args.consent_required == "true",
+        "evidence_ids": list(dict.fromkeys(args.evidence_id)),
+    }
+    inferred_category = inferred_tag_category(tag)
+    if inferred_category is not None and args.tag_category != inferred_category:
+        raise SystemExit(
+            f"Tag metadata identifies category {inferred_category}; received {args.tag_category}."
+        )
+    scope_status, scope_reason = tag_scope_decision(
+        tag,
+        case.get("tag_scope"),
+        case.get("declared_tag_contracts", []),
+    )
+    tag["scope_status"] = scope_status
+    tag["scope_reason"] = scope_reason
+    case.setdefault("tag_inventory", []).append(tag)
+
+
+def revise_tag_inventory(ledger: dict[str, Any], args: argparse.Namespace) -> None:
+    """Version a frozen inventory after a material late tag discovery and force retest."""
+    case = find_unique(ledger.get("cases", []), "case_id", args.case_id)
+    if case.get("applicability_status") != "FROZEN":
+        raise SystemExit("Late discovery requires an already frozen applicability card.")
+    case_actions = sorted(
+        [row for row in ledger.get("actions", []) if row.get("case_id") == args.case_id],
+        key=lambda row: row.get("attempt_number", 0),
+    )
+    if not case_actions or case_actions[-1].get("state") != "SETTLED":
+        raise SystemExit("Settle the current action before revising a frozen tag inventory.")
+    if any(
+        row.get("tag_id") == args.tag_id
+        for row in case.get("tag_inventory", [])
+        if isinstance(row, dict)
+    ):
+        raise SystemExit(f"Duplicate tag_id in case {args.case_id}: {args.tag_id}")
+    if args.container_id not in case.get("container_ids", []):
+        raise SystemExit("Detected tag container is outside the case container set.")
+    reason = str(args.reason).strip()
+    if not reason:
+        raise SystemExit("Late discovery requires an exact reason.")
+    prior_revision = int(case.get("inventory_revision", 1))
+    case.setdefault("applicability_history", []).append(
+        {
+            "inventory_revision": prior_revision,
+            "tag_inventory": deepcopy(case.get("tag_inventory", [])),
+            "layer_applicability": deepcopy(case.get("layer_applicability", [])),
+            "applicable_layers": deepcopy(case.get("applicable_layers", [])),
+            "frozen_at": case.get("applicability_frozen_at"),
+            "superseded_by_action_id": case_actions[-1].get("action_id"),
+            "superseded_reason": reason,
+        }
+    )
+    tag = {
+        "tag_id": args.tag_id,
+        "tag_name": args.tag_name,
+        "container_id": args.container_id,
+        "tag_category": args.tag_category,
+        "tag_delivery": args.tag_delivery,
+        "vendor_family": str(args.vendor_family or "").strip() or None,
+        "destination_id": str(args.destination_id or "").strip() or None,
+        "template_type": args.template_type,
+        "consent_required": args.consent_required == "true",
+        "evidence_ids": list(dict.fromkeys(args.evidence_id)),
+    }
+    inferred_category = inferred_tag_category(tag)
+    if inferred_category is not None and args.tag_category != inferred_category:
+        raise SystemExit(
+            f"Tag metadata identifies category {inferred_category}; received {args.tag_category}."
+        )
+    tag["scope_status"], tag["scope_reason"] = tag_scope_decision(
+        tag,
+        case.get("tag_scope"),
+        case.get("declared_tag_contracts", []),
+    )
+    inventory = [
+        *[row for row in case.get("tag_inventory", []) if isinstance(row, dict)],
+        tag,
+    ]
+    applicability = layer_applicability(
+        [
+            {"scope_status": "IN_SCOPE", "expectation": expectation}
+            for expectation in case.get("source_expectations", [])
+        ],
+        container_count=max(1, len(case.get("container_ids", []))),
+        tag_inventory=inventory,
+        activated_conditions=case.get("conditional_activations", {}),
+    )
+    prior_action_id = str(case_actions[-1].get("action_id"))
+    case.update(
+        {
+            "inventory_revision": prior_revision + 1,
+            "tag_inventory": inventory,
+            "tag_inventory_status": "COMPLETE",
+            "tag_inventory_reason": reason,
+            "tag_inventory_evidence_ids": list(
+                dict.fromkeys([*case.get("tag_inventory_evidence_ids", []), *args.evidence_id])
+            ),
+            "layer_applicability": applicability,
+            "applicable_layers": [
+                row["layer"] for row in applicability if row.get("mode") == "MANDATORY"
+            ],
+            "applicability_frozen_at": now(),
+            "execution_status": "PENDING",
+            "final_action_id": None,
+            "required_retest_of_action_id": prior_action_id,
+        }
+    )
+
+
+def complete_tag_inventory(ledger: dict[str, Any], args: argparse.Namespace) -> None:
+    """Freeze the per-case tag inventory and immutable applicability card."""
+    case = find_unique(ledger.get("cases", []), "case_id", args.case_id)
+    if case.get("applicability_status") != "DRAFT":
+        raise SystemExit("Case applicability is already frozen.")
+    reason = str(args.reason).strip()
+    if not reason:
+        raise SystemExit("Tag inventory completion requires an exact reason.")
+    inventory = [row for row in case.get("tag_inventory", []) if isinstance(row, dict)]
+    applicability = layer_applicability(
+        [
+            {"scope_status": "IN_SCOPE", "expectation": expectation}
+            for expectation in case.get("source_expectations", [])
+        ],
+        container_count=max(1, len(case.get("container_ids", []))),
+        tag_inventory=inventory,
+        activated_conditions=case.get("conditional_activations", {}),
+    )
+    # Backward-compatible fallback for a draft created before source expectations were stored.
+    if not case.get("source_expectations"):
+        applicability = list(case.get("layer_applicability", []))
+        mandatory = {row["layer"] for row in applicability if row.get("mode") == "MANDATORY"}
+        in_scope = [row for row in inventory if row.get("scope_status") == "IN_SCOPE"]
+        if any(row.get("consent_required") is True for row in in_scope):
+            mandatory.add("consent_when_applicable")
+        if in_scope and all(row.get("tag_delivery") == "local_only" for row in in_scope):
+            mandatory.discard("destination_request_when_applicable")
+        applicability = [
+            {
+                **row,
+                "mode": "MANDATORY" if row.get("layer") in mandatory else row.get("mode"),
+                "reason": (
+                    "A concerned tag declares consent requirements."
+                    if row.get("layer") == "consent_when_applicable"
+                    and row.get("layer") in mandatory
+                    else row.get("reason")
+                ),
+            }
+            for row in applicability
+        ]
+    case.update(
+        {
+            "tag_inventory_status": "COMPLETE",
+            "tag_inventory_reason": reason,
+            "tag_inventory_evidence_ids": list(dict.fromkeys(args.evidence_id)),
+            "applicability_status": "FROZEN",
+            "layer_applicability": applicability,
+            "applicable_layers": [
+                row["layer"] for row in applicability if row.get("mode") == "MANDATORY"
+            ],
+            "applicability_frozen_at": now(),
+        }
+    )
+
+
+def import_tag_results(ledger: dict[str, Any], args: argparse.Namespace) -> None:
+    """Import one row per in-scope tag and tag-related evidence layer."""
+    action = find_unique(ledger.get("actions", []), "action_id", args.action_id)
+    if action.get("state") != "OPEN":
+        raise SystemExit("Tag results can be imported only for an open action.")
+    value = json.loads(args.tag_results.read_text(encoding="utf-8"))
+    if isinstance(value, dict):
+        value = value.get("tag_layer_results")
+    if not isinstance(value, list) or any(not isinstance(row, dict) for row in value):
+        raise SystemExit("Tag results must be an array of objects.")
+    if action.get("tag_layer_results"):
+        raise SystemExit("Tag results are already recorded for this action.")
+    for index, row in enumerate(value, start=1):
+        if row.get("layer") not in TAG_RESULT_LAYERS:
+            raise SystemExit(f"Tag result row {index} has an unsupported layer.")
+        row["action_id"] = args.action_id
+        row.setdefault("recorded_at", now())
+    action["tag_layer_results"] = value
+
+
+def _comparison_template(
+    requirement_id: str,
+    source: str,
+    path: str,
+    *,
+    transform: str = "identity",
+) -> dict[str, Any]:
+    anchor = {"source": source, "requirement_id": requirement_id, "path": path}
+    if transform != "identity":
+        anchor["transform"] = transform
+    return {
+        "name": "replace-with-exact-field-name",
+        "expected_anchor": anchor,
+        "expected_value": None,
+        "expected_type": "null",
+        "actual_value": None,
+        "actual_type": "null",
+        "status": "BLOCKED",
+    }
+
+
+def scaffold_tag_results(ledger: dict[str, Any], args: argparse.Namespace) -> None:
+    """Write the exact in-scope tag x layer matrix as a fillable import template."""
+    action = find_unique(ledger.get("actions", []), "action_id", args.action_id)
+    if action.get("state") != "OPEN":
+        raise SystemExit("Tag result scaffolding requires an open action.")
+    case = find_unique(ledger.get("cases", []), "case_id", str(action.get("case_id")))
+    requirement_ids = [str(value) for value in action.get("requirement_ids", []) if str(value)]
+    if not requirement_ids:
+        raise SystemExit("The action has no accepted requirement IDs.")
+    requirement_id = requirement_ids[0]
+    output: list[dict[str, Any]] = []
+    for tag in case.get("tag_inventory", []):
+        if not isinstance(tag, dict) or tag.get("scope_status") != "IN_SCOPE":
+            continue
+        details_by_layer = {
+            "gtm_variable": {
+                "variables": [
+                    _comparison_template(
+                        requirement_id,
+                        "raw_data_layer_mapping",
+                        "resolved_data_layer.field_value",
+                    )
+                ]
+            },
+            "tag_configuration": {
+                "configuration": [
+                    _comparison_template(
+                        requirement_id,
+                        "tracking_plan",
+                        "expectation.expected_tag_configuration",
+                    )
+                ]
+            },
+            "tag_firing": {
+                "expected_firing": None,
+                "expected_firing_anchor": {
+                    "source": "tracking_plan",
+                    "requirement_id": requirement_id,
+                    "path": "expectation.expected_firing",
+                },
+                "actual_firing": None,
+                "fire_count": 0,
+            },
+            "tag_parameter": {
+                "parameters": [
+                    _comparison_template(
+                        requirement_id,
+                        "resolved_gtm_variable_contract",
+                        "gtm_variable.field_value",
+                    )
+                ]
+            },
+            "destination_request_when_applicable": {
+                "request_count": 0,
+                "request_ids": [],
+                "expected_request_behavior": None,
+                "expected_request_behavior_anchor": {
+                    "source": "tracking_plan",
+                    "requirement_id": requirement_id,
+                    "path": "expectation.expected_request_behavior",
+                },
+                "parameters": [
+                    _comparison_template(
+                        requirement_id,
+                        "explicit_acceptance_rule",
+                        "expectation.expected_request_behavior",
+                        transform="request_expected",
+                    )
+                ],
+            },
+            "consent_when_applicable": {"predicate_reason": "replace-with-direct-proof"},
+            "trigger_logic_when_applicable": {"predicate_reason": "replace-with-direct-proof"},
+            "tag_sequence_when_applicable": {"predicate_reason": "replace-with-direct-proof"},
+        }
+        for layer in TAG_RESULT_LAYERS:
+            output.append(
+                {
+                    "action_id": args.action_id,
+                    "tag_id": tag.get("tag_id"),
+                    "tag_name": tag.get("tag_name"),
+                    "container_id": tag.get("container_id"),
+                    "tag_category": tag.get("tag_category"),
+                    "tag_delivery": tag.get("tag_delivery"),
+                    "layer": layer,
+                    "status": "PENDING",
+                    "reason": "Pending direct evidence.",
+                    "details": details_by_layer[layer],
+                    "evidence_ids": [],
+                    "semantic_ambiguity": None,
+                    "blocker_id": None,
+                }
+            )
+    save(
+        args.output,
+        {
+            "schema_version": SESSION_SCHEMA_VERSION,
+            "action_id": args.action_id,
+            "inventory_revision": case.get("inventory_revision", 1),
+            "tag_layer_results": output,
+        },
+    )
+    print(f"Created {args.output.resolve()}")
 
 
 def begin_action(ledger: dict[str, Any], args: argparse.Namespace) -> None:
@@ -388,6 +826,14 @@ def begin_action(ledger: dict[str, Any], args: argparse.Namespace) -> None:
     case = find_unique(ledger.get("cases", []), "case_id", args.case_id)
     if case.get("scope_status") != "IN_SCOPE" or case.get("execution_status") == "BLOCKED":
         raise SystemExit("Actions can start only for an applicable, unblocked case.")
+    if (
+        case.get("tag_inventory_status") != "COMPLETE"
+        or case.get("applicability_status") != "FROZEN"
+    ):
+        raise SystemExit(
+            "Complete the concerned-tag inventory and freeze the applicability card "
+            "before beginning the action."
+        )
     if args.quiet_window_ms <= 0 or args.timeout_ms <= 0:
         raise SystemExit("Quiet window and timeout must be positive.")
     previous = sorted(
@@ -404,6 +850,11 @@ def begin_action(ledger: dict[str, Any], args: argparse.Namespace) -> None:
             )
     elif args.retry_of_action_id:
         raise SystemExit("The first case attempt cannot use --retry-of-action-id.")
+    required_retest = case.get("required_retest_of_action_id")
+    if required_retest and args.retry_of_action_id != required_retest:
+        raise SystemExit(
+            "Late tag discovery requires a retry of the retained pre-discovery action."
+        )
     container_ids = args.container_id or case.get("container_ids", [])
     if not container_ids:
         raise SystemExit("The action requires at least one client-side container ID.")
@@ -418,6 +869,7 @@ def begin_action(ledger: dict[str, Any], args: argparse.Namespace) -> None:
         "material_variant": case.get("material_variant"),
         "action": case.get("action"),
         "attempt_number": len(previous) + 1,
+        "inventory_revision": case.get("inventory_revision", 1),
         "connection_epoch": ledger.get("connection_epoch", 1),
         "retry_of_action_id": args.retry_of_action_id,
         "preview_connected_before": True,
@@ -430,6 +882,7 @@ def begin_action(ledger: dict[str, Any], args: argparse.Namespace) -> None:
         "quiet_window_ms": args.quiet_window_ms,
         "timeout_ms": args.timeout_ms,
         "layer_results": [],
+        "tag_layer_results": [],
         "state": "OPEN",
     }
     ledger.setdefault("actions", []).append(action)
@@ -599,18 +1052,26 @@ def import_cases(ledger: dict[str, Any], args: argparse.Namespace) -> None:
                 authorization_id=[],
                 include_layer=[],
                 exclude_layer=[],
+                activate_condition=[],
             ),
         )
 
 
 def record_layer(ledger: dict[str, Any], args: argparse.Namespace) -> None:
     action = find_unique(ledger.get("actions", []), "action_id", args.action_id)
-    if args.layer not in find_unique(
+    case = find_unique(
         ledger.get("cases", []),
         "case_id",
         str(action.get("case_id")),
-    ).get("applicable_layers", []):
-        raise SystemExit(f"Layer is not applicable to this case: {args.layer}")
+    )
+    decisions = {
+        row.get("layer"): row
+        for row in case.get("layer_applicability", [])
+        if isinstance(row, dict)
+    }
+    decision = decisions.get(args.layer)
+    if decision is None:
+        raise SystemExit(f"Layer is absent from the frozen applicability card: {args.layer}")
     if any(
         row.get("layer") == args.layer
         for row in action.get("layer_results", [])
@@ -621,6 +1082,21 @@ def record_layer(ledger: dict[str, Any], args: argparse.Namespace) -> None:
         raise SystemExit("REVIEW requires --semantic-ambiguity.")
     if args.status == "BLOCKED" and not str(args.blocker_id or "").strip():
         raise SystemExit("BLOCKED layer evidence requires --blocker-id.")
+    predicate_result = (
+        args.predicate_result == "true" if args.predicate_result is not None else None
+    )
+    if decision.get("mode") == "MANDATORY":
+        if args.status == "NOT_APPLICABLE":
+            raise SystemExit("A mandatory layer cannot be NOT_APPLICABLE.")
+        if predicate_result is False:
+            raise SystemExit("A mandatory layer cannot have predicate_result=false.")
+    else:
+        if predicate_result is None:
+            raise SystemExit("Conditional layers require --predicate-result true or false.")
+        if predicate_result is False and args.status != "NOT_APPLICABLE":
+            raise SystemExit("A false conditional predicate requires NOT_APPLICABLE.")
+        if predicate_result is True and args.status == "NOT_APPLICABLE":
+            raise SystemExit("An activated conditional layer cannot be NOT_APPLICABLE.")
     action.setdefault("layer_results", []).append(
         {
             "layer": args.layer,
@@ -631,6 +1107,7 @@ def record_layer(ledger: dict[str, Any], args: argparse.Namespace) -> None:
                 str(args.semantic_ambiguity).strip() if args.semantic_ambiguity else None
             ),
             "blocker_id": str(args.blocker_id).strip() if args.blocker_id else None,
+            "predicate_result": predicate_result,
             "recorded_at": now(),
         }
     )
@@ -694,6 +1171,7 @@ def settle_action(ledger: dict[str, Any], args: argparse.Namespace) -> None:
         )
         case["execution_status"] = "EXECUTED"
         case["final_action_id"] = args.action_id
+        case.pop("required_retest_of_action_id", None)
     if args.settlement_reason == "preview_disconnected":
         ledger["connection_epoch"] = (
             action.get("connection_epoch", ledger.get("connection_epoch", 1)) + 1
@@ -824,12 +1302,16 @@ MUTATING_COMMANDS = {
     "register-surface": register_surface,
     "authorize": authorize,
     "register-case": register_case,
+    "register-tag": register_tag,
+    "complete-tag-inventory": complete_tag_inventory,
     "close-case": close_case,
     "begin-action": begin_action,
     "record-push": record_push,
     "import-pushes": import_pushes,
     "import-cases": import_cases,
     "record-layer": record_layer,
+    "import-tag-results": import_tag_results,
+    "revise-tag-inventory": revise_tag_inventory,
     "settle-action": settle_action,
     "checkpoint": checkpoint,
 }
@@ -850,6 +1332,9 @@ def main() -> int:
         return 0
     if args.command == "status":
         print(json.dumps(ledger, ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "scaffold-tag-results":
+        scaffold_tag_results(ledger, args)
         return 0
 
     MUTATING_COMMANDS[args.command](ledger, args)

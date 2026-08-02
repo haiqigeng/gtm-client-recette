@@ -1,6 +1,6 @@
 # Workbook Architecture
 
-Generate schema-v2 reports with:
+Generate schema-v3 reports with:
 
 ```powershell
 python scripts/build_recette_report.py normalized-results.json gtm-recette-results.xlsx `
@@ -15,21 +15,22 @@ The workbook contains, in order:
 3. `Requirement Matrix`
 4. `Journey Coverage`
 5. `Interaction Cases`
-6. `Event Evidence`
-7. `Observed Push Stream`
-8. `Tag Evidence`
-9. `Destination Evidence`
-10. `Trigger & Sequence`
-11. `Consent`
-12. `Business Rules`
-13. `Sensitive Data`
-14. `Client Checks`
-15. `Regression`
-16. `Container Context`
-17. `Unexpected Events-Tags`
-18. `Blockers`
-19. `Evidence Catalogue`
-20. `Run Context`
+6. `Layer Verdicts`
+7. `Event Evidence`
+8. `Observed Push Stream`
+9. `Tag Evidence`
+10. `Destination Evidence`
+11. `Trigger & Sequence`
+12. `Consent`
+13. `Business Rules`
+14. `Sensitive Data`
+15. `Client Checks`
+16. `Regression`
+17. `Container Context`
+18. `Unexpected Events-Tags`
+19. `Blockers`
+20. `Evidence Catalogue`
+21. `Run Context`
 
 `Client Summary` includes the complete event list in original plan order,
 status, requirement and case counts, verified layer statuses, concise reason,
@@ -54,10 +55,17 @@ source order. Protected analyst input is represented only by its canonical
 redacted marker.
 
 `Interaction Cases` lists every case and retained attempt with placement,
-material variant, applicable layers, completion signal, push count, retry
-lineage, and layer results. `Observed Push Stream` lists every chronological
+material variant, tag scope and inventory, immutable applicability card,
+completion signal, push count, retry lineage, and layer results. `Observed Push
+Stream` lists every chronological
 business push, action/case mapping, page/state, classification/reason,
 container, connection epoch, and exact API Call evidence.
+
+`Layer Verdicts` is the omission-control surface. It contains one row per
+event/case/canonical layer plus one subrow per in-scope tag and tag-related
+layer. Each row has status, reason, predicate result, evidence, blocker, and
+retest. Detected out-of-scope tags remain visible with their scope reason. The
+event roll-up is the worst layer status.
 
 `Event Evidence` keeps action and retry IDs, independent interaction outcome
 and completion signal, adaptive quiet/timeout values, stream-settlement reason,
@@ -80,17 +88,19 @@ paths, decoded value/type, request behaviour/count, endpoint, and evidence.
 This lets an analyst trace each plan value back to the captured browser send.
 
 `Evidence Catalogue` keeps canonical evidence kind/source/capture mode and
-structured action/event/container/request/tag linkage separate from optional
+structured action/event/container/request/tag-ID linkage separate from optional
 `source_detail`, then path/URL, timezone-qualified capture time, and redacted
 description.
 
-Keep all 20 sheets even when an optional domain has zero rows. The empty,
+Keep all 21 sheets even when an optional domain has zero rows. The empty,
 filtered sheet makes non-applicability visible and prevents a missing worksheet
 from hiding an omitted layer.
 
 The builder reloads the XLSX and verifies required sheets, order, row counts,
 filters, links, and formatting. Do not declare completion when strict validation
-or reload checks fail.
+or reload checks fail. Structured text longer than Excel's 32,767-character
+cell limit is split into explicit `[part i/n]` continuation rows before save;
+physical row counts are recomputed and silent truncation is rejected.
 
 Generate optional shareable sidecars from the same validated source:
 

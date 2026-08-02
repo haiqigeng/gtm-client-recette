@@ -11,9 +11,11 @@ DIRECT_CAPTURE_KINDS = {
     "resolved_data_layer",
     "gtm_variable",
     "tag_configuration",
+    "tag_inventory",
     "tag_runtime",
     "browser_interception",
     "browser_network_request",
+    "browser_network_capture",
     "browser_console",
     "console_error",
     "vendor_helper",
@@ -48,6 +50,7 @@ CAPTURE_MODES = {"direct", "deterministic", "analyst_supplied", "supplemental"}
 
 ACTION_BOUND_EVIDENCE_KINDS = DIRECT_CAPTURE_KINDS - {
     "tag_configuration",
+    "tag_inventory",
     "screenshot",
     "navigation",
 }
@@ -72,8 +75,10 @@ CONTAINER_BOUND_EVIDENCE_KINDS = {
     "resolved_data_layer",
     "gtm_variable",
     "tag_configuration",
+    "tag_inventory",
     "tag_runtime",
     "browser_network_request",
+    "browser_network_capture",
     "trigger_evaluation",
     "tag_sequence",
     "tag_assistant_consent",

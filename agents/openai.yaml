@@ -1,4 +1,4 @@
 interface:
   display_name: "GTM Preview Recette"
   short_description: "Run exhaustive client-side GTM acceptance QA"
-  default_prompt: "Use $gtm-preview-recette to register and test every applicable tracking-plan interaction case in order, prove each website action independently, classify and count every business push, close every applicable raw/resolved/GTM/tag/runtime/browser-send layer with direct evidence, complete safe gated journeys, and deliver immediate per-event verdicts plus a strictly validated XLSX and actionable defect register."
+  default_prompt: "Use $gtm-preview-recette to test every applicable tracking-plan interaction in order. Treat the plan as expected-value and journey support, never as the layer selector; for every planned dataLayer event, close all 19 canonical layers and all 8 per-tag layers with exact tag identity, accepted expectation anchors, reconciled browser requests, and privacy-safe evidence. Default to analytics tag scope, keep detected exclusions visible, complete ordinary safe synthetic journeys, and deliver immediate per-event/per-layer/per-tag verdicts plus the strictly validated XLSX and defect register."

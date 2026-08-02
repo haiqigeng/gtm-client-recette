@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "run": {
     "run_id": "RUN-LIMITED-001",
     "report_title": "Pre-CMP event-order check",
@@ -19,6 +19,32 @@
     ],
     "tracking_plan_source": "Analyst-defined rule",
     "acceptance_scope": "Confirm page_ready is pushed before cmp_init; tag layers excluded.",
+    "tag_scope": {
+      "mode": "analytics_only",
+      "explicit_tag_names": [],
+      "include_plan_declared_media": true,
+      "reason": "Analytics tags are in scope by default; other detected tags remain visible."
+    },
+    "journey_authority": {
+      "complete_ordinary_journeys": true,
+      "safe_synthetic_data": true,
+      "ordinary_form_inputs": true,
+      "ordinary_privacy_acknowledgements": true,
+      "ordinary_opt_ins_when_part_of_tested_conversion": true,
+      "ordinary_form_submissions": true,
+      "protected_boundaries": [
+        "CREDENTIALS",
+        "GOOGLE_SIGN_IN",
+        "MFA",
+        "CAPTCHA",
+        "EMAIL_VERIFICATION",
+        "SMS_VERIFICATION",
+        "MAGIC_LINK",
+        "REAL_PAYMENT",
+        "EXTERNAL_APPROVAL",
+        "IRREVERSIBLE_ACTION"
+      ]
+    },
     "executed_at": "2026-07-25T10:00:00+00:00",
     "included_layers": [
       "raw_api_call"

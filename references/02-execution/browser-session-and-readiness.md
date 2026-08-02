@@ -82,7 +82,8 @@ Record:
 - quiet-window and bounded-timeout values;
 - whether the relevant stream settled and why.
 - the independently observed business-push count and every classified push ID;
-- every applicable layer result and direct evidence ID.
+- every canonical layer result, conditional predicate result, per-tag subrow,
+  and direct evidence ID.
 
 Normalize the action value, JSON-compatible type, and source. Use explicit
 `null`/`not_applicable` for a plain click or load. Preserve safe supplied or

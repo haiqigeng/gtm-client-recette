@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build and semantically validate a schema-v2 GTM Preview recette workbook."""
+"""Build and semantically validate a schema-v3 GTM Preview recette workbook."""
 
 from __future__ import annotations
 
@@ -26,6 +26,7 @@ from execution_contract import (
     case_action_rows,
     validate_session,
 )
+from layer_contract import CANONICAL_LAYERS, TAG_RESULT_LAYERS
 from recette_schema import (
     ReportValidationError,
     as_rows,
@@ -39,11 +40,13 @@ STATUS_FILLS = {
     "BLOCKED": "F4B183",
     "REVIEW": "FFF2CC",
     "NOT_TESTED": "D9E1F2",
+    "NOT_APPLICABLE": "E7E6E6",
 }
 UNSAFE_EVIDENCE_MARKERS = (
     "unallowlisted sensitive content",
     "provenance contains sensitive content",
     "must not retain an unredacted value",
+    "session contains unredacted sensitive content",
 )
 
 
@@ -61,6 +64,9 @@ HEADER_FONT = Font(color="FFFFFF", bold=True)
 SECTION_FILL = PatternFill("solid", fgColor="D9EAF7")
 THIN_BORDER = Border(bottom=Side(style="thin", color="B7C9D6"))
 WRAP_ALIGNMENT = Alignment(vertical="top", wrap_text=True)
+EXCEL_CELL_LIMIT = 32767
+EXCEL_CHUNK_PAYLOAD = 32000
+EXCEL_CONTINUATION_PREFIX = "[part {part}/{total}] "
 
 REQUIRED_SHEETS = [
     "Client Summary",
@@ -68,6 +74,7 @@ REQUIRED_SHEETS = [
     "Requirement Matrix",
     "Journey Coverage",
     "Interaction Cases",
+    "Layer Verdicts",
     "Event Evidence",
     "Observed Push Stream",
     "Tag Evidence",
@@ -93,6 +100,7 @@ DEFECT_HEADERS = [
     "status",
     "case_id",
     "requirement_id",
+    "tag_name",
     "placement",
     "material_variant",
     "failed_layer",
@@ -225,6 +233,11 @@ CASE_HEADERS = [
     "action",
     "material_variant",
     "discovered_from",
+    "tag_scope",
+    "tag_inventory_status",
+    "tag_inventory",
+    "applicability_status",
+    "layer_applicability",
     "applicable_layers",
     "blocker_id",
     "case_reason",
@@ -238,6 +251,25 @@ CASE_HEADERS = [
     "settlement_reason",
     "observed_business_push_count",
     "layer_results",
+    "tag_layer_results",
+]
+
+LAYER_VERDICT_HEADERS = [
+    "plan_order",
+    "event_group_id",
+    "event_name",
+    "case_id",
+    "action_id",
+    "tag_id",
+    "tag_name",
+    "tag_scope_status",
+    "layer",
+    "status",
+    "reason",
+    "predicate_result",
+    "details",
+    "evidence_ids",
+    "exact_retest",
 ]
 
 EVENT_HEADERS = [
@@ -315,6 +347,12 @@ TAG_HEADERS = [
     "destination_id",
     "template_type",
     "tag_name",
+    "tag_id",
+    "tag_category",
+    "tag_delivery",
+    "scope_status",
+    "scope_reason",
+    "inventory_status",
     "relevance",
     "expected_firing",
     "actual_firing",
@@ -333,6 +371,7 @@ TAG_HEADERS = [
     "execution_error",
     "error_evidence_id",
     "notes",
+    "layer_results",
 ]
 
 CONSENT_HEADERS = [
@@ -523,6 +562,7 @@ BLOCKER_HEADERS = [
     "checkpoint",
     "description",
     "requirement_ids",
+    "attempted_methods",
     "analyst_intervention_required",
     "analyst_help_requested",
     "analyst_response",
@@ -540,6 +580,7 @@ EVIDENCE_HEADERS = [
     "action_id",
     "event_index",
     "container_id",
+    "tag_id",
     "request_id",
     "tag_name",
     "configuration_field",
@@ -552,7 +593,7 @@ EVIDENCE_HEADERS = [
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("input", help="Schema-v2 normalized JSON path, or - for stdin.")
+    parser.add_argument("input", help="Schema-v3 normalized JSON path, or - for stdin.")
     parser.add_argument("output", nargs="?", help="Destination .xlsx path.")
     parser.add_argument("--strict", action="store_true", help="Reject every semantic error.")
     parser.add_argument(
@@ -592,19 +633,58 @@ def serialize(value: Any) -> Any:
 def set_safe_cell(cell: Cell, value: Any) -> Cell:
     """Write a workbook value without allowing untrusted text to become a formula."""
     serialized = serialize(value)
+    if isinstance(serialized, str) and len(serialized) > EXCEL_CELL_LIMIT:
+        raise ReportValidationError(
+            "A non-tabular workbook cell exceeds Excel's 32,767-character limit; "
+            "move the structured evidence to a table where it can be split safely."
+        )
     cell.value = serialized
     if isinstance(serialized, str):
         cell.data_type = "s"
     return cell
 
 
-def append_safe_row(ws, values: Iterable[Any]) -> None:
-    """Append one row while forcing every string cell to the literal string type."""
+def _excel_parts(value: Any) -> list[Any]:
+    serialized = serialize(value)
+    if not isinstance(serialized, str) or len(serialized) <= EXCEL_CELL_LIMIT:
+        return [serialized]
+    raw_parts = [
+        serialized[index : index + EXCEL_CHUNK_PAYLOAD]
+        for index in range(0, len(serialized), EXCEL_CHUNK_PAYLOAD)
+    ]
+    total = len(raw_parts)
+    return [
+        EXCEL_CONTINUATION_PREFIX.format(part=index, total=total) + part
+        for index, part in enumerate(raw_parts, start=1)
+    ]
+
+
+def expanded_row_count(values: Iterable[Any]) -> int:
+    """Return how many physical Excel rows one logical row requires."""
+    return max((len(_excel_parts(value)) for value in values), default=1)
+
+
+def append_safe_row(ws, values: Iterable[Any]) -> int:
+    """Append one logical row, splitting oversized cells with explicit part markers."""
     serialized = [serialize(value) for value in values]
-    ws.append(serialized)
-    for cell, value in zip(ws[ws.max_row], serialized, strict=False):
-        if isinstance(value, str):
-            cell.data_type = "s"
+    parts = [_excel_parts(value) for value in serialized]
+    physical_rows = max((len(value_parts) for value_parts in parts), default=1)
+    for index in range(physical_rows):
+        row_values = [
+            (
+                value_parts[index]
+                if len(value_parts) > 1 and index < len(value_parts)
+                else ""
+                if len(value_parts) > 1
+                else value_parts[0]
+            )
+            for value_parts in parts
+        ]
+        ws.append(row_values)
+        for cell, value in zip(ws[ws.max_row], row_values, strict=False):
+            if isinstance(value, str):
+                cell.data_type = "s"
+    return physical_rows
 
 
 def apply_status_fill(cell: Cell) -> None:
@@ -700,6 +780,11 @@ def add_table_sheet(
     for row in rows:
         append_safe_row(ws, [row.get(header) for header in headers])
     style_table(ws)
+
+
+def table_sheet_row_count(headers: list[str], rows: Iterable[dict[str, Any]]) -> int:
+    """Return the exact physical row count after safe continuation splitting."""
+    return 1 + sum(expanded_row_count(row.get(header) for header in headers) for row in rows)
 
 
 def _observation_value(observation: Any, field: str) -> Any:
@@ -993,7 +1078,8 @@ def defect_rows(
         layer_results = [
             row
             for row in final_action.get("layer_results", [])
-            if isinstance(row, dict) and status_of(row.get("status")) != "PASS"
+            if isinstance(row, dict)
+            and status_of(row.get("status")) not in {"PASS", "NOT_APPLICABLE"}
         ]
         if case_status == "EXECUTED" and not layer_results:
             continue
@@ -1023,6 +1109,7 @@ def defect_rows(
                     "status": status_of(layer_result.get("status")) or case_status,
                     "case_id": case.get("case_id"),
                     "requirement_id": None,
+                    "tag_name": None,
                     "placement": case.get("placement"),
                     "material_variant": variant,
                     "failed_layer": layer,
@@ -1033,6 +1120,44 @@ def defect_rows(
                     "concise_reason": layer_result.get("reason") or case.get("reason"),
                     "exact_retest": retest,
                     "evidence_ids": layer_result.get("evidence_ids") or [],
+                    "retest_status": "PENDING",
+                }
+            )
+        inventory_by_id = {
+            str(row.get("tag_id", "")): row
+            for row in case.get("tag_inventory", [])
+            if isinstance(row, dict)
+        }
+        for tag_result in final_action.get("tag_layer_results", []) or []:
+            if not isinstance(tag_result, dict) or status_of(tag_result.get("status")) in {
+                "PASS",
+                "NOT_APPLICABLE",
+            }:
+                continue
+            tag = inventory_by_id.get(str(tag_result.get("tag_id", "")), {})
+            layer = str(tag_result.get("layer", "tag_layer"))
+            output.append(
+                {
+                    "defect_id": (
+                        f"DEF-TAG-{case.get('case_id')}-{tag_result.get('tag_id')}-{layer}"
+                    ),
+                    "plan_order": inventory.get("plan_order"),
+                    "event_group_id": group_id,
+                    "event_name": inventory.get("event_name"),
+                    "status": status_of(tag_result.get("status")),
+                    "case_id": case.get("case_id"),
+                    "requirement_id": None,
+                    "tag_name": tag.get("tag_name"),
+                    "placement": case.get("placement"),
+                    "material_variant": variant,
+                    "failed_layer": layer,
+                    "expected_value": "per-tag layer accepted",
+                    "expected_type": "layer_status",
+                    "observed_value": tag_result.get("details"),
+                    "observed_type": "object",
+                    "concise_reason": tag_result.get("reason"),
+                    "exact_retest": retest,
+                    "evidence_ids": tag_result.get("evidence_ids") or [],
                     "retest_status": "PENDING",
                 }
             )
@@ -1139,7 +1264,87 @@ def event_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
     return output
 
 
-def tag_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
+def tag_rows(
+    data: dict[str, Any],
+    session: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    if isinstance(session, dict):
+        inventory_by_group = {
+            str(row.get("event_group_id", "")): row
+            for row in data.get("run", {}).get("event_inventory", [])
+            if isinstance(row, dict)
+        }
+        actions = {
+            str(row.get("action_id", "")): row
+            for row in session.get("actions", [])
+            if isinstance(row, dict)
+        }
+        output: list[dict[str, Any]] = []
+        for case in session.get("cases", []):
+            if not isinstance(case, dict):
+                continue
+            event = inventory_by_group.get(str(case.get("event_group_id", "")), {})
+            action = actions.get(str(case.get("final_action_id", "")), {})
+            results_by_tag: dict[str, list[dict[str, Any]]] = {}
+            for result in action.get("tag_layer_results", []) or []:
+                if isinstance(result, dict):
+                    results_by_tag.setdefault(str(result.get("tag_id", "")), []).append(result)
+            for tag in case.get("tag_inventory", []) or []:
+                if not isinstance(tag, dict):
+                    continue
+                tag_id = str(tag.get("tag_id", ""))
+                layers = results_by_tag.get(tag_id, [])
+                layer_by_name = {
+                    str(row.get("layer", "")): row for row in layers if isinstance(row, dict)
+                }
+                firing = (layer_by_name.get("tag_firing") or {}).get("details") or {}
+                configuration = (layer_by_name.get("tag_configuration") or {}).get("details") or {}
+                parameters = (layer_by_name.get("tag_parameter") or {}).get("details") or {}
+                output.append(
+                    {
+                        "plan_order": event.get("plan_order"),
+                        "event_group_id": case.get("event_group_id"),
+                        "requirement_id": None,
+                        "event_name": event.get("event_name"),
+                        "container_id": tag.get("container_id"),
+                        "vendor_family": tag.get("vendor_family"),
+                        "destination_id": tag.get("destination_id"),
+                        "template_type": tag.get("template_type"),
+                        "tag_name": tag.get("tag_name"),
+                        "tag_id": tag_id,
+                        "tag_category": tag.get("tag_category"),
+                        "tag_delivery": tag.get("tag_delivery"),
+                        "scope_status": tag.get("scope_status"),
+                        "scope_reason": tag.get("scope_reason"),
+                        "inventory_status": case.get("tag_inventory_status"),
+                        "relevance": "runtime_discovered",
+                        "expected_firing": firing.get("expected_firing"),
+                        "actual_firing": firing.get("actual_firing"),
+                        "fire_count": firing.get("fire_count"),
+                        "configuration_field": configuration.get("configuration_field"),
+                        "configured_value": configuration.get("configuration"),
+                        "runtime_state": parameters.get("runtime_state"),
+                        "runtime_value": parameters.get("parameters"),
+                        "runtime_type": parameters.get("runtime_type"),
+                        "firing_status": (layer_by_name.get("tag_firing") or {}).get("status"),
+                        "parameter_status": (layer_by_name.get("tag_parameter") or {}).get(
+                            "status"
+                        ),
+                        "non_firing_reason": (layer_by_name.get("tag_firing") or {}).get("reason"),
+                        "reason_source": "direct runtime evidence" if layers else None,
+                        "configuration_evidence_id": (
+                            layer_by_name.get("tag_configuration") or {}
+                        ).get("evidence_ids"),
+                        "runtime_evidence_id": (layer_by_name.get("tag_parameter") or {}).get(
+                            "evidence_ids"
+                        ),
+                        "execution_error": firing.get("execution_error"),
+                        "error_evidence_id": firing.get("error_evidence_id"),
+                        "notes": case.get("tag_inventory_reason"),
+                        "layer_results": layers,
+                    }
+                )
+        return output
     output = []
     for req in as_rows(data.get("requirements"), "requirements"):
         tag = req.get("tag")
@@ -1161,6 +1366,12 @@ def tag_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
                 "destination_id": tag.get("destination_id") or expectation.get("destination_id"),
                 "template_type": tag.get("template_type"),
                 "tag_name": tag.get("name"),
+                "tag_id": None,
+                "tag_category": "analytics" if expectation.get("vendor_family") == "ga4" else None,
+                "tag_delivery": expectation.get("tag_delivery"),
+                "scope_status": "IN_SCOPE",
+                "scope_reason": "Plan-declared tag; no session inventory supplied.",
+                "inventory_status": None,
                 "relevance": tag.get("relevance"),
                 "expected_firing": tag.get("expected_firing"),
                 "actual_firing": tag.get("actual_firing"),
@@ -1179,9 +1390,113 @@ def tag_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
                 "execution_error": tag.get("execution_error"),
                 "error_evidence_id": tag.get("error_evidence_id"),
                 "notes": req.get("notes"),
+                "layer_results": None,
             }
         )
     return output
+
+
+def layer_verdict_rows(
+    data: dict[str, Any],
+    session: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Return one visible row per event layer and one subrow per in-scope tag layer."""
+    if not isinstance(session, dict):
+        return []
+    inventory = {
+        str(row.get("event_group_id", "")): row
+        for row in data.get("run", {}).get("event_inventory", [])
+        if isinstance(row, dict)
+    }
+    feedback_by_group = {
+        str(row.get("event_group_id", "")): row for row in event_feedback(data, session)
+    }
+    output: list[dict[str, Any]] = []
+    for group_id, feedback in feedback_by_group.items():
+        event = inventory.get(group_id, {})
+        for row in feedback.get("layer_feedback", []):
+            output.append(
+                {
+                    "plan_order": event.get("plan_order"),
+                    "event_group_id": group_id,
+                    "event_name": event.get("event_name"),
+                    "case_id": row.get("case_id"),
+                    "action_id": row.get("action_id"),
+                    "tag_id": None,
+                    "tag_name": None,
+                    "tag_scope_status": None,
+                    "layer": row.get("layer"),
+                    "status": row.get("status"),
+                    "reason": row.get("reason"),
+                    "predicate_result": row.get("predicate_result"),
+                    "details": None,
+                    "evidence_ids": row.get("evidence_ids"),
+                    "exact_retest": feedback.get("retest"),
+                }
+            )
+        for tag in feedback.get("tag_feedback", []):
+            if tag.get("scope_status") == "OUT_OF_SCOPE":
+                output.append(
+                    {
+                        "plan_order": event.get("plan_order"),
+                        "event_group_id": group_id,
+                        "event_name": event.get("event_name"),
+                        "case_id": tag.get("case_id"),
+                        "action_id": tag.get("action_id"),
+                        "tag_id": tag.get("tag_id"),
+                        "tag_name": tag.get("tag_name"),
+                        "tag_scope_status": "OUT_OF_SCOPE",
+                        "layer": "concerned_tag_inventory",
+                        "status": "NOT_APPLICABLE",
+                        "reason": tag.get("scope_reason"),
+                        "predicate_result": False,
+                        "details": {
+                            "tag_category": tag.get("tag_category"),
+                            "tag_delivery": tag.get("tag_delivery"),
+                        },
+                        "evidence_ids": tag.get("evidence_ids"),
+                        "exact_retest": feedback.get("retest"),
+                    }
+                )
+                continue
+            for layer in tag.get("layers", []):
+                output.append(
+                    {
+                        "plan_order": event.get("plan_order"),
+                        "event_group_id": group_id,
+                        "event_name": event.get("event_name"),
+                        "case_id": tag.get("case_id"),
+                        "action_id": tag.get("action_id"),
+                        "tag_id": tag.get("tag_id"),
+                        "tag_name": tag.get("tag_name"),
+                        "tag_scope_status": tag.get("scope_status"),
+                        "layer": layer.get("layer"),
+                        "status": layer.get("status"),
+                        "reason": layer.get("reason"),
+                        "predicate_result": None,
+                        "details": layer.get("details"),
+                        "evidence_ids": layer.get("evidence_ids"),
+                        "exact_retest": feedback.get("retest"),
+                    }
+                )
+    canonical_order = {layer: index for index, layer in enumerate(CANONICAL_LAYERS)}
+    tag_order = {layer: index for index, layer in enumerate(TAG_RESULT_LAYERS)}
+    return sorted(
+        output,
+        key=lambda row: (
+            float(row.get("plan_order"))
+            if isinstance(row.get("plan_order"), (int, float))
+            else 1e18,
+            str(row.get("case_id", "")),
+            0 if row.get("tag_id") in (None, "") else 1,
+            str(row.get("tag_id") or ""),
+            (
+                canonical_order.get(str(row.get("layer", "")), len(canonical_order))
+                if row.get("tag_id") in (None, "")
+                else tag_order.get(str(row.get("layer", "")), len(tag_order))
+            ),
+        ),
+    )
 
 
 def consent_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1656,6 +1971,12 @@ def build_workbook(
         CASE_HEADERS,
         _generic_rows(case_action_rows(session or {}), CASE_HEADERS),
     )
+    add_table_sheet(
+        wb,
+        "Layer Verdicts",
+        LAYER_VERDICT_HEADERS,
+        layer_verdict_rows(data, session),
+    )
     add_table_sheet(wb, "Event Evidence", EVENT_HEADERS, event_rows(data))
     add_table_sheet(
         wb,
@@ -1663,7 +1984,7 @@ def build_workbook(
         PUSH_HEADERS,
         _generic_rows(business_push_rows(session or {}), PUSH_HEADERS),
     )
-    add_table_sheet(wb, "Tag Evidence", TAG_HEADERS, tag_rows(data))
+    add_table_sheet(wb, "Tag Evidence", TAG_HEADERS, tag_rows(data, session))
     add_table_sheet(
         wb,
         "Destination Evidence",
@@ -1760,24 +2081,52 @@ def validate_workbook(
         if workbook.sheetnames != REQUIRED_SHEETS:
             raise ReportValidationError("Generated workbook sheets are not in the required order.")
         expected_rows = {
-            "Defect Register": len(defect_rows(data, session)) + 1,
-            "Requirement Matrix": len(as_rows(data.get("requirements"), "requirements")) + 1,
-            "Journey Coverage": len(as_rows(data.get("requirements"), "requirements")) + 1,
-            "Interaction Cases": len(case_action_rows(session or {})) + 1,
-            "Event Evidence": len(as_rows(data.get("requirements"), "requirements")) + 1,
-            "Observed Push Stream": len(business_push_rows(session or {})) + 1,
-            "Tag Evidence": len(tag_rows(data)) + 1,
-            "Destination Evidence": len(destination_rows(data)) + 1,
-            "Trigger & Sequence": len(trigger_sequence_rows(data)) + 1,
-            "Consent": len(consent_rows(data)) + 1,
-            "Business Rules": len(business_rule_rows(data)) + 1,
-            "Sensitive Data": len(sensitive_data_rows(data)) + 1,
-            "Client Checks": len(client_check_rows(data)) + 1,
-            "Regression": len(regression_rows(data)) + 1,
-            "Container Context": len(container_rows(data)) + 1,
-            "Unexpected Events-Tags": len(as_rows(data.get("unexpected"), "unexpected")) + 1,
-            "Blockers": len(as_rows(data.get("blockers"), "blockers")) + 1,
-            "Evidence Catalogue": len(as_rows(data.get("evidence"), "evidence")) + 1,
+            "Defect Register": table_sheet_row_count(DEFECT_HEADERS, defect_rows(data, session)),
+            "Requirement Matrix": table_sheet_row_count(
+                REQUIREMENT_HEADERS, requirement_rows(data)
+            ),
+            "Journey Coverage": table_sheet_row_count(JOURNEY_HEADERS, journey_rows(data)),
+            "Interaction Cases": table_sheet_row_count(
+                CASE_HEADERS,
+                _generic_rows(case_action_rows(session or {}), CASE_HEADERS),
+            ),
+            "Layer Verdicts": table_sheet_row_count(
+                LAYER_VERDICT_HEADERS, layer_verdict_rows(data, session)
+            ),
+            "Event Evidence": table_sheet_row_count(EVENT_HEADERS, event_rows(data)),
+            "Observed Push Stream": table_sheet_row_count(
+                PUSH_HEADERS,
+                _generic_rows(business_push_rows(session or {}), PUSH_HEADERS),
+            ),
+            "Tag Evidence": table_sheet_row_count(TAG_HEADERS, tag_rows(data, session)),
+            "Destination Evidence": table_sheet_row_count(
+                DESTINATION_HEADERS, destination_rows(data)
+            ),
+            "Trigger & Sequence": table_sheet_row_count(
+                TRIGGER_SEQUENCE_HEADERS, trigger_sequence_rows(data)
+            ),
+            "Consent": table_sheet_row_count(CONSENT_HEADERS, consent_rows(data)),
+            "Business Rules": table_sheet_row_count(
+                BUSINESS_RULE_HEADERS, business_rule_rows(data)
+            ),
+            "Sensitive Data": table_sheet_row_count(
+                SENSITIVE_DATA_HEADERS, sensitive_data_rows(data)
+            ),
+            "Client Checks": table_sheet_row_count(CLIENT_CHECK_HEADERS, client_check_rows(data)),
+            "Regression": table_sheet_row_count(REGRESSION_HEADERS, regression_rows(data)),
+            "Container Context": table_sheet_row_count(CONTAINER_HEADERS, container_rows(data)),
+            "Unexpected Events-Tags": table_sheet_row_count(
+                UNEXPECTED_HEADERS,
+                _generic_rows(as_rows(data.get("unexpected"), "unexpected"), UNEXPECTED_HEADERS),
+            ),
+            "Blockers": table_sheet_row_count(
+                BLOCKER_HEADERS,
+                _generic_rows(as_rows(data.get("blockers"), "blockers"), BLOCKER_HEADERS),
+            ),
+            "Evidence Catalogue": table_sheet_row_count(
+                EVIDENCE_HEADERS,
+                _generic_rows(as_rows(data.get("evidence"), "evidence"), EVIDENCE_HEADERS),
+            ),
         }
         for title, count in expected_rows.items():
             sheet = workbook[title]
@@ -1789,6 +2138,12 @@ def validate_workbook(
                 raise ReportValidationError(
                     f"Generated workbook sheet '{title}' is missing its filter."
                 )
+            for row in sheet.iter_rows():
+                for cell in row:
+                    if isinstance(cell.value, str) and len(cell.value) > EXCEL_CELL_LIMIT:
+                        raise ReportValidationError(
+                            f"Generated workbook sheet '{title}' contains an oversized cell."
+                        )
     finally:
         workbook.close()
 
@@ -1884,7 +2239,7 @@ def main() -> int:
                 raise ReportValidationError("\n".join(execution_errors))
             warnings.extend(execution_errors)
         if args.validate_only:
-            print("Schema-v2 recette results are valid.")
+            print("Schema-v3 recette results are valid.")
             if warnings:
                 print(f"Completed with {len(warnings)} validation warning(s).")
             return 0

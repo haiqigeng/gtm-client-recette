@@ -71,7 +71,7 @@ Before the first controlled page load and every business action:
 - wait for the observed-baseline quiet window from the browser-readiness
   reference;
 - confirm the website is interactive and the target is not covered;
-- capture applicable event-level consent state;
+- capture the natural event-level consent baseline;
 - check that the supplemental dataLayer journal, when installed, remains
   attached.
 
@@ -81,6 +81,13 @@ same-origin child, or cross-origin child. The extension may expose iframe tag
 activity, but the evidence must retain the owning surface.
 
 ## Extract event evidence
+
+Before the first action for a case, use the concerned event context and
+read-only container/Preview evidence to inventory every detected analytics,
+media, and other client-side tag that could be concerned. Record category,
+delivery type, container, template, consent setting, vendor/destination when
+visible, and direct evidence. Apply the run tag scope; do not drop excluded
+detected tags. Freeze the inventory and applicability card before acting.
 
 For each occurred planned event, select the exact event index and capture these
 panels independently:
@@ -97,9 +104,12 @@ cumulative Data Layer panel or from a screenshot. Use the supplemental journal
 to locate candidate indexes and detect gaps, then cross-check the selected
 Tag Assistant events.
 
-For a wanted tag that did not fire, inspect the event where it should have
+Missing plan tag columns do not remove steps 3–5. For a wanted tag that did not fire, inspect the event where it should have
 fired. Capture the evaluated trigger, blocking exception, variable values,
-event-level consent, and direct Preview message. Do not inspect unrelated tags.
+event-level consent, and direct Preview message. Inspect analytics tags by
+default, exact plan-declared media destinations when present, and broader tags
+only under explicit scope. Keep other detected tags visible without expanding
+them into the in-scope matrix.
 
 ## Reconcile a recorder and Preview gap
 
@@ -204,5 +214,8 @@ checkpoint:
 5. resume the same journey automatically.
 
 Ordinary website forms, sign-up, login preparation, lead and conversion flows
-remain normal recette work with safe synthetic data. Only the protected
-credential or consequential step belongs to the analyst.
+remain normal recette work with safe synthetic data, including required privacy
+acknowledgements and tested-conversion opt-ins. Only the protected credential
+or consequential step belongs to the analyst. An inoperable ordinary control
+is a `UI_CONTROL_BLOCKER` after the required recovery attempts, not a protected
+checkpoint.

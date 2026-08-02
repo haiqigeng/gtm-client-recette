@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import tomllib
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
@@ -19,6 +21,7 @@ INCLUDED = (
     "tests",
 )
 EXCLUDED_NAMES = {"__pycache__", "build_skill_package.py", "check_release.py"}
+MANIFEST_NAME = "RELEASE-MANIFEST.json"
 
 
 def parse_args() -> argparse.Namespace:
@@ -50,13 +53,39 @@ def main() -> int:
             f"release archive must be named {expected_name!r}; got {args.output.name!r}"
         )
     args.output.parent.mkdir(parents=True, exist_ok=True)
+    files = release_files()
+    hashes = {
+        path.relative_to(ROOT).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in files
+    }
+    tree_digest = hashlib.sha256(
+        "".join(f"{name}\0{digest}\n" for name, digest in hashes.items()).encode("utf-8")
+    ).hexdigest()
+    manifest = {
+        "manifest_version": 1,
+        "package": project["name"],
+        "release": f"v{project['version']}",
+        "source_tree_sha256": tree_digest,
+        "files": hashes,
+    }
     with ZipFile(args.output, "w", compression=ZIP_DEFLATED, compresslevel=9) as archive:
-        for path in release_files():
+        for path in files:
             relative = Path("gtm-preview-recette") / path.relative_to(ROOT)
             info = ZipInfo(relative.as_posix(), date_time=(2026, 1, 1, 0, 0, 0))
             info.compress_type = ZIP_DEFLATED
             info.external_attr = 0o644 << 16
             archive.writestr(info, path.read_bytes())
+        manifest_info = ZipInfo(
+            (Path("gtm-preview-recette") / MANIFEST_NAME).as_posix(),
+            date_time=(2026, 1, 1, 0, 0, 0),
+        )
+        manifest_info.compress_type = ZIP_DEFLATED
+        manifest_info.external_attr = 0o644 << 16
+        archive.writestr(
+            manifest_info,
+            json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True).encode("utf-8")
+            + b"\n",
+        )
     print(f"Created {args.output.resolve()}")
     return 0
 
