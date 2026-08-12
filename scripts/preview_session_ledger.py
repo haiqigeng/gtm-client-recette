@@ -34,7 +34,7 @@ from layer_contract import (
     tag_scope_decision,
 )
 from runtime_state_contract import INTERRUPTION_REASONS, normalize_runtime_check
-from state_io import atomic_write_json, load_json_object
+from state_io import atomic_write_json, load_json_object, recover_file_pair
 
 ROLES = {
     "gtm_workspace",
@@ -371,10 +371,6 @@ def parser() -> argparse.ArgumentParser:
             "quiet_without_expected",
             "timeout",
             "interaction_failed",
-            "preview_disconnected",
-            "browser_crashed",
-            "network_capture_lost",
-            "surface_unavailable",
         ),
         required=True,
     )
@@ -936,8 +932,8 @@ def begin_action(ledger: dict[str, Any], args: argparse.Namespace) -> None:
     if any(row.get("action_id") == args.action_id for row in ledger.get("actions", [])):
         raise SystemExit(f"Duplicate action_id: {args.action_id}")
     case = find_unique(ledger.get("cases", []), "case_id", args.case_id)
-    if case.get("scope_status") != "IN_SCOPE" or case.get("execution_status") == "BLOCKED":
-        raise SystemExit("Actions can start only for an applicable, unblocked case.")
+    if case.get("scope_status") != "IN_SCOPE":
+        raise SystemExit("Actions can start only for an applicable case.")
     if (
         case.get("tag_inventory_status") != "COMPLETE"
         or case.get("applicability_status") != "FROZEN"
@@ -985,6 +981,22 @@ def begin_action(ledger: dict[str, Any], args: argparse.Namespace) -> None:
             )
     elif args.retry_of_action_id:
         raise SystemExit("The first case attempt cannot use --retry-of-action-id.")
+    retrying_interruption = case.get("execution_status") == "BLOCKED"
+    if retrying_interruption:
+        prior = previous[-1] if previous else None
+        if not (
+            isinstance(prior, dict)
+            and prior.get("state") == "SETTLED"
+            and prior.get("settlement_reason") in INTERRUPTION_REASONS
+            and prior.get("interaction_outcome") == "uncertain"
+            and str(prior.get("interruption_blocker_id", "")).strip()
+            and str(prior.get("interruption_reason", "")).strip()
+            and args.retry_of_action_id == prior.get("action_id")
+        ):
+            raise SystemExit(
+                "A blocked case can restart only as a linked retry of its immediately prior "
+                "retained runtime interruption."
+            )
     required_retest = case.get("required_retest_of_action_id")
     if required_retest and args.retry_of_action_id != required_retest:
         raise SystemExit(
@@ -997,6 +1009,20 @@ def begin_action(ledger: dict[str, Any], args: argparse.Namespace) -> None:
     ]
     if not container_ids:
         raise SystemExit("The action requires at least one client-side container ID.")
+    if len(container_ids) > 1:
+        raise SystemExit(
+            "The guided action has one Preview and network cursor. Use one container-scoped "
+            "certified run per applicable client container."
+        )
+    if retrying_interruption:
+        case.update(
+            {
+                "execution_status": "PENDING",
+                "final_action_id": None,
+                "blocker_id": None,
+                "reason": None,
+            }
+        )
     action = {
         "action_id": args.action_id,
         "case_id": args.case_id,
@@ -1213,6 +1239,23 @@ def import_cases(ledger: dict[str, Any], args: argparse.Namespace) -> None:
 
 def record_layer(ledger: dict[str, Any], args: argparse.Namespace) -> None:
     action = find_unique(ledger.get("actions", []), "action_id", args.action_id)
+    if not isinstance(args.layer, str) or args.layer not in CANONICAL_LAYERS:
+        raise SystemExit(f"Unsupported canonical layer: {args.layer}")
+    if not isinstance(args.status, str) or args.status not in LAYER_RESULT_STATUSES:
+        raise SystemExit(f"Unsupported layer status: {args.status}")
+    reason = str(args.reason).strip()
+    if not reason:
+        raise SystemExit("Layer evidence requires a non-empty reason.")
+    if (
+        not isinstance(args.evidence_id, list)
+        or not args.evidence_id
+        or any(not isinstance(value, str) or not value.strip() for value in args.evidence_id)
+    ):
+        raise SystemExit("Layer evidence_ids must be a non-empty string array.")
+    if len(set(args.evidence_id)) != len(args.evidence_id):
+        raise SystemExit("Layer evidence_ids contain duplicates.")
+    if args.predicate_result not in (None, "true", "false"):
+        raise SystemExit("predicate_result must be true, false, or omitted.")
     case = find_unique(
         ledger.get("cases", []),
         "case_id",
@@ -1255,8 +1298,8 @@ def record_layer(ledger: dict[str, Any], args: argparse.Namespace) -> None:
         {
             "layer": args.layer,
             "status": args.status,
-            "reason": args.reason,
-            "evidence_ids": list(dict.fromkeys(args.evidence_id)),
+            "reason": reason,
+            "evidence_ids": list(args.evidence_id),
             "semantic_ambiguity": (
                 str(args.semantic_ambiguity).strip() if args.semantic_ambiguity else None
             ),
@@ -1274,23 +1317,45 @@ def import_layers(ledger: dict[str, Any], args: argparse.Namespace) -> None:
     except (OSError, json.JSONDecodeError) as exc:
         raise SystemExit(f"Cannot read layer results: {exc}") from exc
     rows = value.get("layer_results") if isinstance(value, dict) else value
-    if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+    if not isinstance(rows, list) or not rows or any(not isinstance(row, dict) for row in rows):
         raise SystemExit("Layer results must be an array or an object with a layer_results array.")
     required = {"layer", "status", "reason", "evidence_ids"}
+    seen_layers: set[str] = set()
     for index, row in enumerate(rows, start=1):
         missing = sorted(key for key in required if row.get(key) in (None, "", []))
         if missing:
             raise SystemExit(f"Layer result row {index} is missing: " + ", ".join(missing))
+        layer = row.get("layer")
+        status = row.get("status")
+        if not isinstance(layer, str) or layer not in CANONICAL_LAYERS:
+            raise SystemExit(f"Layer result row {index} has an unsupported layer.")
+        if layer in seen_layers:
+            raise SystemExit(f"Layer result row {index} duplicates layer {layer}.")
+        seen_layers.add(layer)
+        if not isinstance(status, str) or status not in LAYER_RESULT_STATUSES:
+            raise SystemExit(f"Layer result row {index} has an unsupported status.")
+        if not isinstance(row.get("reason"), str) or not row["reason"].strip():
+            raise SystemExit(f"Layer result row {index} reason must be a non-empty string.")
         evidence_ids = row.get("evidence_ids")
         if not isinstance(evidence_ids, list) or any(
-            not str(value).strip() for value in evidence_ids
+            not isinstance(value, str) or not value.strip() for value in evidence_ids
         ):
             raise SystemExit(f"Layer result row {index} evidence_ids must be a string array.")
+        if len(set(evidence_ids)) != len(evidence_ids):
+            raise SystemExit(f"Layer result row {index} evidence_ids contain duplicates.")
+        predicate_result = row.get("predicate_result")
+        if predicate_result not in (None, True, False, "true", "false"):
+            raise SystemExit(
+                f"Layer result row {index} predicate_result must be boolean or omitted."
+            )
+    staged = deepcopy(ledger)
+    for row in rows:
+        evidence_ids = row["evidence_ids"]
         predicate_result = row.get("predicate_result")
         if isinstance(predicate_result, bool):
             predicate_result = "true" if predicate_result else "false"
         record_layer(
-            ledger,
+            staged,
             argparse.Namespace(
                 action_id=args.action_id,
                 layer=row["layer"],
@@ -1302,6 +1367,8 @@ def import_layers(ledger: dict[str, Any], args: argparse.Namespace) -> None:
                 predicate_result=predicate_result,
             ),
         )
+    ledger.clear()
+    ledger.update(staged)
 
 
 def settle_action(ledger: dict[str, Any], args: argparse.Namespace) -> None:
@@ -1331,17 +1398,18 @@ def settle_action(ledger: dict[str, Any], args: argparse.Namespace) -> None:
         raise SystemExit("Interrupted settlement reason must equal the captured failure_reason.")
     if interrupted and args.interaction_outcome != "uncertain":
         raise SystemExit("An interrupted action must settle with interaction_outcome=uncertain.")
+    if not interrupted and args.settlement_reason in INTERRUPTION_REASONS:
+        raise SystemExit(
+            "Runtime interruption reasons require an interrupted_action capture and "
+            "interrupt-action."
+        )
     if not stream_settled and args.settlement_reason in {
         "expected_and_quiet",
         "quiet_without_expected",
     }:
         raise SystemExit("An unsettled stream cannot use a quiet settlement reason.")
-    if (
-        not interrupted
-        and not preview_connected_after
-        and args.settlement_reason != "preview_disconnected"
-    ):
-        raise SystemExit("A disconnected Preview session requires preview_disconnected.")
+    if not interrupted and not preview_connected_after:
+        raise SystemExit("A disconnected Preview session requires an interrupted_action capture.")
     recorded_pushes = sum(
         row.get("action_id") == args.action_id
         for row in ledger.get("business_pushes", [])
@@ -1392,7 +1460,7 @@ def settle_action(ledger: dict[str, Any], args: argparse.Namespace) -> None:
         case["execution_status"] = "EXECUTED"
         case["final_action_id"] = args.action_id
         case.pop("required_retest_of_action_id", None)
-    if args.settlement_reason in INTERRUPTION_REASONS:
+    if interrupted and args.settlement_reason == "preview_disconnected":
         ledger["connection_epoch"] = (
             action.get("connection_epoch", ledger.get("connection_epoch", 1)) + 1
         )
@@ -1557,6 +1625,8 @@ def main() -> int:
         print(f"Created {args.ledger.resolve()}")
         return 0
 
+    if args.command == "validate" and args.results is not None:
+        recover_file_pair(args.results, args.ledger)
     ledger = load(args.ledger)
     if ledger.get("schema_version") != SESSION_SCHEMA_VERSION:
         raise SystemExit("Unsupported session ledger. Recreate it with the current init command.")

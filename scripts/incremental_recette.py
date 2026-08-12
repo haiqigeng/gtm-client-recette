@@ -14,7 +14,7 @@ from event_feedback import event_feedback, feedback_for_event
 from execution_contract import validate_session
 from init_coverage_ledger import initialize_requirement
 from recette_schema import validate
-from state_io import atomic_write_json, load_json_object
+from state_io import atomic_write_json, load_json_object, recover_file_pair
 
 
 def load_object(path: Path) -> dict[str, Any]:
@@ -404,6 +404,8 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     try:
+        if getattr(args, "session_ledger", None) is not None:
+            recover_file_pair(args.ledger, args.session_ledger)
         data = load_object(args.ledger)
         session = (
             load_object(args.session_ledger) if getattr(args, "session_ledger", None) else None

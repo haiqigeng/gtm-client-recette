@@ -33,6 +33,7 @@ from recette_schema import (
     dumps_structured,
     validate,
 )
+from state_io import recover_file_pair
 
 STATUS_FILLS = {
     "PASS": "C6EFCE",
@@ -2271,6 +2272,8 @@ def write_stakeholder_summary(
 def main() -> int:
     args = parse_args()
     try:
+        if args.input != "-" and args.session_ledger is not None:
+            recover_file_pair(Path(args.input), args.session_ledger)
         data = load_data(args.input)
         warnings = validate(data, strict=args.strict)
         refuse_unsafe_evidence(warnings)

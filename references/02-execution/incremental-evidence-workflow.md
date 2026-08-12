@@ -185,8 +185,10 @@ mid-action, retain rather than discard the attempt. Capture
 cursors and exact observed-push count, then use operator `interrupt-action`.
 The action settles as uncertain and the case becomes `BLOCKED`; unavailable
 canonical/tag rows remain unavailable rather than being fabricated. Restore a
-clean boundary before a linked retry. Use `void-runtime-check` only for an
-unconsumed check that never created an action.
+clean boundary before a linked retry. The retry must name the retained action;
+the blocker remains on that historical attempt while the case reopens as
+`PENDING`. Only a Preview disconnect advances `connection_epoch`. Use
+`void-runtime-check` only for an unconsumed check that never created an action.
 
 Full-recette initialization already authorizes ordinary fields, privacy
 acknowledgements, tested-conversion opt-ins, safe synthetic data, and ordinary
@@ -314,6 +316,7 @@ active network capture. Between events, resume without a snapshot; the next
 
 ```powershell
 python -B scripts/recette_operator.py pause-run session.json `
+  --results working-results.json `
   --label "Protected analyst handback"
 python -B scripts/recette_operator.py resume-run `
   working-results.json session.json resume-runtime.json

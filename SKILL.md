@@ -197,8 +197,12 @@ immutable revision, and rerun the case. Never silently mutate a frozen card.
 Use an analyst-approved attached session or dedicated Playwright profile.
 Confirm the intended GTM account, web container, workspace, environment,
 origin, Tag Assistant connection, owning container per tag, natural consent,
-and stable browser-surface identities. Keep separate cursors for separate
-containers.
+and stable browser-surface identities. The current guided runtime has one
+Preview cursor and one browser-network cursor, so certify exactly one client
+web container per normalized run. When several client containers are
+applicable, execute separate container-scoped certified runs from the same
+reproducible checkpoints and never aggregate one cursor as multi-container
+proof.
 
 Initialize one resumable session ledger. Install the supplemental recorder at
 document start and context-level request capture before navigation. The
@@ -225,7 +229,11 @@ permits a cross-origin or unevidenced page mismatch. A normal action still
 requires a complete after-action boundary. If the browser, Preview, network
 capture, or controlled surface fails mid-action, use `interrupt-action` with
 an `interrupted_action` capture. Retain the attempt and observed pushes, mark
-the case honestly `BLOCKED`, and never fabricate the missing downstream rows.
+the attempt honestly `BLOCKED`, and never fabricate the missing downstream
+rows. After restoring a controlled boundary, a fresh action may retry that
+exact retained interruption; the prior action keeps its blocker and the case
+returns to `PENDING` only for the linked retry. Only a Preview disconnect
+boundary advances the connection epoch.
 An unconsumed runtime check created before a mistaken action ID is retained
 through `void-runtime-check`, never deleted or silently reused.
 
@@ -289,7 +297,9 @@ When runtime control fails after an action starts, capture the last trustworthy
 cursors and every push observed so far, then interrupt the action explicitly.
 Do not delete the open attempt, merge it into a retry, or fill unavailable
 layers with assumed values. Normalize the matching blocker before closure or
-start a fresh linked retry after restoring a controlled boundary.
+start a fresh linked retry after restoring a controlled boundary. A browser,
+network, or surface interruption does not advance the Preview epoch; a Preview
+disconnect does.
 
 If a material interaction, variant, or tag is found after event closure, use
 `reopen-event`. Preserve the prior closure/proof in history, invalidate that

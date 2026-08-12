@@ -261,7 +261,12 @@ class V220RegressionTests(unittest.TestCase):
         self.assertEqual("SETTLED", updated["actions"][0]["state"])
         self.assertEqual("uncertain", updated["actions"][0]["interaction_outcome"])
         self.assertEqual("BLOCKED", updated["cases"][0]["execution_status"])
-        self.assertEqual(2, updated["connection_epoch"])
+        self.assertEqual(1, updated["connection_epoch"])
+        self.assertEqual("BLK-RUNTIME-001", updated["actions"][0]["interruption_blocker_id"])
+        self.assertEqual(
+            "Browser network capture became unavailable before settlement.",
+            updated["actions"][0]["interruption_reason"],
+        )
         self.assertTrue(
             any(row["check_id"] == "INTERRUPT-ACT-001" for row in updated["runtime_checks"])
         )

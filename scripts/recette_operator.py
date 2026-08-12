@@ -129,6 +129,14 @@ def _save_pair_atomic(
     atomic_write_json_pair(results_path, results, session_path, session)
 
 
+def _recover_input_pair(args: argparse.Namespace) -> None:
+    """Recover an interrupted result/session transaction before any paired read."""
+    results = getattr(args, "results", None)
+    session = getattr(args, "session", None)
+    if isinstance(results, Path) and isinstance(session, Path):
+        recover_file_pair(results, session)
+
+
 def _start_event(args: argparse.Namespace) -> dict[str, Any]:
     results = load_object(args.results)
     session = load_object(args.session)
@@ -298,6 +306,17 @@ def _interrupt_action(args: argparse.Namespace) -> dict[str, Any]:
             settlement_reason=snapshot.get("failure_reason"),
         ),
     )
+    interrupted_action = next(
+        row
+        for row in staged.get("actions", [])
+        if isinstance(row, dict) and row.get("action_id") == args.action_id
+    )
+    interrupted_action.update(
+        {
+            "interruption_blocker_id": blocker_id,
+            "interruption_reason": reason,
+        }
+    )
     case = next(
         row
         for row in staged.get("cases", [])
@@ -330,8 +349,8 @@ def _interrupt_action(args: argparse.Namespace) -> dict[str, Any]:
         "reason": reason,
         "observed_expected_push": expected_seen,
         "next_required": (
-            "Normalize this event with the same blocker, close it for an honest BLOCKED "
-            "verdict, or reset the case through a controlled retry with fresh evidence."
+            "Restore a controlled boundary and start one fresh action linked with "
+            "--retry-of-action-id, or close the event with the retained blocker."
         ),
     }
 
@@ -663,10 +682,6 @@ def parser() -> argparse.ArgumentParser:
             "quiet_without_expected",
             "timeout",
             "interaction_failed",
-            "preview_disconnected",
-            "browser_crashed",
-            "network_capture_lost",
-            "surface_unavailable",
         ),
         required=True,
     )
@@ -681,6 +696,7 @@ def parser() -> argparse.ArgumentParser:
 
     pause = commands.add_parser("pause-run")
     pause.add_argument("session", type=Path)
+    pause.add_argument("--results", type=Path)
     pause.add_argument("--label", required=True)
 
     resume = commands.add_parser("resume-run")
@@ -727,6 +743,7 @@ COMMANDS = {
 def main() -> int:
     args = parser().parse_args()
     try:
+        _recover_input_pair(args)
         output = COMMANDS[args.command](args)
     except (OSError, json.JSONDecodeError, ValueError) as exc:
         print(f"ERROR: {exc}")

@@ -45,9 +45,13 @@ Rediscover surfaces by role, URL, origin, and title before every action. A tab
 index is never a durable identifier. Stop if the container, workspace, connected
 domain, or target origin changes unexpectedly.
 
-For multiple web containers, register each workspace and Tag Assistant
-connection separately with `container_id`. Simultaneous or sequential Preview
-evidence must remain container-specific.
+The guided runtime currently certifies exactly one client web container per
+normalized run because it owns one Preview cursor and one network cursor. If
+several client containers are applicable, register and execute a separate
+container-scoped run/session for each from the same reproducible checkpoint.
+Keep their evidence container-specific and never use one connection as proof
+for another. A runtime snapshot with more than one configured container is
+rejected rather than producing false completeness.
 
 Use `scripts/preview_session_ledger.py` alongside the browser tool when a run
 needs resumable surface, case, action-boundary, layer, and push-stream state.
@@ -150,23 +154,26 @@ events may be recorded as background noise without preventing the relevant
 business window from settling. Do not ignore technical events that explain
 chronology, triggering, or non-firing.
 
-Record the quiet window, timeout, final index, `stream_settled`, and one
+Record the quiet window, timeout, final index, `stream_settled`, and one normal
 settlement reason:
 
 - `expected_and_quiet`;
 - `quiet_without_expected`;
 - `timeout`;
-- `interaction_failed`; or
-- `preview_disconnected`.
+- `interaction_failed`.
 
 If a browser crash, network-capture loss, Preview disconnect, or unavailable
 controlled surface prevents the normal after-action capture, do not abandon
 the open action. Capture phase `interrupted_action` with the matching
 `failure_reason`, last trustworthy cursors, exact observed business-push
 count, direct action-boundary proof, and network proof only when capture still
-exists. `interrupt-action` settles the retained attempt as `uncertain`, marks
-the case `BLOCKED`, and advances the connection epoch before a fresh retry.
-It never creates missing tag or destination evidence.
+exists. `interrupt-action` settles the retained attempt as `uncertain` and
+marks the case `BLOCKED`. After recovery, one fresh action can retry that exact
+attempt through `--retry-of-action-id`; the prior action retains its blocker
+while the active case returns to `PENDING`. Only `preview_disconnected`
+advances the connection epoch; browser crashes, network-capture loss, and
+unavailable surfaces do not. It never creates missing tag or destination
+evidence.
 
 If the bounded timeout ends while the relevant stream is still changing,
 retain the incomplete window and block absence, exact count, order, and
