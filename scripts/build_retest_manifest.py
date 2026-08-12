@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from event_feedback import event_feedback
+from state_io import recover_file_pair
 
 RETEST_STATUSES = {"FAIL", "BLOCKED", "REVIEW"}
 
@@ -128,6 +129,7 @@ def main() -> int:
     parser.add_argument("output", type=Path)
     args = parser.parse_args()
     try:
+        recover_file_pair(args.results, args.session)
         manifest = build_manifest(load_object(args.results), load_object(args.session))
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(

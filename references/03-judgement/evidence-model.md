@@ -174,4 +174,6 @@ JSON, workbook cells, or chat.
 
 Keep evidence separate by web container, browser context, scenario branch, and
 baseline/current run. A shared event index is not proof that two Preview
-connections observed the same container execution.
+connections observed the same container execution. Until the runtime exposes
+per-container cursors, certify multiple client web containers through separate
+container-scoped normalized runs rather than one aggregated snapshot.

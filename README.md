@@ -6,28 +6,26 @@
 
 ## Current release
 
-[v2.2.0](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v2.2.0) is
+[v2.2.1](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v2.2.1) is
 the current supported release. Download the validated package:
-[gtm-preview-recette-v2.2.0.zip](https://github.com/haiqigeng/gtm-preview-recette/releases/download/v2.2.0/gtm-preview-recette-v2.2.0.zip).
+[gtm-preview-recette-v2.2.1.zip](https://github.com/haiqigeng/gtm-preview-recette/releases/download/v2.2.1/gtm-preview-recette-v2.2.1.zip).
 
-v2.2.0 hardens live operations without changing the fixed 19-layer and
-8-sublayer acceptance contract. Interrupted browser, Preview, network-capture,
-or surface actions are now retained and settled honestly as uncertain/BLOCKED;
-orphan checks can be explicitly voided; same-origin SPA page transitions and
-multi-container cases have deterministic evidence rules; and phase-specific
-readiness no longer relies on one undifferentiated gate.
+v2.2.1 is a field-safety patch that leaves the approved North Star and fixed
+19-layer/8-sublayer contract unchanged. It restores strictly linked retries
+after retained runtime interruptions, separates normal settlement from failure
+capture, advances Preview epochs only on Preview disconnects, requires direct
+navigation proof for SPA route relaxation, and rejects unsupported
+multi-container certification instead of accepting one cursor as complete.
 
-The release also adds transactional layer batches, complete computed outcome
-coverage, formula-safe CSV sidecars, path-alias rejection, journaled crash
-recovery for results/session and final workbook/session pairs, shared strict
-value semantics, smaller event-validation slices, and CI that extracts and
-tests the actual packaged skill before release. Redundant and contradictory
-legacy documentation was removed; schema v2 is now migration-only.
+Canonical-layer batches now prevalidate every row and remain byte-for-byte
+unchanged on malformed status, evidence, predicate, or duplicate input.
+Result/session transaction recovery also runs before paired reads, including
+status, validation, reporting, retest-manifest, and guided operator commands.
 
 An expert-only workflow for testing an existing client-side Google Tag Manager
 implementation against a tracking plan. It coordinates Playwright, GTM Preview,
-Tag Assistant, analytics and media tags, browser destination requests, multiple
-web containers, consent scenarios, cross-field and privacy checks, browser
+Tag Assistant, analytics and media tags, browser destination requests,
+container-scoped client-web runs, consent scenarios, cross-field and privacy checks, browser
 contexts, prior-run comparison, and a detailed XLSX result workbook.
 
 ## Who It Serves
@@ -198,7 +196,7 @@ release or local installation against its SHA-256 manifest:
 ```powershell
 python -B scripts/migrate_schema_v2_to_v3.py old-results.json normalized-results.json `
   --legacy-session old-session.json --case-manifest retest-cases.json
-python -B scripts/verify_release_artifact.py dist/gtm-preview-recette-v2.2.0.zip
+python -B scripts/verify_release_artifact.py dist/gtm-preview-recette-v2.2.1.zip
 ```
 
 Evaluate declared client-side rules, scan for redacted sensitive-data findings,

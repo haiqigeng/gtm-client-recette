@@ -236,6 +236,8 @@ def runtime_snapshot_errors(
     )
     if urls_differ and page_match_mode != "same_origin_spa":
         errors.append("runtime snapshot selected Tag Assistant page differs from the website")
+    if not urls_differ and page_match_mode == "same_origin_spa":
+        errors.append("same_origin_spa is valid only when the website and selected page differ")
     if urls_differ and page_match_mode == "same_origin_spa":
         route_evidence_id = str(snapshot.get("route_transition_evidence_id", "")).strip()
         if not route_evidence_id or route_evidence_id not in set(snapshot.get("evidence_ids", [])):
@@ -247,6 +249,12 @@ def runtime_snapshot_errors(
     expected_containers = expected_container_contract(results, case)
     if not expected_containers:
         errors.append("runtime snapshot cannot resolve the case container/workspace contract")
+    elif len(expected_containers) > 1:
+        errors.append(
+            "the guided runtime has one Preview and network cursor and cannot certify "
+            "multiple client containers together; use one container-scoped certified run "
+            "per applicable container"
+        )
     elif actual_containers != expected_containers:
         errors.append("runtime snapshot container/workspace differs from the accepted run")
     workspace_surface = surfaces.get(
@@ -472,4 +480,11 @@ def validate_runtime_evidence(
         errors.append(f"{label}: direct action_boundary evidence is required")
     if check.get("network_capture_active") is True and "browser_network_capture" not in kinds:
         errors.append(f"{label}: direct browser_network_capture evidence is required")
+    if check.get("page_match_mode") == "same_origin_spa":
+        route_evidence_id = str(check.get("route_transition_evidence_id", "")).strip()
+        route_evidence = evidence.get(route_evidence_id)
+        if route_evidence is not None and route_evidence.get("kind") != "navigation":
+            errors.append(
+                f"{label}: route transition evidence '{route_evidence_id}' must be navigation"
+            )
     return errors

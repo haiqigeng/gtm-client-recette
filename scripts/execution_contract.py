@@ -1160,6 +1160,17 @@ def _validate_operator_action_boundary(
             context.errors.append(
                 f"session action {action_id}: interruption reason differs from its capture"
             )
+        if not nonempty(action.get("interruption_blocker_id")) or not nonempty(
+            action.get("interruption_reason")
+        ):
+            context.errors.append(
+                f"session action {action_id}: retained interruption requires blocker ID and reason"
+            )
+    elif action.get("settlement_reason") in INTERRUPTION_REASONS:
+        context.errors.append(
+            f"session action {action_id}: a normal after_action capture cannot use an "
+            "interruption settlement reason"
+        )
     after_network = action.get("network_request_cursor_after")
     if not isinstance(after_network, int) or isinstance(after_network, bool) or after_network < 0:
         context.errors.append(
@@ -1305,6 +1316,8 @@ def _validate_attempt_chain(
             errors.append(
                 f"session case {case_id}: retry must reference the retained prior attempt"
             )
+        if index > 0 and ordered[index - 1].get("state") != "SETTLED":
+            errors.append(f"session case {case_id}: retry cannot follow an open attempt")
 
 
 def _validate_actions(context: _ValidationContext) -> None:
@@ -2275,12 +2288,12 @@ def validate_session(
                 )
             if (
                 action.get("state") == "SETTLED"
-                and action.get("settlement_reason") in INTERRUPTION_REASONS
+                and action.get("settlement_reason") == "preview_disconnected"
             ):
                 expected_epoch += 1
         if ledger.get("connection_epoch") != expected_epoch:
             errors.append(
-                "session: connection_epoch does not reconcile with settled runtime interruptions"
+                "session: connection_epoch does not reconcile with Preview disconnect boundaries"
             )
     by_requirement, requirements_by_group, event_by_group, evidence = _result_catalogs(results)
     unexpected_rows = [

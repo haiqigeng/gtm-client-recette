@@ -168,12 +168,22 @@ is required even for a single container. Record stable
 container ID, workspace, role, Preview environment, and version when visible.
 Assign exactly one owner to each concerned tag requirement.
 
-Every interaction case retains the complete configured client-container set,
-not only the container named by one plan row. Runtime snapshots must prove all
-those configured container/workspace identities. The per-event tag matrix is
-still limited by the declared tag scope; this prevents an unrelated
-every-container/every-tag explosion while allowing a concerned tag discovered
-in any configured container to be evaluated.
+The current guided runtime has one Preview cursor, one selected Tag Assistant
+surface, and one browser-network cursor. It therefore certifies exactly one
+client web container per normalized run. A runtime snapshot or action that
+claims several configured containers is rejected. This fail-closed boundary
+prevents a request from one container from being misused as proof for another.
+
+When several client containers are applicable:
+
+1. keep the complete discovery inventory outside the verdict evidence;
+2. initialize one container-scoped normalized run and session per container;
+3. return to the same reproducible website, state, and consent checkpoint;
+4. repeat the applicable interaction under that container's Preview session;
+5. report every container-specific verdict without merging cursors or evidence.
+
+The per-event tag matrix remains limited by declared tag scope inside each
+run, preventing an unrelated every-container/every-tag explosion.
 
 Use roles:
 
@@ -186,14 +196,6 @@ If two containers both own or fire the same accepted destination, record a
 `container_conflict` client check and relevant unexpected duplicate. Do not
 build an unrelated every-container/every-tag matrix; do build the exact
 per-event matrix for all in-scope tags under the declared tag scope.
-
-When multiple simultaneous Preview connections are unreliable:
-
-1. checkpoint the website and consent state;
-2. preview the first web container and capture its event cursor/evidence;
-3. return to the same reproducible checkpoint;
-4. preview the next web container and repeat;
-5. keep container-specific evidence separate.
 
 Server containers, server clients, transformations, outbound server requests,
 and browser/server deduplication are outside this skill.

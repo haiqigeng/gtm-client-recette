@@ -119,6 +119,9 @@ inventory revision.
     check. A mid-action browser, Preview, network, or surface failure instead
     uses `interrupted_action`, preserves its last trustworthy cursors/pushes,
     settles uncertain, and blocks the case without invented downstream proof.
+    A fresh action may retry that exact retained interruption after runtime
+    recovery; the historical blocker remains attached to the prior attempt.
+    Only a Preview disconnect advances the connection epoch.
     Exact browser context, container/workspace, selected Preview page,
     connection epoch, Preview cursor, and network cursor must reconcile. Agent-
     entered readiness booleans or cursors are not certification evidence.

@@ -88,9 +88,15 @@ URL difference backed by a direct route-transition evidence ID in the same
 capture. A mid-action runtime failure uses `interrupted_action`, a supported
 failure reason, last trustworthy cursors and exact observed-push count. It
 settles the retained action as uncertain and blocks the case without requiring
-or fabricating unavailable downstream layer/tag rows. A mistaken, unconsumed
+or fabricating unavailable downstream layer/tag rows. A strictly linked retry
+reopens the case as `PENDING` without removing the prior action's blocker.
+Only a Preview disconnect advances the connection epoch. A mistaken, unconsumed
 orphan check can be retained as `voided` with a timestamp and exact reason;
 voided checks cannot be consumed or linked to actions.
+
+One guided run contains exactly one configured client web container. Multiple
+applicable containers require separate container-scoped normalized runs until
+the runtime contract exposes per-container Preview and network cursors.
 
 Only `playwright_runtime_probe` and `browser_connector_runtime_probe` are valid
 runtime producers. Captured and recorded timestamps must be fresh and ordered

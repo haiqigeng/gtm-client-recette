@@ -109,6 +109,12 @@ network evidence row must bind to this exact check and phase:
 Use separate evidence IDs for `before_action` and `after_action`; generic or
 reused proof is rejected.
 
+The current guided runtime accepts exactly one container/workspace row. If
+more than one client web container is applicable, run one normalized certified
+session per container from the same reproducible checkpoint. A multi-container
+snapshot is rejected because one Preview/network cursor cannot prove several
+container streams.
+
 Use `page_match_mode: same_origin_spa` only when the website and selected
 Preview URLs differ because of an evidenced client-side route. Add
 `route_transition_evidence_id` and include that same ID in `evidence_ids`.
@@ -149,7 +155,9 @@ The snapshot uses phase `interrupted_action`, one supported `failure_reason`
 `surface_unavailable`), the last trustworthy cursors, and the exact observed
 push count. The action is retained as `SETTLED`/`uncertain`; the case becomes
 `BLOCKED`. No unavailable layer or tag result is invented. Restore the runtime
-and use a fresh linked action if a retry is justified.
+and use a fresh action with `--retry-of-action-id` for that exact retained
+attempt. The prior action keeps its blocker while the active case returns to
+`PENDING`. Only `preview_disconnected` advances the connection epoch.
 
 If a before-action check was captured under a mistaken action ID and no action
 was ever created, retain it explicitly:
@@ -243,6 +251,14 @@ python scripts/recette_operator.py resume-run normalized-results.json session.js
 
 # Between events: omit the capture; the next start-event captures readiness.
 python scripts/recette_operator.py resume-run normalized-results.json session.json
+```
+
+Pause with both paired paths so an interrupted result/session transaction is
+recovered before the session is read:
+
+```powershell
+python scripts/recette_operator.py pause-run session.json `
+  --results normalized-results.json --label "Protected analyst handback"
 ```
 
 The guided operator accepts only normalized results declaring

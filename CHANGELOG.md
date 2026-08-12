@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## [v2.2.1](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v2.2.1) (2026-08-13)
+
+- Restore a strictly linked retry after an interrupted action while preserving
+  the original attempt, blocker, push stream, and evidence.
+- Separate normal settlement from `interrupted_action` failure capture and
+  advance the connection epoch only for Preview disconnect boundaries.
+- Require exact direct `navigation` evidence for same-origin SPA relaxation and
+  reject identical-URL SPA declarations.
+- Fail closed on multi-container runtime snapshots until per-container Preview
+  and network cursors exist; document separate container-scoped certified runs.
+- Prevalidate canonical-layer batches transactionally, including status,
+  predicate, evidence, and duplicate checks.
+- Recover interrupted result/session pair transactions before every supported
+  paired read and add focused regression coverage for all field-safety fixes.
+
 ## [v2.2.0](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v2.2.0) (2026-08-12)
 
 - Add honest mid-action recovery for browser, Preview, network-capture, and
