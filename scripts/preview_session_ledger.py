@@ -33,6 +33,7 @@ from layer_contract import (
     normalize_tag_scope,
     tag_scope_decision,
 )
+from runtime_state_contract import normalize_runtime_check
 
 ROLES = {
     "gtm_workspace",
@@ -128,6 +129,19 @@ def parser() -> argparse.ArgumentParser:
         help="Unique key when more than one workspace, Preview session, or website is open.",
     )
     register.add_argument("--container-id")
+    register.add_argument("--workspace")
+
+    runtime_check = subparsers.add_parser("record-runtime-check")
+    runtime_check.add_argument("ledger", type=Path)
+    runtime_check.add_argument("snapshot", type=Path)
+    runtime_check.add_argument("--results", type=Path, required=True)
+    runtime_check.add_argument(
+        "--phase",
+        choices=("before_action", "resume", "after_action"),
+        required=True,
+    )
+    runtime_check.add_argument("--action-id", required=True)
+    runtime_check.add_argument("--case-id", required=True)
 
     authorize = subparsers.add_parser("authorize")
     authorize.add_argument("ledger", type=Path)
@@ -226,10 +240,8 @@ def parser() -> argparse.ArgumentParser:
     begin.add_argument("ledger", type=Path)
     begin.add_argument("--action-id", required=True)
     begin.add_argument("--case-id", required=True)
-    begin.add_argument("--last-event-before", type=int, required=True)
+    begin.add_argument("--readiness-check-id", required=True)
     begin.add_argument("--consent-state", required=True)
-    begin.add_argument("--browser-context-id")
-    begin.add_argument("--container-id", action="append", default=[])
     begin.add_argument("--quiet-window-ms", type=int, default=2000)
     begin.add_argument("--timeout-ms", type=int, default=15000)
     begin.add_argument(
@@ -329,10 +341,8 @@ def parser() -> argparse.ArgumentParser:
     settle = subparsers.add_parser("settle-action")
     settle.add_argument("ledger", type=Path)
     settle.add_argument("--action-id", required=True)
-    settle.add_argument("--first-event-after", type=int)
-    settle.add_argument("--settled-final-event", type=int, required=True)
+    settle.add_argument("--settlement-check-id", required=True)
     settle.add_argument("--expected-seen", choices=("true", "false"), required=True)
-    settle.add_argument("--preview-connected-after", choices=("true", "false"), required=True)
     settle.add_argument(
         "--interaction-outcome",
         choices=("completed", "failed", "uncertain"),
@@ -344,7 +354,6 @@ def parser() -> argparse.ArgumentParser:
         required=True,
         help="Safe non-tracking proof of the completion, failure, or uncertainty.",
     )
-    settle.add_argument("--stream-settled", choices=("true", "false"), required=True)
     settle.add_argument(
         "--settlement-reason",
         choices=(
@@ -356,13 +365,6 @@ def parser() -> argparse.ArgumentParser:
         ),
         required=True,
     )
-    settle.add_argument(
-        "--observed-business-push-count",
-        type=int,
-        required=True,
-        help="Total business pushes visible in the complete action window.",
-    )
-
     checkpoint = subparsers.add_parser("checkpoint")
     checkpoint.add_argument("ledger", type=Path)
     checkpoint.add_argument("--label", required=True)
@@ -401,6 +403,57 @@ def find_unique(rows: list[dict[str, Any]], field: str, value: str) -> dict[str,
     if len(matches) != 1:
         raise SystemExit(f"Unknown or duplicate {field}: {value}")
     return matches[0]
+
+
+def runtime_check_by_id(ledger: dict[str, Any], check_id: str) -> dict[str, Any]:
+    """Return one unique directly captured runtime check."""
+    return find_unique(ledger.get("runtime_checks", []), "check_id", check_id)
+
+
+def record_runtime_check(ledger: dict[str, Any], args: argparse.Namespace) -> None:
+    """Record one direct browser/Preview/network state capture."""
+    try:
+        snapshot = json.loads(args.snapshot.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"Cannot read runtime snapshot: {exc}") from exc
+    if not isinstance(snapshot, dict):
+        raise SystemExit("Runtime snapshot must be a JSON object.")
+    check_id = str(snapshot.get("check_id", "")).strip()
+    if any(
+        row.get("check_id") == check_id
+        for row in ledger.get("runtime_checks", [])
+        if isinstance(row, dict)
+    ):
+        raise SystemExit(f"Duplicate runtime check ID: {check_id}")
+    case = find_unique(ledger.get("cases", []), "case_id", args.case_id)
+    action_matches = [
+        row
+        for row in ledger.get("actions", [])
+        if isinstance(row, dict) and row.get("action_id") == args.action_id
+    ]
+    if args.phase == "before_action" and action_matches:
+        raise SystemExit("A before-action runtime check must precede action registration.")
+    if args.phase in {"resume", "after_action"}:
+        if len(action_matches) != 1 or action_matches[0].get("state") != "OPEN":
+            raise SystemExit(f"A {args.phase} runtime check requires the matching open action.")
+        if action_matches[0].get("case_id") != args.case_id:
+            raise SystemExit("Runtime check action and case identities differ.")
+    try:
+        normalized = normalize_runtime_check(
+            snapshot,
+            phase=args.phase,
+            action_id=args.action_id,
+            case=case,
+            ledger=ledger,
+            results=load_results(args.results),
+            recorded_at=now(),
+            action_timestamp=(
+                action_matches[0].get("action_timestamp") if action_matches else None
+            ),
+        )
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    ledger.setdefault("runtime_checks", []).append(normalized)
 
 
 def register_case(ledger: dict[str, Any], args: argparse.Namespace) -> None:
@@ -617,6 +670,31 @@ def revise_tag_inventory(ledger: dict[str, Any], args: argparse.Namespace) -> No
             "required_retest_of_action_id": prior_action_id,
         }
     )
+    event_group_id = str(case.get("event_group_id", ""))
+    closures = [row for row in ledger.get("event_closures", []) if isinstance(row, dict)]
+    closure_index = next(
+        (
+            index
+            for index, row in enumerate(closures)
+            if str(row.get("event_group_id", "")) == event_group_id
+        ),
+        None,
+    )
+    if closure_index is not None:
+        invalidated = deepcopy(closures[closure_index:])
+        ledger["event_closures"] = deepcopy(closures[:closure_index])
+        ledger.setdefault("closure_history", []).append(
+            {
+                "reopened_event_group_id": event_group_id,
+                "reopened_at": now(),
+                "reason": reason,
+                "invalidated_closures": invalidated,
+            }
+        )
+    ledger["operator_state"] = {
+        "status": "ACTIVE",
+        "current_event_group_id": event_group_id,
+    }
 
 
 def complete_tag_inventory(ledger: dict[str, Any], args: argparse.Namespace) -> None:
@@ -836,6 +914,27 @@ def begin_action(ledger: dict[str, Any], args: argparse.Namespace) -> None:
         )
     if args.quiet_window_ms <= 0 or args.timeout_ms <= 0:
         raise SystemExit("Quiet window and timeout must be positive.")
+    readiness = runtime_check_by_id(ledger, args.readiness_check_id)
+    if readiness.get("phase") != "before_action":
+        raise SystemExit("begin-action requires a before_action runtime check.")
+    if readiness.get("action_id") != args.action_id or readiness.get("case_id") != args.case_id:
+        raise SystemExit("The readiness check is bound to another action or case.")
+    if readiness.get("consumed") is True:
+        raise SystemExit("The readiness check has already been consumed.")
+    if readiness.get("connection_epoch") != ledger.get("connection_epoch", 1):
+        raise SystemExit("The readiness check belongs to a stale Preview connection epoch.")
+    if not all(
+        readiness.get(field_name) is True
+        for field_name in (
+            "preview_connected",
+            "target_interactive",
+            "target_uncovered",
+            "lifecycle_observed",
+            "stream_quiet",
+            "network_capture_active",
+        )
+    ):
+        raise SystemExit("The readiness check is not fully ready for a business action.")
     previous = sorted(
         [row for row in ledger.get("actions", []) if row.get("case_id") == args.case_id],
         key=lambda row: row.get("attempt_number", 0),
@@ -855,7 +954,11 @@ def begin_action(ledger: dict[str, Any], args: argparse.Namespace) -> None:
         raise SystemExit(
             "Late tag discovery requires a retry of the retained pre-discovery action."
         )
-    container_ids = args.container_id or case.get("container_ids", [])
+    container_ids = [
+        str(row.get("container_id", ""))
+        for row in readiness.get("containers", [])
+        if isinstance(row, dict) and str(row.get("container_id", "")).strip()
+    ]
     if not container_ids:
         raise SystemExit("The action requires at least one client-side container ID.")
     action = {
@@ -872,12 +975,25 @@ def begin_action(ledger: dict[str, Any], args: argparse.Namespace) -> None:
         "inventory_revision": case.get("inventory_revision", 1),
         "connection_epoch": ledger.get("connection_epoch", 1),
         "retry_of_action_id": args.retry_of_action_id,
-        "preview_connected_before": True,
-        "target_ready_before": True,
-        "last_event_before": args.last_event_before,
+        "readiness_check_id": readiness.get("check_id"),
+        "readiness_evidence_ids": list(readiness.get("evidence_ids", [])),
+        "preview_connected_before": readiness.get("preview_connected"),
+        "target_ready_before": all(
+            readiness.get(field_name) is True
+            for field_name in (
+                "target_interactive",
+                "target_uncovered",
+                "lifecycle_observed",
+                "stream_quiet",
+            )
+        ),
+        "last_event_before": readiness.get("preview_event_cursor"),
+        "network_request_cursor_before": readiness.get("network_request_cursor"),
         "consent_state_before": args.consent_state,
-        "browser_context_id": args.browser_context_id,
+        "browser_context_id": readiness.get("browser_context_id"),
         "container_ids": list(dict.fromkeys(container_ids)),
+        "observed_url_before": readiness.get("website_url"),
+        "selected_page_url_before": readiness.get("selected_page_url"),
         "action_timestamp": now(),
         "quiet_window_ms": args.quiet_window_ms,
         "timeout_ms": args.timeout_ms,
@@ -885,6 +1001,8 @@ def begin_action(ledger: dict[str, Any], args: argparse.Namespace) -> None:
         "tag_layer_results": [],
         "state": "OPEN",
     }
+    readiness["consumed"] = True
+    readiness["consumed_by_action_id"] = args.action_id
     ledger.setdefault("actions", []).append(action)
 
 
@@ -1117,11 +1235,22 @@ def settle_action(ledger: dict[str, Any], args: argparse.Namespace) -> None:
     action = find_unique(ledger.get("actions", []), "action_id", args.action_id)
     if action.get("state") != "OPEN":
         raise SystemExit(f"Action is already settled: {args.action_id}")
+    settlement = runtime_check_by_id(ledger, args.settlement_check_id)
+    if settlement.get("phase") != "after_action":
+        raise SystemExit("settle-action requires an after_action runtime check.")
+    if settlement.get("action_id") != args.action_id or settlement.get("case_id") != action.get(
+        "case_id"
+    ):
+        raise SystemExit("The settlement check is bound to another action or case.")
+    if settlement.get("consumed") is True:
+        raise SystemExit("The settlement check has already been consumed.")
+    if settlement.get("connection_epoch") != action.get("connection_epoch"):
+        raise SystemExit("The settlement check belongs to another connection epoch.")
     completion_signal = str(args.completion_signal).strip()
     if not completion_signal:
         raise SystemExit("A safe independent --completion-signal is required.")
-    preview_connected_after = args.preview_connected_after == "true"
-    stream_settled = args.stream_settled == "true"
+    preview_connected_after = settlement.get("preview_connected") is True
+    stream_settled = settlement.get("stream_quiet") is True
     if not stream_settled and args.settlement_reason in {
         "expected_and_quiet",
         "quiet_without_expected",
@@ -1134,35 +1263,42 @@ def settle_action(ledger: dict[str, Any], args: argparse.Namespace) -> None:
         for row in ledger.get("business_pushes", [])
         if isinstance(row, dict)
     )
-    if args.observed_business_push_count < 0:
-        raise SystemExit("Observed business push count must be non-negative.")
-    if recorded_pushes != args.observed_business_push_count:
+    observed_business_push_count = settlement.get("observed_business_push_count")
+    if recorded_pushes != observed_business_push_count:
         raise SystemExit(
             "Record and classify every observed business push before settlement; "
             f"ledger has {recorded_pushes}, action window has "
-            f"{args.observed_business_push_count}."
+            f"{observed_business_push_count}."
         )
-    if args.first_event_after is not None and args.first_event_after <= action.get(
-        "last_event_before", -1
-    ):
+    first_event_after = settlement.get("first_event_after")
+    settled_final_event = settlement.get("preview_event_cursor")
+    network_request_cursor_after = settlement.get("network_request_cursor")
+    if first_event_after is not None and first_event_after <= action.get("last_event_before", -1):
         raise SystemExit("first_event_after must follow last_event_before.")
-    if args.settled_final_event < action.get("last_event_before", -1):
+    if settled_final_event < action.get("last_event_before", -1):
         raise SystemExit("settled_final_event cannot precede last_event_before.")
+    if network_request_cursor_after < action.get("network_request_cursor_before", -1):
+        raise SystemExit("Network request cursor cannot move backwards within an action.")
     action.update(
         {
-            "first_event_after": args.first_event_after,
-            "settled_final_event": args.settled_final_event,
+            "settlement_check_id": settlement.get("check_id"),
+            "settlement_evidence_ids": list(settlement.get("evidence_ids", [])),
+            "first_event_after": first_event_after,
+            "settled_final_event": settled_final_event,
+            "network_request_cursor_after": network_request_cursor_after,
             "expected_seen": args.expected_seen == "true",
             "preview_connected_after": preview_connected_after,
             "interaction_outcome": args.interaction_outcome,
             "completion_signal": completion_signal,
             "stream_settled": stream_settled,
             "settlement_reason": args.settlement_reason,
-            "observed_business_push_count": args.observed_business_push_count,
+            "observed_business_push_count": observed_business_push_count,
             "settled_at": now(),
             "state": "SETTLED",
         }
     )
+    settlement["consumed"] = True
+    settlement["consumed_by_action_id"] = args.action_id
     if args.interaction_outcome == "completed" and preview_connected_after and stream_settled:
         case = find_unique(
             ledger.get("cases", []),
@@ -1184,12 +1320,20 @@ def init_command(args: argparse.Namespace) -> None:
         args.ledger,
         {
             "schema_version": SESSION_SCHEMA_VERSION,
+            "operator_contract_version": 1,
             "created_at": timestamp,
             "updated_at": timestamp,
             "profile_path": args.profile_path,
             "connection_epoch": 1,
             "approved_origins": sorted({origin(item) for item in args.approved_origin}),
             "surfaces": {},
+            "runtime_checks": [],
+            "event_closures": [],
+            "closure_history": [],
+            "operator_state": {
+                "status": "ACTIVE",
+                "current_event_group_id": None,
+            },
             "authorizations": [],
             "cases": [],
             "actions": [],
@@ -1214,6 +1358,8 @@ def register_surface(ledger: dict[str, Any], args: argparse.Namespace) -> None:
         surface["connected"] = args.connected == "true"
     if args.container_id:
         surface["container_id"] = args.container_id
+    if args.workspace:
+        surface["workspace"] = args.workspace
     ledger.setdefault("surfaces", {})[args.surface_id or args.role] = surface
 
 
@@ -1300,6 +1446,7 @@ def validate_command(ledger: dict[str, Any], args: argparse.Namespace) -> None:
 
 MUTATING_COMMANDS = {
     "register-surface": register_surface,
+    "record-runtime-check": record_runtime_check,
     "authorize": authorize,
     "register-case": register_case,
     "register-tag": register_tag,

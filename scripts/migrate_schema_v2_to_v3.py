@@ -12,6 +12,7 @@ from typing import Any
 
 from init_coverage_ledger import event_inventory, initialize_requirement
 from layer_contract import CANONICAL_LAYERS, applicable_layers, normalize_tag_scope
+from recette_schema import ACTION_BOUNDARY_CONTRACT_VERSION
 
 
 def parse_args() -> argparse.Namespace:
@@ -57,6 +58,7 @@ def migrate_results(legacy: dict[str, Any]) -> dict[str, Any]:
     included.sort(key=CANONICAL_LAYERS.index)
     run.update(
         {
+            "action_boundary_contract_version": ACTION_BOUNDARY_CONTRACT_VERSION,
             "tag_scope": normalize_tag_scope(run.get("tag_scope")),
             "included_layers": included,
             "requirement_inventory": [row.get("requirement_id") for row in requirements],

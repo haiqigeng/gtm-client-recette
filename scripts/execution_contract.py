@@ -27,6 +27,7 @@ from layer_contract import (
     normalize_tag_scope,
     tag_scope_decision,
 )
+from runtime_state_contract import runtime_snapshot_errors, validate_runtime_evidence
 from tag_evidence_contract import (
     evidence_matches_tag,
     has_network_capture,
@@ -388,13 +389,19 @@ def _validate_action_boundary_link(
 
 @dataclass
 class _ValidationContext:
+    ledger: dict[str, Any]
+    operator_contract_version: int | None
     final: bool
     results_provided: bool
     errors: list[str]
     cases: list[dict[str, Any]]
     actions: list[dict[str, Any]]
+    runtime_checks: list[dict[str, Any]]
+    event_closures: list[dict[str, Any]]
+    closure_history: list[dict[str, Any]]
     case_by_id: dict[str, dict[str, Any]]
     action_by_id: dict[str, dict[str, Any]]
+    runtime_by_id: dict[str, dict[str, Any]]
     push_by_id: dict[str, dict[str, Any]]
     authorization_by_id: dict[str, dict[str, Any]]
     by_requirement: dict[str, dict[str, Any]]
@@ -1023,6 +1030,117 @@ def _case_contract_for_action(case: dict[str, Any], action: dict[str, Any]) -> d
     }
 
 
+def _validate_operator_action_boundary(
+    context: _ValidationContext,
+    action: dict[str, Any],
+) -> None:
+    """Bind action cursors and readiness claims to captured runtime checks."""
+    if context.operator_contract_version != 1:
+        return
+    action_id = str(action.get("action_id", "")).strip()
+    case_id = str(action.get("case_id", "")).strip()
+    readiness_id = str(action.get("readiness_check_id", "")).strip()
+    readiness = context.runtime_by_id.get(readiness_id)
+    if not readiness_id:
+        context.errors.append(f"session action {action_id}: readiness_check_id is required")
+    elif readiness is None:
+        context.errors.append(
+            f"session action {action_id}: readiness_check_id is absent from runtime checks"
+        )
+    else:
+        if (
+            readiness.get("phase") != "before_action"
+            or readiness.get("action_id") != action_id
+            or readiness.get("case_id") != case_id
+        ):
+            context.errors.append(
+                f"session action {action_id}: readiness check has the wrong phase or identity"
+            )
+        if (
+            readiness.get("consumed") is not True
+            or readiness.get("consumed_by_action_id") != action_id
+        ):
+            context.errors.append(
+                f"session action {action_id}: readiness check was not consumed by this action"
+            )
+        expected_pairs = {
+            "last_event_before": "preview_event_cursor",
+            "network_request_cursor_before": "network_request_cursor",
+            "browser_context_id": "browser_context_id",
+            "observed_url_before": "website_url",
+            "selected_page_url_before": "selected_page_url",
+        }
+        for action_field, check_field in expected_pairs.items():
+            if action.get(action_field) != readiness.get(check_field):
+                context.errors.append(
+                    f"session action {action_id}: {action_field} differs from readiness capture"
+                )
+        if (
+            action.get("preview_connected_before") is not True
+            or action.get("target_ready_before") is not True
+        ):
+            context.errors.append(
+                f"session action {action_id}: captured readiness is not fully satisfied"
+            )
+
+    before_network = action.get("network_request_cursor_before")
+    if (
+        not isinstance(before_network, int)
+        or isinstance(before_network, bool)
+        or before_network < 0
+    ):
+        context.errors.append(
+            f"session action {action_id}: network_request_cursor_before must be non-negative"
+        )
+    if action.get("state") != "SETTLED":
+        return
+    settlement_id = str(action.get("settlement_check_id", "")).strip()
+    settlement = context.runtime_by_id.get(settlement_id)
+    if not settlement_id:
+        context.errors.append(f"session action {action_id}: settlement_check_id is required")
+        return
+    if settlement is None:
+        context.errors.append(
+            f"session action {action_id}: settlement_check_id is absent from runtime checks"
+        )
+        return
+    if (
+        settlement.get("phase") != "after_action"
+        or settlement.get("action_id") != action_id
+        or settlement.get("case_id") != case_id
+    ):
+        context.errors.append(
+            f"session action {action_id}: settlement check has the wrong phase or identity"
+        )
+    if (
+        settlement.get("consumed") is not True
+        or settlement.get("consumed_by_action_id") != action_id
+    ):
+        context.errors.append(
+            f"session action {action_id}: settlement check was not consumed by this action"
+        )
+    expected_pairs = {
+        "first_event_after": "first_event_after",
+        "settled_final_event": "preview_event_cursor",
+        "network_request_cursor_after": "network_request_cursor",
+        "observed_business_push_count": "observed_business_push_count",
+        "preview_connected_after": "preview_connected",
+        "stream_settled": "stream_quiet",
+    }
+    for action_field, check_field in expected_pairs.items():
+        if action.get(action_field) != settlement.get(check_field):
+            context.errors.append(
+                f"session action {action_id}: {action_field} differs from settlement capture"
+            )
+    after_network = action.get("network_request_cursor_after")
+    if not isinstance(after_network, int) or isinstance(after_network, bool) or after_network < 0:
+        context.errors.append(
+            f"session action {action_id}: network_request_cursor_after must be non-negative"
+        )
+    elif isinstance(before_network, int) and after_network < before_network:
+        context.errors.append(f"session action {action_id}: network request cursor moved backwards")
+
+
 def _validate_action(context: _ValidationContext, action: dict[str, Any]) -> None:
     action_id = str(action.get("action_id", "")).strip()
     case_id = str(action.get("case_id", "")).strip()
@@ -1063,6 +1181,7 @@ def _validate_action(context: _ValidationContext, action: dict[str, Any]) -> Non
         context.errors.append(
             f"session action {action_id}: connection_epoch must be a positive integer"
         )
+    _validate_operator_action_boundary(context, action)
     layer_results = action.get("layer_results")
     if not isinstance(layer_results, list):
         context.errors.append(f"session action {action_id}: layer_results must be an array")
@@ -1827,6 +1946,235 @@ def _validate_result_alignment(context: _ValidationContext) -> None:
     _validate_event_statuses(context)
 
 
+def _validate_runtime_checks(context: _ValidationContext) -> None:
+    """Validate captured readiness/settlement records and their direct proof."""
+    if context.operator_contract_version != 1:
+        return
+    for check in context.runtime_checks:
+        check_id = str(check.get("check_id", "")).strip()
+        action_id = str(check.get("action_id", "")).strip()
+        case_id = str(check.get("case_id", "")).strip()
+        action = context.action_by_id.get(action_id)
+        case = context.case_by_id.get(case_id)
+        if action is None:
+            context.errors.append(
+                f"session runtime check {check_id}: action_id is absent from actions"
+            )
+            continue
+        if case is None:
+            context.errors.append(f"session runtime check {check_id}: case_id is absent from cases")
+            continue
+        if action.get("case_id") != case_id or check.get("event_group_id") != case.get(
+            "event_group_id"
+        ):
+            context.errors.append(
+                f"session runtime check {check_id}: action, case, and event identities differ"
+            )
+        if check.get("phase") not in {"before_action", "resume", "after_action"}:
+            context.errors.append(
+                f"session runtime check {check_id}: unsupported runtime-check phase"
+            )
+            continue
+        if context.results_provided:
+            for error in runtime_snapshot_errors(
+                check,
+                phase=str(check.get("phase")),
+                action_id=action_id,
+                case=case,
+                ledger=context.ledger,
+                results={"run": context.run},
+                expected_connection_epoch=action.get("connection_epoch", 1),
+                recorded_at=check.get("recorded_at"),
+                action_timestamp=action.get("action_timestamp"),
+            ):
+                context.errors.append(f"session runtime check {check_id}: {error}")
+            context.errors.extend(validate_runtime_evidence(check, context.evidence))
+        if (
+            check.get("phase") == "resume"
+            and context.final
+            and (
+                check.get("consumed") is not True or check.get("consumed_by_action_id") != action_id
+            )
+        ):
+            context.errors.append(
+                f"session runtime check {check_id}: resume check was not consumed"
+            )
+    for action in context.actions:
+        action_id = str(action.get("action_id", "")).strip()
+        readiness = context.runtime_by_id.get(str(action.get("readiness_check_id", "")))
+        settlement = context.runtime_by_id.get(str(action.get("settlement_check_id", "")))
+        if readiness is None or settlement is None:
+            continue
+        overlap = sorted(
+            set(readiness.get("evidence_ids", [])) & set(settlement.get("evidence_ids", []))
+        )
+        if overlap:
+            context.errors.append(
+                f"session action {action_id}: before/after runtime checks must use distinct "
+                "action-window evidence IDs"
+            )
+
+
+def _ordered_event_inventory(context: _ValidationContext) -> list[dict[str, Any]]:
+    inventory = [row for row in context.run.get("event_inventory", []) if isinstance(row, dict)]
+    return [
+        row
+        for _, row in sorted(
+            enumerate(inventory),
+            key=lambda item: (
+                item[1].get("plan_order") if isinstance(item[1].get("plan_order"), int) else 10**9,
+                item[0],
+            ),
+        )
+    ]
+
+
+def _validate_event_closures(context: _ValidationContext) -> None:
+    """Require plan-ordered event closure and immediate feedback acknowledgement."""
+    if context.operator_contract_version != 1:
+        return
+    ordered_inventory = _ordered_event_inventory(context)
+    expected_groups = [str(row.get("event_group_id", "")) for row in ordered_inventory]
+    actual_groups = [str(row.get("event_group_id", "")).strip() for row in context.event_closures]
+    if len(set(actual_groups)) != len(actual_groups):
+        context.errors.append("session: event_closures contain duplicate event groups")
+    if context.results_provided and actual_groups != expected_groups[: len(actual_groups)]:
+        context.errors.append(
+            "session: event_closures must follow the original tracking-plan order"
+        )
+    if context.final and context.results_provided and actual_groups != expected_groups:
+        context.errors.append("session: final validation requires one closure for every plan event")
+    inventory_by_group = {str(row.get("event_group_id", "")): row for row in ordered_inventory}
+    for closure in context.event_closures:
+        group_id = str(closure.get("event_group_id", "")).strip()
+        label = f"session event closure {group_id}"
+        inventory = inventory_by_group.get(group_id)
+        if not group_id or (context.results_provided and inventory is None):
+            context.errors.append(f"{label}: event_group_id is absent from event inventory")
+            continue
+        if inventory is not None and closure.get("plan_order") != inventory.get("plan_order"):
+            context.errors.append(f"{label}: plan_order differs from event inventory")
+        for field_name in ("closed_at", "feedback_emitted_at"):
+            if not iso_timestamp(closure.get(field_name)):
+                context.errors.append(f"{label}: {field_name} must be ISO 8601 with timezone")
+        group_cases = [
+            case
+            for case in context.cases
+            if str(case.get("event_group_id", "")).strip() == group_id
+        ]
+        expected_case_ids = [str(case.get("case_id", "")).strip() for case in group_cases]
+        closure_case_ids = closure.get("case_ids")
+        valid_case_ids = (
+            isinstance(closure_case_ids, list)
+            and all(nonempty(value) for value in closure_case_ids)
+            and len(closure_case_ids) == len(set(closure_case_ids))
+        )
+        if not valid_case_ids or set(closure_case_ids) != set(expected_case_ids):
+            context.errors.append(
+                f"{label}: case_ids must exactly match the event's interaction cases"
+            )
+        expected_actions = [
+            str(case.get("final_action_id", "")).strip()
+            for case in group_cases
+            if case.get("execution_status") == "EXECUTED"
+        ]
+        final_action_ids = closure.get("final_action_ids")
+        valid_action_ids = (
+            isinstance(final_action_ids, list)
+            and all(nonempty(value) for value in final_action_ids)
+            and len(final_action_ids) == len(set(final_action_ids))
+        )
+        if not valid_action_ids or set(final_action_ids) != set(expected_actions):
+            context.errors.append(
+                f"{label}: final_action_ids must exactly match executed final attempts"
+            )
+        if any(case.get("execution_status") == "PENDING" for case in group_cases):
+            context.errors.append(f"{label}: cannot close an event with pending cases")
+        if any(
+            action.get("state") != "SETTLED"
+            for action_id in expected_actions
+            if (action := context.action_by_id.get(action_id)) is not None
+        ):
+            context.errors.append(f"{label}: a final action is not settled")
+
+
+def _validate_closure_history(context: _ValidationContext) -> None:
+    """Keep every explicit reopening auditable without treating old proof as current."""
+    if context.operator_contract_version != 1:
+        return
+    inventory_order = {
+        str(row.get("event_group_id", "")): index
+        for index, row in enumerate(_ordered_event_inventory(context))
+    }
+    current_closures = {str(row.get("event_group_id", "")): row for row in context.event_closures}
+    for index, history in enumerate(context.closure_history, start=1):
+        label = f"session closure history {index}"
+        reopened_group = str(history.get("reopened_event_group_id", "")).strip()
+        if not reopened_group or (
+            context.results_provided and reopened_group not in inventory_order
+        ):
+            context.errors.append(f"{label}: invalid reopened_event_group_id")
+        if not iso_timestamp(history.get("reopened_at")):
+            context.errors.append(f"{label}: reopened_at must be ISO 8601 with timezone")
+        if not nonempty(history.get("reason")):
+            context.errors.append(f"{label}: reason is required")
+        invalidated = history.get("invalidated_closures")
+        if (
+            not isinstance(invalidated, list)
+            or not invalidated
+            or any(not isinstance(row, dict) for row in invalidated)
+        ):
+            context.errors.append(f"{label}: invalidated_closures must be a non-empty array")
+            continue
+        invalidated_groups = [str(row.get("event_group_id", "")).strip() for row in invalidated]
+        for closure in invalidated:
+            group_id = str(closure.get("event_group_id", "")).strip()
+            if context.results_provided and group_id not in inventory_order:
+                context.errors.append(f"{label}: invalidated closure has an unknown event")
+            if not isinstance(closure.get("plan_order"), int) or isinstance(
+                closure.get("plan_order"), bool
+            ):
+                context.errors.append(f"{label}: invalidated closure requires plan_order")
+            for field_name in ("closed_at", "feedback_emitted_at"):
+                if not iso_timestamp(closure.get(field_name)):
+                    context.errors.append(
+                        f"{label}: invalidated closure {field_name} must be ISO 8601"
+                    )
+        if invalidated_groups[0] != reopened_group:
+            context.errors.append(f"{label}: invalidated suffix must start with reopened event")
+        if len(set(invalidated_groups)) != len(invalidated_groups):
+            context.errors.append(f"{label}: invalidated closures contain duplicate events")
+        if context.results_provided and reopened_group in inventory_order:
+            positions = [inventory_order.get(group) for group in invalidated_groups]
+            expected = list(
+                range(
+                    inventory_order[reopened_group],
+                    inventory_order[reopened_group] + len(invalidated_groups),
+                )
+            )
+            if positions != expected:
+                context.errors.append(
+                    f"{label}: invalidated closures must preserve the plan-ordered suffix"
+                )
+        current = current_closures.get(reopened_group)
+        prior = invalidated[0]
+        if context.final and current is not None:
+            current_cases = {
+                value for value in current.get("case_ids", []) if isinstance(value, str)
+            }
+            prior_cases = {value for value in prior.get("case_ids", []) if isinstance(value, str)}
+            current_actions = {
+                value for value in current.get("final_action_ids", []) if isinstance(value, str)
+            }
+            prior_actions = {
+                value for value in prior.get("final_action_ids", []) if isinstance(value, str)
+            }
+            if current_cases == prior_cases and current_actions == prior_actions:
+                context.errors.append(
+                    f"{label}: reopened target requires a new case or final action"
+                )
+
+
 def validate_session(
     ledger: dict[str, Any],
     *,
@@ -1840,11 +2188,31 @@ def validate_session(
             "with the current preview_session_ledger.py"
         ]
     errors: list[str] = []
+    operator_contract_version = ledger.get("operator_contract_version")
+    if operator_contract_version not in (None, 1):
+        errors.append("session: operator_contract_version must be 1 when supplied")
+    if final and operator_contract_version == 1 and results is None:
+        errors.append("session: operator-contract final validation requires normalized results")
     _validate_session_metadata(ledger, errors)
     cases = rows(ledger.get("cases"), "cases", errors)
     actions = rows(ledger.get("actions"), "actions", errors)
     pushes = rows(ledger.get("business_pushes"), "business_pushes", errors)
     authorizations = rows(ledger.get("authorizations"), "authorizations", errors)
+    runtime_checks = (
+        rows(ledger.get("runtime_checks"), "runtime_checks", errors)
+        if operator_contract_version == 1
+        else []
+    )
+    event_closures = (
+        rows(ledger.get("event_closures"), "event_closures", errors)
+        if operator_contract_version == 1
+        else []
+    )
+    closure_history = (
+        rows(ledger.get("closure_history", []), "closure_history", errors)
+        if operator_contract_version == 1
+        else []
+    )
     if "connection_epoch" in ledger:
         expected_epoch = 1
         for action in actions:
@@ -1867,13 +2235,24 @@ def validate_session(
         row for row in (results or {}).get("unexpected", []) if isinstance(row, dict)
     ]
     context = _ValidationContext(
+        ledger=ledger,
+        operator_contract_version=operator_contract_version,
         final=final,
         results_provided=results is not None,
         errors=errors,
         cases=cases,
         actions=actions,
+        runtime_checks=runtime_checks,
+        event_closures=event_closures,
+        closure_history=closure_history,
         case_by_id=_unique_ids(cases, "case_id", "case", errors),
         action_by_id=_unique_ids(actions, "action_id", "action", errors),
+        runtime_by_id=_unique_ids(
+            runtime_checks,
+            "check_id",
+            "runtime check",
+            errors,
+        ),
         push_by_id=_unique_ids(pushes, "push_id", "business push", errors),
         authorization_by_id=_validate_authorizations(authorizations, errors),
         by_requirement=by_requirement,
@@ -1899,6 +2278,9 @@ def validate_session(
     _validate_actions(context)
     _validate_cases(context)
     _validate_pushes(context)
+    _validate_runtime_checks(context)
+    _validate_event_closures(context)
+    _validate_closure_history(context)
     _validate_result_alignment(context)
     unsafe_session_findings = [
         finding
@@ -1955,6 +2337,13 @@ def case_action_rows(ledger: dict[str, Any]) -> list[dict[str, Any]]:
                 "action_id": action.get("action_id"),
                 "attempt_number": action.get("attempt_number"),
                 "retry_of_action_id": action.get("retry_of_action_id"),
+                "readiness_check_id": action.get("readiness_check_id"),
+                "settlement_check_id": action.get("settlement_check_id"),
+                "last_event_before": action.get("last_event_before"),
+                "first_event_after": action.get("first_event_after"),
+                "settled_final_event": action.get("settled_final_event"),
+                "network_request_cursor_before": action.get("network_request_cursor_before"),
+                "network_request_cursor_after": action.get("network_request_cursor_after"),
                 "interaction_outcome": action.get("interaction_outcome"),
                 "completion_signal": action.get("completion_signal"),
                 "stream_settled": action.get("stream_settled"),

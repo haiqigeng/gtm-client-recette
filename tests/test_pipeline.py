@@ -8,7 +8,9 @@ import tempfile
 import unittest
 from argparse import Namespace
 from copy import deepcopy
+from datetime import UTC, datetime
 from pathlib import Path
+from unittest.mock import patch
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.comments import Comment
@@ -59,7 +61,9 @@ from preview_session_ledger import (  # noqa: E402
     revise_tag_inventory,
     scaffold_tag_results,
 )
+from recette_operator import _save_pair_atomic  # noqa: E402
 from recette_schema import ReportValidationError, event_rollup, validate  # noqa: E402
+from runtime_state_contract import runtime_snapshot_errors  # noqa: E402
 from verify_release_artifact import verify_archive  # noqa: E402
 
 
@@ -418,16 +422,78 @@ def execution_fixture(data: dict | None = None) -> dict:
                 "recorded_at": "2026-07-25T10:01:04+00:00",
             }
         )
+    before_runtime_evidence_ids = ["EVD-READY-ACTION-001", "EVD-READY-NETWORK-001"]
+    after_runtime_evidence_ids = ["EVD-SETTLE-ACTION-001", "EVD-SETTLE-NETWORK-001"]
+    runtime_evidence = [
+        {
+            "evidence_id": "EVD-READY-ACTION-001",
+            "kind": "action_boundary",
+            "source": "Playwright",
+            "capture_mode": "direct",
+            "action_id": "ACT-001",
+            "runtime_check_id": boundary["readiness_check_id"],
+            "runtime_phase": "before_action",
+            "path_or_url": "evidence/ready-action-001.json",
+            "captured_at": "2026-07-25T10:00:59+00:00",
+            "description": "Direct readiness boundary for this exact action.",
+        },
+        {
+            "evidence_id": "EVD-READY-NETWORK-001",
+            "kind": "browser_network_capture",
+            "source": "Browser Network",
+            "capture_mode": "direct",
+            "action_id": "ACT-001",
+            "runtime_check_id": boundary["readiness_check_id"],
+            "runtime_phase": "before_action",
+            "container_id": tag_container,
+            "path_or_url": "evidence/ready-network-001.json",
+            "captured_at": "2026-07-25T10:00:59+00:00",
+            "description": "Active network cursor at the readiness boundary.",
+        },
+        {
+            "evidence_id": "EVD-SETTLE-ACTION-001",
+            "kind": "action_boundary",
+            "source": "Playwright",
+            "capture_mode": "direct",
+            "action_id": "ACT-001",
+            "runtime_check_id": boundary["settlement_check_id"],
+            "runtime_phase": "after_action",
+            "path_or_url": "evidence/settle-action-001.json",
+            "captured_at": "2026-07-25T10:01:03+00:00",
+            "description": "Direct settlement boundary for this exact action.",
+        },
+        {
+            "evidence_id": "EVD-SETTLE-NETWORK-001",
+            "kind": "browser_network_capture",
+            "source": "Browser Network",
+            "capture_mode": "direct",
+            "action_id": "ACT-001",
+            "runtime_check_id": boundary["settlement_check_id"],
+            "runtime_phase": "after_action",
+            "container_id": tag_container,
+            "path_or_url": "evidence/settle-network-001.json",
+            "captured_at": "2026-07-25T10:01:03+00:00",
+            "description": "Complete request cursor capture for the settled action window.",
+        },
+    ]
+    known_evidence_ids = {str(row.get("evidence_id", "")) for row in data.get("evidence", [])}
+    data.setdefault("evidence", []).extend(
+        row for row in runtime_evidence if row["evidence_id"] not in known_evidence_ids
+    )
     return {
         "schema_version": 3,
+        "operator_contract_version": 1,
         "created_at": "2026-07-25T09:55:00+00:00",
         "updated_at": "2026-07-25T10:02:00+00:00",
         "profile_path": "profiles/run-synthetic-001",
+        "connection_epoch": 1,
         "approved_origins": ["https://shop.example.test"],
         "surfaces": {
             "gtm": {
                 "role": "gtm_workspace",
                 "url": "https://tagmanager.google.com/",
+                "container_id": tag_container,
+                "workspace": data["run"]["workspace"],
             },
             "preview": {
                 "role": "tag_assistant",
@@ -438,6 +504,93 @@ def execution_fixture(data: dict | None = None) -> dict:
                 "role": "website",
                 "url": "https://shop.example.test/product",
             },
+        },
+        "runtime_checks": [
+            {
+                "check_id": boundary["readiness_check_id"],
+                "phase": "before_action",
+                "action_id": "ACT-001",
+                "case_id": "CASE-001",
+                "event_group_id": "EVG-001",
+                "captured_at": "2026-07-25T10:00:59+00:00",
+                "recorded_at": "2026-07-25T10:00:59+00:00",
+                "capture_source": "playwright_runtime_probe",
+                "browser_context_id": "desktop-default",
+                "connection_epoch": 1,
+                "gtm_workspace_surface_id": "gtm",
+                "tag_assistant_surface_id": "preview",
+                "website_surface_id": "site",
+                "containers": [
+                    {
+                        "container_id": tag_container,
+                        "workspace": data["run"]["workspace"],
+                    }
+                ],
+                "website_url": "https://shop.example.test/product",
+                "selected_page_url": "https://shop.example.test/product",
+                "preview_connected": True,
+                "target_interactive": True,
+                "target_uncovered": True,
+                "lifecycle_observed": True,
+                "stream_quiet": True,
+                "network_capture_active": True,
+                "preview_event_cursor": boundary["last_event_before"],
+                "network_request_cursor": boundary["network_request_cursor_before"],
+                "evidence_ids": before_runtime_evidence_ids,
+                "consumed": True,
+                "consumed_by_action_id": "ACT-001",
+            },
+            {
+                "check_id": boundary["settlement_check_id"],
+                "phase": "after_action",
+                "action_id": "ACT-001",
+                "case_id": "CASE-001",
+                "event_group_id": "EVG-001",
+                "captured_at": "2026-07-25T10:01:03+00:00",
+                "recorded_at": "2026-07-25T10:01:03+00:00",
+                "capture_source": "playwright_runtime_probe",
+                "browser_context_id": "desktop-default",
+                "connection_epoch": 1,
+                "gtm_workspace_surface_id": "gtm",
+                "tag_assistant_surface_id": "preview",
+                "website_surface_id": "site",
+                "containers": [
+                    {
+                        "container_id": tag_container,
+                        "workspace": data["run"]["workspace"],
+                    }
+                ],
+                "website_url": "https://shop.example.test/product",
+                "selected_page_url": "https://shop.example.test/product",
+                "preview_connected": True,
+                "target_interactive": True,
+                "target_uncovered": True,
+                "lifecycle_observed": True,
+                "stream_quiet": True,
+                "network_capture_active": True,
+                "preview_event_cursor": boundary["settled_final_event"],
+                "network_request_cursor": boundary["network_request_cursor_after"],
+                "first_event_after": boundary["first_event_after"],
+                "observed_business_push_count": 1,
+                "evidence_ids": after_runtime_evidence_ids,
+                "consumed": True,
+                "consumed_by_action_id": "ACT-001",
+            },
+        ],
+        "event_closures": [
+            {
+                "event_group_id": "EVG-001",
+                "plan_order": 1,
+                "case_ids": ["CASE-001"],
+                "final_action_ids": ["ACT-001"],
+                "closed_at": "2026-07-25T10:02:00+00:00",
+                "feedback_emitted_at": "2026-07-25T10:02:00+00:00",
+            }
+        ],
+        "closure_history": [],
+        "operator_state": {
+            "status": "FINISHED",
+            "current_event_group_id": None,
         },
         "authorizations": [],
         "cases": [
@@ -485,13 +638,19 @@ def execution_fixture(data: dict | None = None) -> dict:
                 "action": "click",
                 "attempt_number": 1,
                 "inventory_revision": 1,
+                "connection_epoch": 1,
                 "retry_of_action_id": None,
+                "readiness_check_id": boundary["readiness_check_id"],
+                "readiness_evidence_ids": before_runtime_evidence_ids,
                 "preview_connected_before": True,
                 "target_ready_before": True,
                 "last_event_before": boundary["last_event_before"],
+                "network_request_cursor_before": boundary["network_request_cursor_before"],
                 "consent_state_before": "analytics_storage=granted",
                 "browser_context_id": "desktop-default",
                 "container_ids": [tag_container],
+                "observed_url_before": "https://shop.example.test/product",
+                "selected_page_url_before": "https://shop.example.test/product",
                 "action_timestamp": boundary["action_timestamp"],
                 "quiet_window_ms": boundary["quiet_window_ms"],
                 "timeout_ms": boundary["timeout_ms"],
@@ -499,6 +658,9 @@ def execution_fixture(data: dict | None = None) -> dict:
                 "tag_layer_results": tag_layer_results,
                 "first_event_after": boundary["first_event_after"],
                 "settled_final_event": boundary["settled_final_event"],
+                "settlement_check_id": boundary["settlement_check_id"],
+                "settlement_evidence_ids": after_runtime_evidence_ids,
+                "network_request_cursor_after": boundary["network_request_cursor_after"],
                 "expected_seen": True,
                 "preview_connected_after": True,
                 "interaction_outcome": boundary["interaction_outcome"],
@@ -755,6 +917,8 @@ class PipelineTests(unittest.TestCase):
             workbook = load_workbook(output, read_only=False)
             self.assertEqual(REQUIRED_SHEETS, workbook.sheetnames)
             self.assertEqual("PASS", workbook["Client Summary"]["B3"].value)
+            self.assertEqual("Output contract", workbook["Client Summary"]["A4"].value)
+            self.assertEqual(2, workbook["Client Summary"]["B4"].value)
             self.assertEqual(2, workbook["Requirement Matrix"].max_row)
             event_sheet = workbook["Event Evidence"]
             event_headers = {cell.value: cell.column for cell in event_sheet[1]}
@@ -2412,6 +2576,90 @@ class PipelineTests(unittest.TestCase):
                     text=True,
                 )
 
+            def record_runtime(
+                check_id: str,
+                phase: str,
+                action_id: str,
+                preview_cursor: int,
+                network_cursor: int,
+                *,
+                first_event_after: int | None = None,
+                push_count: int | None = None,
+            ) -> None:
+                captured_at = datetime.now(UTC).isoformat(timespec="seconds")
+                runtime_ids = [f"EVD-{check_id}-ACTION", f"EVD-{check_id}-NETWORK"]
+                current_results = json.loads(results.read_text(encoding="utf-8"))
+                current_results.setdefault("evidence", []).extend(
+                    [
+                        {
+                            "evidence_id": runtime_ids[0],
+                            "kind": "action_boundary",
+                            "source": "Playwright",
+                            "capture_mode": "direct",
+                            "action_id": action_id,
+                            "runtime_check_id": check_id,
+                            "runtime_phase": phase,
+                            "path_or_url": f"evidence/{check_id}-action.json",
+                            "captured_at": captured_at,
+                            "description": "Direct runtime action boundary.",
+                        },
+                        {
+                            "evidence_id": runtime_ids[1],
+                            "kind": "browser_network_capture",
+                            "source": "Browser Network",
+                            "capture_mode": "direct",
+                            "action_id": action_id,
+                            "runtime_check_id": check_id,
+                            "runtime_phase": phase,
+                            "container_id": "GTM-TEST",
+                            "path_or_url": f"evidence/{check_id}-network.json",
+                            "captured_at": captured_at,
+                            "description": "Direct runtime network boundary.",
+                        },
+                    ]
+                )
+                results.write_text(json.dumps(current_results), encoding="utf-8")
+                snapshot = {
+                    "check_id": check_id,
+                    "captured_at": captured_at,
+                    "capture_source": "playwright_runtime_probe",
+                    "browser_context_id": "desktop-default",
+                    "connection_epoch": 1,
+                    "gtm_workspace_surface_id": "gtm_workspace",
+                    "tag_assistant_surface_id": "tag_assistant",
+                    "website_surface_id": "website",
+                    "containers": [{"container_id": "GTM-TEST", "workspace": "Recette"}],
+                    "website_url": "https://shop.example.test/product",
+                    "selected_page_url": "https://shop.example.test/product",
+                    "preview_connected": True,
+                    "target_interactive": True,
+                    "target_uncovered": True,
+                    "lifecycle_observed": True,
+                    "stream_quiet": True,
+                    "network_capture_active": True,
+                    "preview_event_cursor": preview_cursor,
+                    "network_request_cursor": network_cursor,
+                    "evidence_ids": runtime_ids,
+                }
+                if phase == "after_action":
+                    snapshot["first_event_after"] = first_event_after
+                    snapshot["observed_business_push_count"] = push_count
+                snapshot_path = Path(tempdir) / f"{check_id}.json"
+                snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
+                run(
+                    "record-runtime-check",
+                    str(ledger),
+                    str(snapshot_path),
+                    "--results",
+                    str(results),
+                    "--phase",
+                    phase,
+                    "--action-id",
+                    action_id,
+                    "--case-id",
+                    "CASE-ADD-DESKTOP",
+                )
+
             run(
                 "init",
                 str(ledger),
@@ -2429,6 +2677,10 @@ class PipelineTests(unittest.TestCase):
                 "https://tagmanager.google.com/",
                 "--title",
                 "GTM",
+                "--container-id",
+                "GTM-TEST",
+                "--workspace",
+                "Recette",
             )
             run(
                 "register-surface",
@@ -2510,6 +2762,7 @@ class PipelineTests(unittest.TestCase):
                 "--evidence-id",
                 "EVD-TAG-CONFIG-011",
             )
+            record_runtime("READY-ACT-001", "before_action", "ACT-001", 10, 20)
             run(
                 "begin-action",
                 str(ledger),
@@ -2517,33 +2770,36 @@ class PipelineTests(unittest.TestCase):
                 "ACT-001",
                 "--case-id",
                 "CASE-ADD-DESKTOP",
-                "--last-event-before",
-                "10",
+                "--readiness-check-id",
+                "READY-ACT-001",
                 "--consent-state",
                 "analytics_storage=granted",
+            )
+            record_runtime(
+                "SETTLE-ACT-001",
+                "after_action",
+                "ACT-001",
+                10,
+                20,
+                push_count=0,
             )
             run(
                 "settle-action",
                 str(ledger),
                 "--action-id",
                 "ACT-001",
-                "--settled-final-event",
-                "10",
+                "--settlement-check-id",
+                "SETTLE-ACT-001",
                 "--expected-seen",
                 "false",
-                "--preview-connected-after",
-                "true",
                 "--interaction-outcome",
                 "failed",
                 "--completion-signal",
                 "Overlay intercepted the click",
-                "--stream-settled",
-                "true",
                 "--settlement-reason",
                 "interaction_failed",
-                "--observed-business-push-count",
-                "0",
             )
+            record_runtime("READY-ACT-002", "before_action", "ACT-002", 10, 20)
             run(
                 "begin-action",
                 str(ledger),
@@ -2553,8 +2809,8 @@ class PipelineTests(unittest.TestCase):
                 "ACT-001",
                 "--case-id",
                 "CASE-ADD-DESKTOP",
-                "--last-event-before",
-                "10",
+                "--readiness-check-id",
+                "READY-ACT-002",
                 "--consent-state",
                 "analytics_storage=granted",
                 "--quiet-window-ms",
@@ -2584,29 +2840,30 @@ class PipelineTests(unittest.TestCase):
                 "--container-id",
                 "GTM-TEST",
             )
+            record_runtime(
+                "SETTLE-ACT-002",
+                "after_action",
+                "ACT-002",
+                12,
+                21,
+                first_event_after=11,
+                push_count=1,
+            )
             run(
                 "settle-action",
                 str(ledger),
                 "--action-id",
                 "ACT-002",
-                "--first-event-after",
-                "11",
-                "--settled-final-event",
-                "12",
+                "--settlement-check-id",
+                "SETTLE-ACT-002",
                 "--expected-seen",
-                "true",
-                "--preview-connected-after",
                 "true",
                 "--interaction-outcome",
                 "completed",
                 "--completion-signal",
                 "Basket count changed from 0 to 1",
-                "--stream-settled",
-                "true",
                 "--settlement-reason",
                 "expected_and_quiet",
-                "--observed-business-push-count",
-                "1",
             )
             for layer, evidence_id in (
                 ("raw_api_call", "EVD-RAW-011"),
@@ -2642,6 +2899,7 @@ class PipelineTests(unittest.TestCase):
             )
             self.assertTrue(state["actions"][1]["preview_connected_after"])
             self.assertTrue(state["actions"][1]["stream_settled"])
+            record_runtime("READY-ACT-003", "before_action", "ACT-003", 12, 21)
             run(
                 "begin-action",
                 str(ledger),
@@ -2651,10 +2909,18 @@ class PipelineTests(unittest.TestCase):
                 "ACT-002",
                 "--case-id",
                 "CASE-ADD-DESKTOP",
-                "--last-event-before",
-                "12",
+                "--readiness-check-id",
+                "READY-ACT-003",
                 "--consent-state",
                 "analytics_storage=granted",
+            )
+            record_runtime(
+                "SETTLE-ACT-003",
+                "after_action",
+                "ACT-003",
+                12,
+                21,
+                push_count=0,
             )
             invalid = subprocess.run(
                 [
@@ -2664,20 +2930,14 @@ class PipelineTests(unittest.TestCase):
                     str(ledger),
                     "--action-id",
                     "ACT-003",
-                    "--settled-final-event",
-                    "12",
+                    "--settlement-check-id",
+                    "SETTLE-ACT-003",
                     "--expected-seen",
                     "false",
-                    "--preview-connected-after",
-                    "true",
                     "--interaction-outcome",
                     "completed",
-                    "--stream-settled",
-                    "true",
                     "--settlement-reason",
                     "quiet_without_expected",
-                    "--observed-business-push-count",
-                    "0",
                 ],
                 check=False,
                 capture_output=True,
@@ -2685,6 +2945,319 @@ class PipelineTests(unittest.TestCase):
             )
             self.assertNotEqual(0, invalid.returncode)
             self.assertIn("--completion-signal", invalid.stderr)
+
+    def test_runtime_readiness_rejects_wrong_page_and_inactive_network(self) -> None:
+        data = fixture()
+        session = execution_fixture(data)
+        snapshot = deepcopy(session["runtime_checks"][0])
+        snapshot["selected_page_url"] = "https://shop.example.test/cart"
+        snapshot["network_capture_active"] = False
+        errors = runtime_snapshot_errors(
+            snapshot,
+            phase="before_action",
+            action_id="ACT-001",
+            case=session["cases"][0],
+            ledger=session,
+            results=data,
+            expected_connection_epoch=1,
+        )
+        self.assertTrue(any("selected Tag Assistant page differs" in row for row in errors))
+        self.assertTrue(any("network_capture_active=true" in row for row in errors))
+
+    def test_runtime_capture_rejects_untrusted_source_future_time_and_reused_proof(self) -> None:
+        data = fixture()
+        session = execution_fixture(data)
+        session["runtime_checks"][0]["capture_source"] = "manual_guess"
+        errors = validate_session(session, results=data, final=True)
+        self.assertTrue(any("supported browser runtime probe" in row for row in errors))
+
+        session = execution_fixture(data)
+        session["runtime_checks"][0]["captured_at"] = "2026-07-25T11:00:59+00:00"
+        errors = validate_session(session, results=data, final=True)
+        self.assertTrue(any("later than recorded_at" in row for row in errors))
+
+        session = execution_fixture(data)
+        session["runtime_checks"][0]["captured_at"] = "2026-07-25T09:50:00+00:00"
+        errors = validate_session(session, results=data, final=True)
+        self.assertTrue(any("runtime snapshot is stale" in row for row in errors))
+
+        session = execution_fixture(data)
+        session["runtime_checks"][1]["evidence_ids"] = list(
+            session["runtime_checks"][0]["evidence_ids"]
+        )
+        errors = validate_session(session, results=data, final=True)
+        self.assertTrue(any("distinct action-window evidence IDs" in row for row in errors))
+
+    def test_legacy_schema_v3_remains_readable_without_new_boundary_contract(self) -> None:
+        current = fixture()
+        current_session = execution_fixture(current)
+        legacy = deepcopy(current)
+        legacy["run"].pop("action_boundary_contract_version", None)
+        for row in legacy["requirements"]:
+            boundary = row.get("action_boundary", {})
+            for field in (
+                "readiness_check_id",
+                "settlement_check_id",
+                "network_request_cursor_before",
+                "network_request_cursor_after",
+            ):
+                boundary.pop(field, None)
+        self.assertEqual([], validate(legacy, strict=True))
+
+        strict_current = deepcopy(current)
+        strict_current["requirements"][0]["action_boundary"].pop("readiness_check_id")
+        strict_errors = validate(strict_current, strict=False)
+        self.assertTrue(any("readiness_check_id" in row for row in strict_errors))
+
+        legacy_session = deepcopy(current_session)
+        for field in (
+            "operator_contract_version",
+            "runtime_checks",
+            "event_closures",
+            "closure_history",
+            "operator_state",
+        ):
+            legacy_session.pop(field, None)
+        for action in legacy_session["actions"]:
+            for field in (
+                "readiness_check_id",
+                "settlement_check_id",
+                "readiness_evidence_ids",
+                "settlement_evidence_ids",
+                "network_request_cursor_before",
+                "network_request_cursor_after",
+            ):
+                action.pop(field, None)
+        self.assertEqual([], validate_session(legacy_session, results=legacy, final=True))
+
+    def test_guided_operator_rejects_legacy_results_without_fabricating_runtime_proof(
+        self,
+    ) -> None:
+        data = fixture()
+        session = execution_fixture(data)
+        data["run"].pop("action_boundary_contract_version", None)
+        with tempfile.TemporaryDirectory() as tempdir:
+            results_path = Path(tempdir) / "results.json"
+            session_path = Path(tempdir) / "session.json"
+            results_path.write_text(json.dumps(data), encoding="utf-8")
+            session_path.write_text(json.dumps(session), encoding="utf-8")
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "recette_operator.py"),
+                    "finish-run",
+                    str(results_path),
+                    str(session_path),
+                    str(Path(tempdir) / "recette.xlsx"),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(0, completed.returncode)
+            self.assertIn("missing historical fields are never fabricated", completed.stdout)
+
+    def test_guided_operator_pause_resume_between_events_and_reopen_closed_event(self) -> None:
+        data = fixture()
+        session = execution_fixture(data)
+        session["event_closures"] = []
+        session["operator_state"] = {"status": "ACTIVE", "current_event_group_id": None}
+        with tempfile.TemporaryDirectory() as tempdir:
+            results_path = Path(tempdir) / "results.json"
+            session_path = Path(tempdir) / "session.json"
+            results_path.write_text(json.dumps(data), encoding="utf-8")
+            session_path.write_text(json.dumps(session), encoding="utf-8")
+            paused = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "recette_operator.py"),
+                    "pause-run",
+                    str(session_path),
+                    "--label",
+                    "between events",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(0, paused.returncode, paused.stdout + paused.stderr)
+            resumed = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "recette_operator.py"),
+                    "resume-run",
+                    str(results_path),
+                    str(session_path),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(0, resumed.returncode, resumed.stdout + resumed.stderr)
+            self.assertIsNone(json.loads(resumed.stdout)["fresh_runtime_check_id"])
+
+            session = execution_fixture(data)
+            session_path.write_text(json.dumps(session), encoding="utf-8")
+            reopened = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "recette_operator.py"),
+                    "reopen-event",
+                    str(results_path),
+                    str(session_path),
+                    "--event-group-id",
+                    "EVG-001",
+                    "--reason",
+                    "Late material footer interaction discovered.",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(0, reopened.returncode, reopened.stdout + reopened.stderr)
+            reopened_session = json.loads(session_path.read_text(encoding="utf-8"))
+            self.assertEqual([], reopened_session["event_closures"])
+            self.assertEqual(1, len(reopened_session["closure_history"]))
+            self.assertEqual([], validate_session(reopened_session, results=data, final=False))
+            patch_path = Path(tempdir) / "no-op-patch.json"
+            patch_path.write_text(
+                json.dumps(
+                    {
+                        "event_group_id": "EVG-001",
+                        "requirements": deepcopy(data["requirements"]),
+                        "evidence": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            unchanged_close = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "recette_operator.py"),
+                    "close-event",
+                    str(results_path),
+                    str(session_path),
+                    str(patch_path),
+                    "--event-group-id",
+                    "EVG-001",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(0, unchanged_close.returncode)
+            self.assertIn("requires a new material case", unchanged_close.stdout)
+
+    def test_paired_event_close_write_rolls_back_after_second_replace_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            results_path = Path(tempdir) / "results.json"
+            session_path = Path(tempdir) / "session.json"
+            original_results = b'{"state":"old-results"}\n'
+            original_session = b'{"state":"old-session"}\n'
+            results_path.write_bytes(original_results)
+            session_path.write_bytes(original_session)
+            path_type = type(results_path)
+            real_replace = path_type.replace
+            failed = False
+
+            def fail_second_replace(source: Path, target: Path) -> Path:
+                nonlocal failed
+                if not failed and Path(target) == session_path and source.suffix == ".tmp":
+                    failed = True
+                    raise OSError("injected second replace failure")
+                return real_replace(source, target)
+
+            with (
+                patch.object(path_type, "replace", new=fail_second_replace),
+                self.assertRaises(OSError),
+            ):
+                _save_pair_atomic(
+                    results_path,
+                    {"state": "new-results"},
+                    session_path,
+                    {"state": "new-session"},
+                )
+            self.assertEqual(original_results, results_path.read_bytes())
+            self.assertEqual(original_session, session_path.read_bytes())
+
+    def test_operator_contract_rejects_uncaptured_cursor_and_missing_closure(self) -> None:
+        data = fixture()
+        session = execution_fixture(data)
+        session["actions"][0]["last_event_before"] -= 1
+        session["event_closures"] = []
+        errors = validate_session(session, results=data, final=True)
+        self.assertTrue(any("differs from readiness capture" in row for row in errors))
+        self.assertTrue(any("one closure for every plan event" in row for row in errors))
+
+    def test_event_feedback_computes_missing_event_and_occurrence_anomaly(self) -> None:
+        missing = fixture()
+        configure_absent_event(missing)
+        missing_feedback = event_feedback(missing, execution_fixture(missing))[0]
+        self.assertEqual("DATALAYER_EVENT_ABSENT", missing_feedback["primary_outcome"])
+        self.assertIn("MISSING_EXPECTED_OCCURRENCE", missing_feedback["anomaly_flags"])
+
+        duplicate = fixture()
+        duplicate_session = execution_fixture(duplicate)
+        duplicate_session["business_pushes"][0]["classification"] = "duplicate"
+        duplicate_feedback = event_feedback(duplicate, duplicate_session)[0]
+        self.assertIn("DUPLICATE_OCCURRENCE", duplicate_feedback["anomaly_flags"])
+
+    def test_guided_operator_closes_event_with_feedback_then_builds_workbook(self) -> None:
+        data = fixture()
+        session = execution_fixture(data)
+        session["event_closures"] = []
+        session["operator_state"] = {
+            "status": "ACTIVE",
+            "current_event_group_id": "EVG-001",
+        }
+        patch = {
+            "event_group_id": "EVG-001",
+            "requirements": deepcopy(data["requirements"]),
+            "evidence": [],
+        }
+        with tempfile.TemporaryDirectory() as tempdir:
+            results_path = Path(tempdir) / "results.json"
+            session_path = Path(tempdir) / "session.json"
+            patch_path = Path(tempdir) / "event-patch.json"
+            workbook_path = Path(tempdir) / "recette.xlsx"
+            results_path.write_text(json.dumps(data), encoding="utf-8")
+            session_path.write_text(json.dumps(session), encoding="utf-8")
+            patch_path.write_text(json.dumps(patch), encoding="utf-8")
+            close = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "recette_operator.py"),
+                    "close-event",
+                    str(results_path),
+                    str(session_path),
+                    str(patch_path),
+                    "--event-group-id",
+                    "EVG-001",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(0, close.returncode, close.stdout + close.stderr)
+            feedback = json.loads(close.stdout)
+            self.assertEqual("PASS", feedback["status"])
+            self.assertTrue(feedback["layer_feedback"])
+            self.assertTrue(feedback["tag_feedback"])
+            finish = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPTS / "recette_operator.py"),
+                    "finish-run",
+                    str(results_path),
+                    str(session_path),
+                    str(workbook_path),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(0, finish.returncode, finish.stdout + finish.stderr)
+            self.assertTrue(workbook_path.exists())
 
     def test_ga4_tracking_plan_handoff_initializes_exact_ordered_requirements(self) -> None:
         plan = {
@@ -2953,7 +3526,7 @@ class PipelineTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tempdir:
             archives = []
             for directory in ("first", "second"):
-                archive = Path(tempdir) / directory / "gtm-preview-recette-v2.0.0.zip"
+                archive = Path(tempdir) / directory / "gtm-preview-recette-v2.1.0.zip"
                 completed = subprocess.run(
                     [
                         sys.executable,
@@ -2969,7 +3542,7 @@ class PipelineTests(unittest.TestCase):
                 archives.append(archive)
             manifest = verify_archive(archives[0])
             self.assertEqual(archives[0].read_bytes(), archives[1].read_bytes())
-        self.assertEqual("v2.0.0", manifest["release"])
+        self.assertEqual("v2.1.0", manifest["release"])
         self.assertIn("SKILL.md", manifest["files"])
 
 

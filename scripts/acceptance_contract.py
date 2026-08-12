@@ -13,9 +13,13 @@ STATUS_RANK = {status: len(STATUS_PRIORITY) - index for index, status in enumera
 ACTION_BOUNDARY_FIELDS = (
     "action_id",
     "retry_of_action_id",
+    "readiness_check_id",
+    "settlement_check_id",
     "last_event_before",
     "first_event_after",
     "settled_final_event",
+    "network_request_cursor_before",
+    "network_request_cursor_after",
     "action_timestamp",
     "interaction_outcome",
     "completion_signal",

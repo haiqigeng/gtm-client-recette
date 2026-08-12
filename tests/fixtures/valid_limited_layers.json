@@ -1,6 +1,7 @@
 {
   "schema_version": 3,
   "run": {
+    "action_boundary_contract_version": 1,
     "run_id": "RUN-LIMITED-001",
     "report_title": "Pre-CMP event-order check",
     "client": "Example Client",
@@ -112,6 +113,8 @@
       "action_boundary": {
         "action_id": "ACT-001",
         "retry_of_action_id": null,
+        "readiness_check_id": "READY-ACT-001",
+        "settlement_check_id": "SETTLE-ACT-001",
         "preview_connected_before": true,
         "target_ready_before": true,
         "consent_state_before": {},
@@ -121,6 +124,8 @@
         "completion_signal": "Document reached interactive state",
         "first_event_after": 1,
         "settled_final_event": 3,
+        "network_request_cursor_before": 20,
+        "network_request_cursor_after": 21,
         "quiet_window_ms": 2000,
         "timeout_ms": 15000,
         "stream_settled": true,

@@ -45,18 +45,85 @@ python scripts/preview_session_ledger.py init session.json `
   --profile-path <controlled-profile> --approved-origin https://example.test
 ```
 
-The ordered session verbs are:
+The guided operator is the default control plane. The ordered verbs are:
 
 1. `register-surface`
 2. `register-case`
 3. `register-tag` for every detected tag
 4. `complete-tag-inventory`
-5. `begin-action`
+5. capture a `before_action` runtime snapshot and use operator `start-event`
 6. `record-push` or transactional `import-pushes`
 7. `scaffold-tag-results`, complete its exact rows, then `import-tag-results`
 8. `record-layer` once for each canonical layer
-9. `settle-action`
-10. `checkpoint`, `validate`, or `status`
+9. capture an `after_action` runtime snapshot and use operator `settle-action`
+10. use operator `close-event` for mandatory immediate feedback
+11. repeat in plan order, then use operator `finish-run`
+
+Each runtime snapshot is a direct browser/Preview/network state capture:
+
+```json
+{
+  "check_id": "READY-ACT-001",
+  "captured_at": "2026-08-12T10:00:00+02:00",
+  "capture_source": "playwright_runtime_probe",
+  "browser_context_id": "recette-profile",
+  "connection_epoch": 1,
+  "gtm_workspace_surface_id": "gtm-primary",
+  "tag_assistant_surface_id": "preview-primary",
+  "website_surface_id": "site-primary",
+  "containers": [{"container_id": "GTM-XXXX", "workspace": "Recette"}],
+  "website_url": "https://example.test/product",
+  "selected_page_url": "https://example.test/product",
+  "preview_connected": true,
+  "target_interactive": true,
+  "target_uncovered": true,
+  "lifecycle_observed": true,
+  "stream_quiet": true,
+  "network_capture_active": true,
+  "preview_event_cursor": 10,
+  "network_request_cursor": 24,
+  "evidence_ids": ["EVD-ACTION-001", "EVD-NET-CAPTURE-001"]
+}
+```
+
+Use only `playwright_runtime_probe` or `browser_connector_runtime_probe`.
+Capture and record within five minutes. Each referenced action-boundary and
+network evidence row must bind to this exact check and phase:
+
+```json
+{
+  "evidence_id": "EVD-ACTION-001",
+  "kind": "action_boundary",
+  "source": "Playwright",
+  "capture_mode": "direct",
+  "action_id": "ACT-001",
+  "runtime_check_id": "READY-ACT-001",
+  "runtime_phase": "before_action",
+  "captured_at": "2026-08-12T10:00:00+02:00"
+}
+```
+
+Use separate evidence IDs for `before_action` and `after_action`; generic or
+reused proof is rejected.
+
+An `after_action` snapshot additionally supplies `first_event_after` and
+`observed_business_push_count`; its two cursors are the settled final cursors.
+The operator derives action-boundary fields from these snapshots:
+
+```powershell
+python scripts/recette_operator.py start-event normalized-results.json session.json `
+  before-action.json --event-group-id EVG-001 --case-id CASE-001 `
+  --action-id ACT-001 --consent-state "analytics_storage=granted"
+
+python scripts/recette_operator.py settle-action normalized-results.json session.json `
+  after-action.json --action-id ACT-001 --expected-seen true `
+  --interaction-outcome completed --completion-signal "Basket count changed" `
+  --settlement-reason expected_and_quiet
+```
+
+The lower-level `record-runtime-check`, `begin-action`, and `settle-action`
+commands remain available for diagnosis. They enforce the same captured-state
+contract; `begin-action` never accepts a manually entered cursor.
 
 If a material tag appears after the inventory was frozen, first settle the
 current action, then version the inventory and force a retained retry:
@@ -70,6 +137,18 @@ python scripts/preview_session_ledger.py revise-tag-inventory session.json `
   --evidence-id EVD-TAG-NEW --reason "Late tag appeared in direct Preview inventory"
 ```
 
+If an interaction, variant, or tag is found after closure, reopen explicitly:
+
+```powershell
+python scripts/recette_operator.py reopen-event normalized-results.json session.json `
+  --event-group-id EVG-001 `
+  --reason "Late material footer interaction discovered"
+```
+
+The selected closure and later closure suffix move to `closure_history`.
+Prior proof stays available, but the selected event and preserved later events
+must be reclosed in plan order before final output.
+
 Install the recorder before navigation and decode safe request records:
 
 ```javascript
@@ -80,33 +159,48 @@ await context.addInitScript({ path: "scripts/datalayer_recorder.js" })
 python scripts/decode_browser_requests.py requests.json decoded-requests.json
 ```
 
-## Incremental event delivery
+## Incremental event delivery and mandatory closure
 
 ```powershell
 python scripts/incremental_recette.py scaffold-event normalized-results.json `
   --event-group-id EVG-001 --session-ledger session.json `
   --output event-001-patch.json
-python scripts/incremental_recette.py apply-event normalized-results.json event-001-patch.json `
-  --session-ledger session.json
-python scripts/incremental_recette.py validate-event normalized-results.json `
-  --event-group-id EVG-001 --session-ledger session.json
+python scripts/recette_operator.py close-event normalized-results.json session.json `
+  event-001-patch.json --event-group-id EVG-001
 ```
 
 Scaffolds preserve discovery only. They never inherit verdicts or evidence.
+`close-event` applies and validates the exact event slice, records closure in
+plan order, and prints the complete per-layer/per-tag feedback object. The next
+event cannot start before this succeeds.
 
 ## Final validation and workbook
 
 ```powershell
-python scripts/incremental_recette.py final-validate normalized-results.json `
-  --session-ledger session.json
-python scripts/validate_business_rules.py normalized-results.json
-python scripts/scan_sensitive_data.py normalized-results.json
-python scripts/build_recette_report.py normalized-results.json gtm-recette-results.xlsx `
-  --strict --session-ledger session.json `
-  --defects-csv gtm-recette-defects.csv `
-  --defects-md gtm-recette-defects.md `
-  --stakeholder-summary gtm-recette-summary.md
+python scripts/recette_operator.py finish-run normalized-results.json session.json `
+  gtm-recette-results.xlsx
 ```
+
+`finish-run` performs strict normalized/session reconciliation, verifies one
+plan-ordered closure per event, and builds the validated workbook. Use the
+lower-level validators and sidecar flags only when additional diagnostic or
+delivery files are required.
+
+Pause/resume accepts both safe states:
+
+```powershell
+# Open action: supply a fresh resume capture.
+python scripts/recette_operator.py resume-run normalized-results.json session.json `
+  resume-runtime.json
+
+# Between events: omit the capture; the next start-event captures readiness.
+python scripts/recette_operator.py resume-run normalized-results.json session.json
+```
+
+The guided operator accepts only normalized results declaring
+`run.action_boundary_contract_version: 1`. Older schema-v3 files remain
+readable through the legacy validator; re-normalize and recapture instead of
+inventing their missing runtime proof.
 
 ## Release provenance
 

@@ -6,29 +6,23 @@
 
 ## Current release
 
-[v2.0.0](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v2.0.0) is
+[v2.1.0](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v2.1.0) is
 the current supported release. Download the validated package:
-[gtm-preview-recette-v2.0.0.zip](https://github.com/haiqigeng/gtm-preview-recette/releases/download/v2.0.0/gtm-preview-recette-v2.0.0.zip).
+[gtm-preview-recette-v2.1.0.zip](https://github.com/haiqigeng/gtm-preview-recette/releases/download/v2.1.0/gtm-preview-recette-v2.1.0.zip).
 
-v2.0.0 introduces schema v3 with exact per-tag evidence identity, accepted
-expectation anchors, browser-request reconciliation, full session privacy
-scanning, controlled late tag discovery, deterministic tag-result scaffolding,
-safe Excel continuation rows, and hash-verifiable release provenance. It also
-retains the direct, hash-verified intake for reviewed or approved
-`ga4-tracking-plan` deliveries. It consumes canonical `plan.json` and
-`expected-events.json`, preserves exact event order, journey and measurement-
-opportunity identity, dataLayer paths, types, requiredness, conditions, and
-finite expectations, and creates the interpreted requirements used by the
-existing coverage-ledger initializer. The XLSX remains the human review
-surface and is no longer reinterpreted when the machine contract is present.
+v2.1.0 adds a guided, plan-ordered operator that derives every action boundary
+from fresh Preview and browser-network runtime snapshots, closes each event
+transactionally with immediate per-layer/per-tag feedback, and blocks final
+export until the run is coherent. It rejects stale, future, manually labelled,
+reused, or cross-action runtime proof and records auditable closure and reopen
+history without fabricating evidence for readable legacy schema-v3 files.
 
-It also makes layer selection deterministic. Every planned dataLayer event now
-requires the complete raw/resolved/tag/runtime/browser-send chain regardless
-of tracking-plan tag columns. Each case freezes a mandatory/conditional
-applicability card, inventories detected tags under an explicit scope, records
-one verdict per layer and per in-scope tag, and keeps excluded detected tags
-visible. Full-recette authority covers ordinary safe form journeys without
-repeated prompts, while CMP overrides and protected boundaries remain separate.
+The release also adds safe pause/resume, paired-write rollback, computed
+`primary_outcome` and occurrence `anomaly_flags`, and output contract 2 for the
+workbook and sidecars. It retains schema v3's exact per-tag evidence identity,
+accepted expectation anchors, browser-request reconciliation, deterministic
+19-layer/8-sublayer coverage, full privacy scanning, safe synthetic journeys,
+and hash-verifiable release provenance.
 
 An expert-only workflow for testing an existing client-side Google Tag Manager
 implementation against a tracking plan. It coordinates Playwright, GTM Preview,
@@ -150,13 +144,34 @@ Install the small deterministic dependency set:
 python -m pip install -e ".[dev]"
 ```
 
-Build a workbook from normalized evidence:
+Close the plan-ordered event through the guided validation/feedback gate, then
+build the final workbook only after every event is closed:
 
 ```powershell
-python -B scripts/build_recette_report.py normalized-results.json gtm-recette-results.xlsx `
-  --strict `
-  --session-ledger session.json
+python -B scripts/recette_operator.py close-event `
+  normalized-results.json session.json event-001-patch.json `
+  --event-group-id EVG-001
+python -B scripts/recette_operator.py finish-run `
+  normalized-results.json session.json gtm-recette-results.xlsx
 ```
+
+New guided runs declare `run.action_boundary_contract_version: 1`. Runtime
+snapshots must come from the supported Playwright/browser-connector probes and
+use fresh, phase-bound, distinct action/network evidence. Older schema-v3
+results without this marker remain readable, but the operator never invents
+their missing checks or cursors.
+
+Reopen late-discovered coverage without losing history:
+
+```powershell
+python -B scripts/recette_operator.py reopen-event `
+  normalized-results.json session.json --event-group-id EVG-001 `
+  --reason "Late material footer interaction discovered"
+```
+
+The workbook and sidecars identify `Output contract: 2` (the CSV repeats it on
+every row) so exact-header consumers can distinguish the outcome/anomaly/
+runtime-cursor interface from the earlier output contract.
 
 Inspect a plan, decode safe browser-request captures, and validate results
 event by event:
@@ -172,6 +187,7 @@ python -B scripts/incremental_recette.py validate-event normalized-results.json 
 python -B scripts/preview_session_ledger.py import-pushes session.json pushes.json
 python -B scripts/preview_session_ledger.py scaffold-tag-results session.json `
   --action-id ACT-001 --output tag-results.json
+python -B scripts/recette_operator.py status normalized-results.json session.json
 ```
 
 Migrate legacy v2 discovery without inheriting proof, and verify a packaged
@@ -180,7 +196,7 @@ release or local installation against its SHA-256 manifest:
 ```powershell
 python -B scripts/migrate_schema_v2_to_v3.py old-results.json normalized-results.json `
   --legacy-session old-session.json --case-manifest retest-cases.json
-python -B scripts/verify_release_artifact.py dist/gtm-preview-recette-v2.0.0.zip
+python -B scripts/verify_release_artifact.py dist/gtm-preview-recette-v2.1.0.zip
 ```
 
 Evaluate declared client-side rules, scan for redacted sensitive-data findings,

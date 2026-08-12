@@ -8,7 +8,7 @@ from collections import defaultdict
 from collections.abc import Iterable
 from typing import Any
 
-from acceptance_contract import worst_status
+from acceptance_contract import expects_absence, worst_status
 from execution_contract import case_action_rows
 from layer_contract import TAG_RESULT_LAYERS
 
@@ -41,6 +41,15 @@ EXECUTION_TO_FEEDBACK_LAYER.update(
         "conditional_scenarios_when_applicable": "conditional_scenarios_when_applicable",
     }
 )
+
+ANOMALY_FLAGS = {
+    "duplicate": "DUPLICATE_OCCURRENCE",
+    "premature": "PREMATURE_OCCURRENCE",
+    "delayed": "DELAYED_OCCURRENCE",
+    "wrong_order": "WRONG_ORDER_OCCURRENCE",
+    "wrong_context": "WRONG_CONTEXT_OCCURRENCE",
+    "unplanned_relevant": "UNPLANNED_EVENT_OBSERVED",
+}
 
 
 def status(value: Any) -> str:
@@ -291,6 +300,114 @@ def _case_counts(cases: Iterable[dict[str, Any]]) -> dict[str, int]:
     }
 
 
+def _anomaly_flags(
+    requirements: list[dict[str, Any]],
+    unexpected: list[dict[str, Any]],
+    session: dict[str, Any] | None,
+    group_id: str,
+) -> list[str]:
+    flags: set[str] = set()
+    for requirement in requirements:
+        expectation = requirement.get("expectation", {})
+        if (
+            isinstance(expectation, dict)
+            and expectation.get("source_mechanism", "data_layer_push") == "data_layer_push"
+            and not expects_absence(expectation)
+            and requirement.get("event_observed") is False
+        ):
+            flags.add("MISSING_EXPECTED_OCCURRENCE")
+    rows = list(unexpected)
+    if isinstance(session, dict):
+        rows.extend(
+            row
+            for row in session.get("business_pushes", [])
+            if isinstance(row, dict) and str(row.get("event_group_id", "")) == group_id
+        )
+    for row in rows:
+        classification = str(row.get("classification", "")).strip()
+        if classification in ANOMALY_FLAGS:
+            flags.add(ANOMALY_FLAGS[classification])
+    return sorted(flags)
+
+
+def _tag_layer_details(
+    tag_feedback: list[dict[str, Any]],
+    layer: str,
+) -> list[dict[str, Any]]:
+    return [
+        row.get("details") or {}
+        for tag in tag_feedback
+        for row in tag.get("layers", [])
+        if isinstance(tag, dict)
+        and isinstance(row, dict)
+        and row.get("layer") == layer
+        and status(row.get("status")) == "FAIL"
+    ]
+
+
+def _primary_outcome(
+    overall_status: str,
+    requirements: list[dict[str, Any]],
+    counts: dict[str, int],
+    verified_layers: dict[str, str],
+    tag_feedback: list[dict[str, Any]],
+    anomaly_flags: list[str],
+) -> str:
+    """Return the first actionable broken link without replacing the verdict."""
+    if overall_status == "PASS":
+        return "PASS"
+    if counts["not_tested"] and not counts["executed"] and not counts["blocked"]:
+        return "NOT_TESTED"
+    if counts["blocked"] and not counts["executed"]:
+        return "JOURNEY_BLOCKED"
+    if counts["pending"] or (counts["applicable"] and counts["executed"] < counts["applicable"]):
+        return "PARTIAL_VARIANT_COVERAGE"
+
+    expected_push_missing = any(
+        isinstance(requirement.get("expectation"), dict)
+        and requirement["expectation"].get("source_mechanism", "data_layer_push")
+        == "data_layer_push"
+        and not expects_absence(requirement["expectation"])
+        and requirement.get("event_observed") is False
+        for requirement in requirements
+    )
+    if expected_push_missing:
+        return "DATALAYER_EVENT_ABSENT"
+
+    failure_order = (
+        ("action_boundary", "ACTION_WINDOW_INVALID"),
+        ("raw_api_call", "DATALAYER_PAYLOAD_INVALID"),
+        ("resolved_data_layer", "RESOLVED_DATA_LAYER_INVALID"),
+        ("concerned_tag_inventory", "CONCERNED_TAG_NOT_FOUND"),
+        ("gtm_variable", "GTM_VARIABLE_INVALID"),
+        ("tag_configuration", "TAG_CONFIGURATION_INVALID"),
+        ("tag_firing", "TAG_FIRING_INVALID"),
+        ("tag_parameter", "TAG_RUNTIME_PARAMETER_INVALID"),
+        ("destination_request_when_applicable", "REQUEST_PARAMETER_INVALID"),
+        ("consent_when_applicable", "CONSENT_INVALID"),
+        ("trigger_logic_when_applicable", "TRIGGER_LOGIC_INVALID"),
+    )
+    for layer, outcome in failure_order:
+        if status(verified_layers.get(layer)) != "FAIL":
+            continue
+        if layer == "tag_firing":
+            details = _tag_layer_details(tag_feedback, layer)
+            if details and all(row.get("fire_count", 0) == 0 for row in details):
+                return "TAG_NOT_FIRED"
+        if layer == "destination_request_when_applicable":
+            details = _tag_layer_details(tag_feedback, layer)
+            if details and all(row.get("request_count", 0) == 0 for row in details):
+                return "TAG_FIRED_REQUEST_ABSENT"
+        return outcome
+    if anomaly_flags:
+        return "OCCURRENCE_ANOMALY"
+    if overall_status == "REVIEW":
+        return "SEMANTIC_REVIEW"
+    if overall_status == "BLOCKED":
+        return "EVIDENCE_UNAVAILABLE"
+    return "OTHER_CONFIRMED_MISMATCH"
+
+
 def event_feedback(
     data: dict[str, Any],
     session: dict[str, Any] | None = None,
@@ -390,14 +507,30 @@ def event_feedback(
         }
         for layer, values in layer_statuses.items():
             verified_layers.setdefault(layer, worst_status(values))
+        counts = _case_counts(unique_cases.values())
+        anomaly_flags = _anomaly_flags(
+            requirements,
+            mapped_unexpected,
+            session,
+            group_id,
+        )
         output.append(
             {
                 "plan_order": inventory.get("plan_order"),
                 "event_group_id": group_id,
                 "event_name": inventory.get("event_name"),
                 "status": normalized_status,
+                "primary_outcome": _primary_outcome(
+                    normalized_status,
+                    requirements,
+                    counts,
+                    verified_layers,
+                    tag_feedback,
+                    anomaly_flags,
+                ),
+                "anomaly_flags": anomaly_flags,
                 "requirement_count": len(requirements),
-                "case_counts": _case_counts(unique_cases.values()),
+                "case_counts": counts,
                 "verified_layers": verified_layers,
                 "layer_feedback": layer_feedback,
                 "tag_feedback": tag_feedback,

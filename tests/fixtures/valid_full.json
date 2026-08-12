@@ -1,6 +1,7 @@
 {
   "schema_version": 3,
   "run": {
+    "action_boundary_contract_version": 1,
     "run_id": "RUN-SYNTHETIC-001",
     "report_title": "Synthetic add-to-cart GTM recette",
     "client": "Example Client",
@@ -153,6 +154,8 @@
       "action_boundary": {
         "action_id": "ACT-001",
         "retry_of_action_id": null,
+        "readiness_check_id": "READY-ACT-001",
+        "settlement_check_id": "SETTLE-ACT-001",
         "preview_connected_before": true,
         "target_ready_before": true,
         "consent_state_before": {
@@ -164,6 +167,8 @@
         "completion_signal": "Basket count changed from 0 to 1",
         "first_event_after": 11,
         "settled_final_event": 12,
+        "network_request_cursor_before": 20,
+        "network_request_cursor_after": 21,
         "quiet_window_ms": 2000,
         "timeout_ms": 15000,
         "stream_settled": true,

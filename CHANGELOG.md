@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## [v2.1.0](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v2.1.0) (2026-08-12)
+
+- Add a guided, plan-ordered operator that derives action boundaries from
+  captured runtime state, closes each event transactionally with immediate
+  feedback, and refuses final export until every event is safely closed.
+- Version new guided action boundaries explicitly while preserving legacy
+  schema-v3 readability; never fabricate historical runtime checks or cursors.
+- Require fresh runtime snapshots from supported browser probes, exact
+  runtime-check/phase evidence bindings, and distinct before/after proof.
+- Add auditable `reopen-event` closure history for late interactions, variants,
+  or tags, plus safe pause/resume both inside and between actions.
+- Roll back both normalized results and session state after a partial paired
+  write failure, and compare closure membership independently of list order.
+- Derive the first actionable `primary_outcome` and occurrence
+  `anomaly_flags`, and expose output contract 2 in the workbook and sidecars.
+
 ## [v2.0.0](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v2.0.0) (2026-08-02)
 
 - Introduce normalized-results and session schema v3 as a hard certification

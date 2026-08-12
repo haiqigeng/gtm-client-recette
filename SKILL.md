@@ -204,6 +204,19 @@ recorder preserves early/mutated/state-clearing pushes but never substitutes
 for Tag Assistant `API Call`. Context capture must retain redirects, unloads,
 popups, iframes, service-worker and batched sends.
 
+Use `recette_operator.py` as the thin plan-order and closure gate. Before each
+action, record a direct runtime snapshot containing the exact browser context,
+workspace/container, selected Tag Assistant page, Preview cursor, browser
+request cursor, lifecycle/readiness states, and evidence IDs. `begin-action`
+derives its boundary from that snapshot; never type a cursor or readiness
+claim into the action. Capture the same state after the action so settlement
+derives its final Preview/network cursors and observed push count.
+
+Accept runtime snapshots only from the supported Playwright or browser-
+connector probes. Bind separate before/after action-boundary and network
+evidence to the exact runtime check, action, phase, timestamp, and container.
+Reject stale, future, manually labelled, reused, or cross-action proof.
+
 Check recorder integrity after dataLayer reassignment. Treat unreadable,
 circular, replaced-unverified, or truncated snapshots as limitations. Persist,
 reconcile, and privacy-scan records before acknowledging them. Keep monotonic
@@ -231,16 +244,20 @@ An override can exercise downstream tags but cannot pass the CMP itself.
 
 For each case:
 
-1. Confirm page, connection, consent, and a quiet baseline.
-2. Record action ID, prior Preview index, page/state, element, placement, and
-   material variant.
+1. Capture and validate page, connection, consent, quiet baseline, exact
+   container/workspace, selected Preview page, and active network capture.
+2. Start the action through the guided operator; it derives the prior Preview
+   and network cursors from the fresh readiness snapshot.
 3. Perform one exact interaction with safe synthetic data where needed.
 4. Prove website completion independently through URL/state/control/success.
 5. Wait adaptively for expected evidence and a settled relevant stream.
-6. Record first/final indexes, quiet window, timeout, settlement, and reason.
+6. Capture the after-action state; derive first/final Preview indexes, final
+   request cursor, observed push count, settlement, and reason.
 7. Inspect and classify every business push in the action window.
 8. Capture all 19 canonical and 8 per-tag results with direct evidence.
-9. Validate, report the event immediately after all its cases, and continue.
+9. Close the event through the guided operator. It validates the complete
+   event/session slice and emits the immediate per-layer/per-tag feedback
+   before the next plan event can start.
 
 Use `scaffold-tag-results` after the frozen inventory to generate the exact
 tag×layer matrix, then replace every placeholder with direct evidence before
@@ -253,6 +270,11 @@ failed attempt and any tracking emitted during it. Retry once after a clean
 baseline for evidenced transient UI failure; more retries require an evidenced
 reason. A valid completed action with missing/wrong tracking is `FAIL`; an
 unexecutable action is `BLOCKED`.
+
+If a material interaction, variant, or tag is found after event closure, use
+`reopen-event`. Preserve the prior closure/proof in history, invalidate that
+event and the later closure suffix, then reclose the affected events in plan
+order. Never silently edit a closed event.
 
 Use adaptive quiet windows, not blind sleep. Restart on relevant business or
 state pushes. If the stream does not settle, absence/count/deduplication cannot
@@ -319,6 +341,12 @@ subrow for every in-scope tag layer. Compact homogeneous passing cases, but
 name every failed/blocked/review placement or variant. Each non-PASS row needs
 the reason, evidence/blocker, and exact website retest interaction.
 
+Report the computed `primary_outcome` (the first actionable broken link) and
+any occurrence `anomaly_flags` beside the canonical verdict. These are derived
+reporting lenses, never agent-selected evidence or replacements for layer
+statuses. An event is not operationally complete until its closure record and
+immediate feedback timestamp exist in original plan order.
+
 ### 8. Close and export
 
 Confirm original plan order, complete cases, classified pushes, all 19/8 rows,
@@ -326,6 +354,15 @@ ordinary gates completed, protected checkpoints offered, anomalies visible,
 and no raw sensitive content. Run final normalized/session validation,
 business rules, privacy scan, and strict workbook generation using the operator
 commands reference.
+
+Use `recette_operator.py finish-run` as the final gate. It refuses an unclosed
+event, open action, stale runtime boundary, incomplete layer/tag matrix, or
+normalized/session mismatch before building the workbook.
+
+Treat schema-v3 results without `action_boundary_contract_version: 1` as
+legacy readable evidence only. Do not run them through the guided operator or
+fabricate missing runtime checks/cursors; fresh normalization and capture are
+required for a new certified run.
 
 The workbook writer must split oversized structured values with explicit part
 markers; it must never accept Excel's silent 32,767-character truncation.

@@ -96,16 +96,17 @@ reason are computed from the run contract. An empty inventory still requires
 direct inventory evidence and becomes an explicit failure chain for a planned
 dataLayer event.
 
-Before each interaction, open one action. Record and classify every business
-push visible after the previous cursor. Settle only after the relevant stream
-reaches the quiet boundary and the explicit observed push count matches the
-ledger:
+Before each interaction, capture `before-action.json` from the controlled
+browser/Preview/network context and open the action through the operator. The
+operator verifies container/workspace/page/readiness and derives both initial
+cursors. Record and classify every business push visible after that boundary:
 
 ```powershell
-python -B scripts/preview_session_ledger.py begin-action session.json `
-  --action-id ACT-001 `
+python -B scripts/recette_operator.py start-event `
+  working-results.json session.json before-action.json `
+  --event-group-id EVG-007 `
   --case-id CASE-ADD-HEADER-Q1 `
-  --last-event-before 10 `
+  --action-id ACT-001 `
   --consent-state "analytics_storage=granted" `
   --quiet-window-ms 3000 `
   --timeout-ms 20000
@@ -126,18 +127,6 @@ python -B scripts/preview_session_ledger.py import-tag-results `
   session.json action-001-tag-results.json `
   --action-id ACT-001
 
-python -B scripts/preview_session_ledger.py settle-action session.json `
-  --action-id ACT-001 `
-  --first-event-after 11 `
-  --settled-final-event 12 `
-  --expected-seen true `
-  --preview-connected-after true `
-  --interaction-outcome completed `
-  --completion-signal "Basket count changed from 0 to 1" `
-  --stream-settled true `
-  --settlement-reason expected_and_quiet `
-  --observed-business-push-count 1
-
 python -B scripts/preview_session_ledger.py record-layer session.json `
   --action-id ACT-001 `
   --layer raw_api_call `
@@ -151,7 +140,20 @@ python -B scripts/preview_session_ledger.py record-layer session.json `
   --status PASS `
   --reason "One decoded request reached the planned destination" `
   --evidence-id EVD-NET-011
+
+python -B scripts/recette_operator.py settle-action `
+  working-results.json session.json after-action.json `
+  --action-id ACT-001 `
+  --expected-seen true `
+  --interaction-outcome completed `
+  --completion-signal "Basket count changed from 0 to 1" `
+  --settlement-reason expected_and_quiet
 ```
+
+`after-action.json` supplies the captured first/final Preview cursor, final
+network cursor, settled state, and independently observed business-push count.
+Settlement refuses a stale capture, backwards cursor, or count that differs
+from classified push rows.
 
 The imported file contains exactly one row for every in-scope tag and every
 tag-related layer. Repeat `record-layer` for every canonical layer on the
@@ -258,17 +260,24 @@ in the event group. Evidence IDs must be new and unique.
 
 ## Apply and validate an event
 
-Apply the patch atomically and validate only that completed event:
+Close the event atomically and validate only that completed event:
 
 ```powershell
-python -B scripts/incremental_recette.py apply-event `
-  working-results.json event-007-patch.json `
-  --session-ledger session.json
+python -B scripts/recette_operator.py close-event `
+  working-results.json session.json event-007-patch.json `
+  --event-group-id EVG-007
 ```
 
 The command validates the patched normalized event and its complete session
-reconciliation before replacing the working file. Any failure leaves the
-existing file byte-for-byte unchanged.
+reconciliation before replacing the working files. It then records the
+plan-ordered closure and emits immediate feedback containing event status,
+computed primary outcome, anomaly flags, every canonical layer, every in-scope
+tag layer, reasons, evidence, and exact retest. Any failure leaves the existing
+files byte-for-byte unchanged.
+
+If either file replacement fails, the operator restores both prior files. A
+late interaction, variant, or tag uses `reopen-event`; the affected plan suffix
+is retained in `closure_history` and reclosed in order after the new case.
 
 Or validate an already populated event:
 
@@ -296,27 +305,33 @@ Continue automatically to the next event.
 
 ## Resume and finish
 
+Pause without discarding state. Resume an open action only after a fresh direct
+runtime capture proves the same container, workspace, page, Preview epoch, and
+active network capture. Between events, resume without a snapshot; the next
+`start-event` establishes its own fresh boundary:
+
+```powershell
+python -B scripts/recette_operator.py pause-run session.json `
+  --label "Protected analyst handback"
+python -B scripts/recette_operator.py resume-run `
+  working-results.json session.json resume-runtime.json
+python -B scripts/recette_operator.py resume-run working-results.json session.json
+```
+
 Inspect progress at any time:
 
 ```powershell
 python -B scripts/incremental_recette.py status working-results.json `
   --session-ledger session.json
 python -B scripts/preview_session_ledger.py status session.json
+python -B scripts/recette_operator.py status working-results.json session.json
 ```
 
 After every event is finalized:
 
 ```powershell
-python -B scripts/incremental_recette.py final-validate working-results.json `
-  --session-ledger session.json
-python -B scripts/validate_business_rules.py working-results.json
-python -B scripts/scan_sensitive_data.py working-results.json
-python -B scripts/build_recette_report.py `
-  working-results.json gtm-recette-results.xlsx `
-  --strict `
-  --session-ledger session.json `
-  --defects-csv gtm-recette-defects.csv `
-  --stakeholder-summary gtm-recette-summary.md
+python -B scripts/recette_operator.py finish-run `
+  working-results.json session.json gtm-recette-results.xlsx
 ```
 
 Do not complete a run with a `PENDING` case, open action, unclassified or
