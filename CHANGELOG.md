@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+## [v2.2.0](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v2.2.0) (2026-08-12)
+
+- Add honest mid-action recovery for browser, Preview, network-capture, and
+  controlled-surface failures: retain the action and observed push stream,
+  settle it as uncertain, and block the case without fabricated downstream
+  evidence.
+- Add explicit orphan runtime-check voiding, phase-specific readiness,
+  evidence-bound same-origin SPA page matching, and complete configured
+  client-container applicability for every case.
+- Add transactional canonical-layer imports, filter event validation to its
+  referenced evidence, eliminate duplicate validation passes, and centralize
+  strict JSON value/type and crash-aware persistence primitives.
+- Complete `primary_outcome` coverage across every canonical layer and prevent
+  pending cases from appearing as `NOT_TESTED`.
+- Escape formula-leading defect CSV values, reject input/output path aliases,
+  and publish the validated workbook plus FINISHED session as one journaled,
+  crash-recoverable transaction.
+- Test the extracted release archive in CI, include its build tooling, add
+  focused v2.2.0 regressions, and replace contradictory legacy schema-v2 and
+  orphan reference material with one migration-only boundary.
+
 ## [v2.1.0](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v2.1.0) (2026-08-12)
 
 - Add a guided, plan-ordered operator that derives action boundaries from

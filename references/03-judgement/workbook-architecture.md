@@ -81,6 +81,8 @@ structured values in normalized JSON.
 `Business Rules` exposes the deterministic evaluation source. Every exported
 string is written as a literal cell value, including text beginning with `=`,
 `+`, `-`, or `@`; evidence can never become an executable spreadsheet formula.
+The same literal-text rule applies to defect CSV sidecars, which prefix unsafe
+leading characters before spreadsheet import.
 
 `Destination Evidence` shows the claimed destination ID and vendor event name,
 their declared raw request paths, the expected and actual tested-parameter
@@ -113,3 +115,7 @@ python scripts/build_recette_report.py normalized-results.json gtm-recette-resul
 
 The stakeholder summary reports scope, event totals, and non-PASS actions. It
 does not invent a GO/NO-GO decision or hide technical evidence.
+Workbook, sidecar, normalized-result, and session paths must be distinct; the
+CLI refuses aliases that could overwrite an input. Guided finalization
+publishes the validated workbook and FINISHED session state together through
+a crash-recoverable paired transaction.

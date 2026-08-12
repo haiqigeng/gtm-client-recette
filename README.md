@@ -6,23 +6,23 @@
 
 ## Current release
 
-[v2.1.0](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v2.1.0) is
+[v2.2.0](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v2.2.0) is
 the current supported release. Download the validated package:
-[gtm-preview-recette-v2.1.0.zip](https://github.com/haiqigeng/gtm-preview-recette/releases/download/v2.1.0/gtm-preview-recette-v2.1.0.zip).
+[gtm-preview-recette-v2.2.0.zip](https://github.com/haiqigeng/gtm-preview-recette/releases/download/v2.2.0/gtm-preview-recette-v2.2.0.zip).
 
-v2.1.0 adds a guided, plan-ordered operator that derives every action boundary
-from fresh Preview and browser-network runtime snapshots, closes each event
-transactionally with immediate per-layer/per-tag feedback, and blocks final
-export until the run is coherent. It rejects stale, future, manually labelled,
-reused, or cross-action runtime proof and records auditable closure and reopen
-history without fabricating evidence for readable legacy schema-v3 files.
+v2.2.0 hardens live operations without changing the fixed 19-layer and
+8-sublayer acceptance contract. Interrupted browser, Preview, network-capture,
+or surface actions are now retained and settled honestly as uncertain/BLOCKED;
+orphan checks can be explicitly voided; same-origin SPA page transitions and
+multi-container cases have deterministic evidence rules; and phase-specific
+readiness no longer relies on one undifferentiated gate.
 
-The release also adds safe pause/resume, paired-write rollback, computed
-`primary_outcome` and occurrence `anomaly_flags`, and output contract 2 for the
-workbook and sidecars. It retains schema v3's exact per-tag evidence identity,
-accepted expectation anchors, browser-request reconciliation, deterministic
-19-layer/8-sublayer coverage, full privacy scanning, safe synthetic journeys,
-and hash-verifiable release provenance.
+The release also adds transactional layer batches, complete computed outcome
+coverage, formula-safe CSV sidecars, path-alias rejection, journaled crash
+recovery for results/session and final workbook/session pairs, shared strict
+value semantics, smaller event-validation slices, and CI that extracts and
+tests the actual packaged skill before release. Redundant and contradictory
+legacy documentation was removed; schema v2 is now migration-only.
 
 An expert-only workflow for testing an existing client-side Google Tag Manager
 implementation against a tracking plan. It coordinates Playwright, GTM Preview,
@@ -185,6 +185,8 @@ python -B scripts/incremental_recette.py validate-event normalized-results.json 
   --event-group-id EVG-001 `
   --session-ledger session.json
 python -B scripts/preview_session_ledger.py import-pushes session.json pushes.json
+python -B scripts/preview_session_ledger.py import-layers session.json layers.json `
+  --action-id ACT-001
 python -B scripts/preview_session_ledger.py scaffold-tag-results session.json `
   --action-id ACT-001 --output tag-results.json
 python -B scripts/recette_operator.py status normalized-results.json session.json
@@ -196,7 +198,7 @@ release or local installation against its SHA-256 manifest:
 ```powershell
 python -B scripts/migrate_schema_v2_to_v3.py old-results.json normalized-results.json `
   --legacy-session old-session.json --case-manifest retest-cases.json
-python -B scripts/verify_release_artifact.py dist/gtm-preview-recette-v2.1.0.zip
+python -B scripts/verify_release_artifact.py dist/gtm-preview-recette-v2.2.0.zip
 ```
 
 Evaluate declared client-side rules, scan for redacted sensitive-data findings,
@@ -243,12 +245,12 @@ The full agent workflow starts in `SKILL.md`. It loads the compact interaction
 and execution contracts first, then loads detailed references only at the stage
 that uses them. The reference map is:
 
-- `references/01-orientation/`: purpose, users, inputs, outputs, acceptance, and non-goals.
+- `references/01-orientation/`: concise input/output and cross-skill boundaries.
 - `references/02-execution/`: interaction, browser readiness, multi-vendor
   destinations/containers, Tag Assistant operations, interaction capture,
-  incremental evidence, runtime contexts, consent, test data, and QA commands.
+  incremental evidence, runtime contexts, consent, and test data.
 - `references/03-judgement/`: comparison, evidence, matching, conditional and
-  business/privacy rules, regression, verdict, workbook, and completion rules.
+  business/privacy rules, regression, schema, verdict, and workbook contracts.
 - `scripts/`: deterministic schema, plan inspection, browser helpers, request
   decoding, incremental validation, business-rule, privacy, regression, and
   XLSX tooling.

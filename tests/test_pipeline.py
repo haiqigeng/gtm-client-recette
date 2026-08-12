@@ -5,6 +5,7 @@ import json
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from argparse import Namespace
 from copy import deepcopy
@@ -3523,10 +3524,15 @@ class PipelineTests(unittest.TestCase):
         self.assertTrue(all(len(value) <= 32767 for value in values))
 
     def test_release_archive_manifest_is_hash_verified(self) -> None:
+        version = str(
+            tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"][
+                "version"
+            ]
+        )
         with tempfile.TemporaryDirectory() as tempdir:
             archives = []
             for directory in ("first", "second"):
-                archive = Path(tempdir) / directory / "gtm-preview-recette-v2.1.0.zip"
+                archive = Path(tempdir) / directory / f"gtm-preview-recette-v{version}.zip"
                 completed = subprocess.run(
                     [
                         sys.executable,
@@ -3542,8 +3548,10 @@ class PipelineTests(unittest.TestCase):
                 archives.append(archive)
             manifest = verify_archive(archives[0])
             self.assertEqual(archives[0].read_bytes(), archives[1].read_bytes())
-        self.assertEqual("v2.1.0", manifest["release"])
+        self.assertEqual(f"v{version}", manifest["release"])
         self.assertIn("SKILL.md", manifest["files"])
+        self.assertIn("scripts/build_skill_package.py", manifest["files"])
+        self.assertIn("tests/test_v220_regressions.py", manifest["files"])
 
 
 if __name__ == "__main__":

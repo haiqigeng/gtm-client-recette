@@ -127,19 +127,8 @@ python -B scripts/preview_session_ledger.py import-tag-results `
   session.json action-001-tag-results.json `
   --action-id ACT-001
 
-python -B scripts/preview_session_ledger.py record-layer session.json `
-  --action-id ACT-001 `
-  --layer raw_api_call `
-  --status PASS `
-  --reason "Exact API Call matched value and type" `
-  --evidence-id EVD-RAW-011
-
-python -B scripts/preview_session_ledger.py record-layer session.json `
-  --action-id ACT-001 `
-  --layer destination_request_when_applicable `
-  --status PASS `
-  --reason "One decoded request reached the planned destination" `
-  --evidence-id EVD-NET-011
+python -B scripts/preview_session_ledger.py import-layers `
+  session.json action-001-layers.json --action-id ACT-001
 
 python -B scripts/recette_operator.py settle-action `
   working-results.json session.json after-action.json `
@@ -155,10 +144,13 @@ network cursor, settled state, and independently observed business-push count.
 Settlement refuses a stale capture, backwards cursor, or count that differs
 from classified push rows.
 
-The imported file contains exactly one row for every in-scope tag and every
-tag-related layer. Repeat `record-layer` for every canonical layer on the
-frozen card. A mandatory row uses a normal verdict. A conditional row requires
-`--predicate-result true|false`; false requires `NOT_APPLICABLE`. Evidence IDs
+The imported tag file contains exactly one row for every in-scope tag and every
+tag-related layer. `action-001-layers.json` is an array, or an object with a
+`layer_results` array, containing every canonical layer on the frozen card. A
+mandatory row uses a normal verdict. A conditional row requires boolean
+`predicate_result`; false requires `NOT_APPLICABLE`. A malformed row rejects
+the whole import without writing partial layer evidence. `record-layer`
+remains available for an isolated correction. Evidence IDs
 must refer to direct structured capture tied to the same action and, when
 applicable, event index, tag, request, and container. A screenshot is optional
 and cannot replace these records.
@@ -186,6 +178,15 @@ successful durable import may the browser recorder acknowledge those calls.
 For one bounded retry, begin a new action with
 `--retry-of-action-id <retained-action-id>`. Never reuse an action ID or merge
 the failed and repeated windows.
+
+If the controlled browser, Preview, request capture, or required surface fails
+mid-action, retain rather than discard the attempt. Capture
+`interrupted_action` with the supported failure reason, last trustworthy
+cursors and exact observed-push count, then use operator `interrupt-action`.
+The action settles as uncertain and the case becomes `BLOCKED`; unavailable
+canonical/tag rows remain unavailable rather than being fabricated. Restore a
+clean boundary before a linked retry. Use `void-runtime-check` only for an
+unconsumed check that never created an action.
 
 Full-recette initialization already authorizes ordinary fields, privacy
 acknowledgements, tested-conversion opt-ins, safe synthetic data, and ordinary
@@ -275,7 +276,8 @@ computed primary outcome, anomaly flags, every canonical layer, every in-scope
 tag layer, reasons, evidence, and exact retest. Any failure leaves the existing
 files byte-for-byte unchanged.
 
-If either file replacement fails, the operator restores both prior files. A
+If either file replacement fails or the process stops during replacement, the
+operator recovers both prior files from its transaction journal. A
 late interaction, variant, or tag uses `reopen-event`; the affected plan suffix
 is retained in `closure_history` and reclosed in order after the new case.
 
@@ -333,6 +335,10 @@ After every event is finalized:
 python -B scripts/recette_operator.py finish-run `
   working-results.json session.json gtm-recette-results.xlsx
 ```
+
+The results, session, and workbook must be distinct paths. The validated XLSX
+and FINISHED session state are published together through the same crash-
+recoverable transaction contract.
 
 Do not complete a run with a `PENDING` case, open action, unclassified or
 unaccounted business push, missing canonical or per-tag layer, mismatched normalized

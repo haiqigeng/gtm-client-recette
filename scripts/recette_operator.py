@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from build_recette_report import build_workbook
 from event_feedback import event_feedback, feedback_for_event
 from execution_contract import validate_session
 from incremental_recette import apply_event, load_object, save_atomic, validate_event
@@ -23,6 +22,12 @@ from preview_session_ledger import (
     settle_action,
 )
 from recette_schema import ACTION_BOUNDARY_CONTRACT_VERSION, validate
+from state_io import (
+    atomic_write_file_pair,
+    atomic_write_json_pair,
+    recover_file_pair,
+    serialized_json,
+)
 
 
 def _ordered_inventory(results: dict[str, Any]) -> list[dict[str, Any]]:
@@ -114,67 +119,14 @@ def _require_guided_contract(
         raise ValueError("The guided operator requires operator_contract_version=1.")
 
 
-def _serialized(value: dict[str, Any]) -> bytes:
-    return (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
-
-
-def _restore_bytes(path: Path, prior: bytes | None) -> None:
-    if prior is None:
-        path.unlink(missing_ok=True)
-        return
-    restore = path.with_name(f".{path.name}.{uuid4().hex}.rollback")
-    try:
-        restore.write_bytes(prior)
-        restore.replace(path)
-    finally:
-        restore.unlink(missing_ok=True)
-
-
 def _save_pair_atomic(
     results_path: Path,
     results: dict[str, Any],
     session_path: Path,
     session: dict[str, Any],
 ) -> None:
-    """Replace the result/session pair and roll both back after any partial failure."""
-    if results_path.resolve() == session_path.resolve():
-        raise ValueError("Results and session paths must be different files.")
-    results_path.parent.mkdir(parents=True, exist_ok=True)
-    session_path.parent.mkdir(parents=True, exist_ok=True)
-    prior_results = results_path.read_bytes() if results_path.exists() else None
-    prior_session = session_path.read_bytes() if session_path.exists() else None
-    result_temp = results_path.with_name(f".{results_path.name}.{uuid4().hex}.tmp")
-    session_temp = session_path.with_name(f".{session_path.name}.{uuid4().hex}.tmp")
-    results_replaced = False
-    session_replaced = False
-    try:
-        result_temp.write_bytes(_serialized(results))
-        session_temp.write_bytes(_serialized(session))
-        result_temp.replace(results_path)
-        results_replaced = True
-        session_temp.replace(session_path)
-        session_replaced = True
-    except OSError as exc:
-        rollback_errors: list[str] = []
-        for path, prior, replaced in (
-            (results_path, prior_results, results_replaced),
-            (session_path, prior_session, session_replaced),
-        ):
-            if not replaced:
-                continue
-            try:
-                _restore_bytes(path, prior)
-            except OSError as rollback_exc:
-                rollback_errors.append(f"{path}: {rollback_exc}")
-        if rollback_errors:
-            raise OSError(
-                f"Paired write failed ({exc}); rollback also failed for "
-                + "; ".join(rollback_errors)
-            ) from exc
-        raise
-    finally:
-        result_temp.unlink(missing_ok=True)
-        session_temp.unlink(missing_ok=True)
+    """Replace the result/session pair as one crash-recoverable transaction."""
+    atomic_write_json_pair(results_path, results, session_path, session)
 
 
 def _start_event(args: argparse.Namespace) -> dict[str, Any]:
@@ -292,6 +244,95 @@ def _settle_operator_action(args: argparse.Namespace) -> dict[str, Any]:
         "action_id": args.action_id,
         "event_group_id": action.get("event_group_id"),
         "next_required": "finish remaining event cases, then close-event",
+    }
+
+
+def _interrupt_action(args: argparse.Namespace) -> dict[str, Any]:
+    """Settle an interrupted action without deleting it or fabricating downstream proof."""
+    results = load_object(args.results)
+    session = load_object(args.session)
+    _require_guided_contract(results, session)
+    _require_active(session)
+    action = next(
+        (
+            row
+            for row in session.get("actions", [])
+            if isinstance(row, dict)
+            and row.get("action_id") == args.action_id
+            and row.get("state") == "OPEN"
+        ),
+        None,
+    )
+    if action is None:
+        raise ValueError("interrupt-action requires the matching open action.")
+    reason = str(args.reason).strip()
+    blocker_id = str(args.blocker_id).strip()
+    if not reason or not blocker_id:
+        raise ValueError("interrupt-action requires a blocker ID and exact reason.")
+    staged = deepcopy(session)
+    record_runtime_check(
+        staged,
+        Namespace(
+            snapshot=args.runtime_snapshot,
+            results=args.results,
+            phase="interrupted_action",
+            action_id=args.action_id,
+            case_id=action.get("case_id"),
+        ),
+    )
+    snapshot = json.loads(args.runtime_snapshot.read_text(encoding="utf-8"))
+    expected_seen = any(
+        isinstance(row, dict)
+        and row.get("action_id") == args.action_id
+        and row.get("classification") == "expected"
+        for row in staged.get("business_pushes", [])
+    )
+    settle_action(
+        staged,
+        Namespace(
+            action_id=args.action_id,
+            settlement_check_id=snapshot.get("check_id"),
+            expected_seen="true" if expected_seen else "false",
+            interaction_outcome="uncertain",
+            completion_signal=f"Runtime interruption captured: {reason}",
+            settlement_reason=snapshot.get("failure_reason"),
+        ),
+    )
+    case = next(
+        row
+        for row in staged.get("cases", [])
+        if isinstance(row, dict) and row.get("case_id") == action.get("case_id")
+    )
+    case.update(
+        {
+            "execution_status": "BLOCKED",
+            "blocker_id": blocker_id,
+            "reason": reason,
+            "final_action_id": None,
+        }
+    )
+    staged["operator_state"] = {
+        "status": "ACTIVE",
+        "current_event_group_id": action.get("event_group_id"),
+    }
+    staged["updated_at"] = now()
+    errors = validate_session(staged, results=results, final=False)
+    if errors:
+        raise ValueError("\n".join(errors))
+    save_atomic(args.session, staged)
+    return {
+        "interrupted": True,
+        "action_id": args.action_id,
+        "case_id": action.get("case_id"),
+        "event_group_id": action.get("event_group_id"),
+        "status": "BLOCKED",
+        "blocker_id": blocker_id,
+        "reason": reason,
+        "observed_expected_push": expected_seen,
+        "next_required": (
+            "Normalize this event with the same blocker, close it for an honest BLOCKED "
+            "verdict, or reset the case through a controlled retry with fresh evidence."
+        ),
     }
 
 
@@ -435,7 +476,7 @@ def _close_event(args: argparse.Namespace) -> dict[str, Any]:
                 "the prior closure cannot be acknowledged unchanged."
             )
     patch = load_object(args.event_patch)
-    updated_results, patched_group = apply_event(results, patch)
+    updated_results, patched_group = apply_event(results, patch, validate_result=False)
     if patched_group != args.event_group_id:
         raise ValueError("Event patch and requested event group differ.")
     updated_session = deepcopy(session)
@@ -528,6 +569,12 @@ def _reopen_event(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _finish_run(args: argparse.Namespace) -> dict[str, Any]:
+    paths = [args.results.resolve(), args.session.resolve(), args.workbook.resolve()]
+    if len(set(paths)) != len(paths):
+        raise ValueError("Results, session, and workbook must use three different files.")
+    if args.workbook.suffix.lower() != ".xlsx":
+        raise ValueError("The final workbook path must use the .xlsx extension.")
+    recover_file_pair(args.workbook, args.session)
     results = load_object(args.results)
     session = load_object(args.session)
     _require_guided_contract(results, session)
@@ -541,17 +588,33 @@ def _finish_run(args: argparse.Namespace) -> dict[str, Any]:
     session_errors = validate_session(session, results=results, final=True)
     if schema_errors or session_errors:
         raise ValueError("\n".join([*schema_errors, *session_errors]))
-    build_workbook(results, args.workbook, schema_errors, session)
-    session["operator_state"] = {
+    from build_recette_report import build_workbook
+
+    staged_session = deepcopy(session)
+    staged_session["operator_state"] = {
         "status": "FINISHED",
         "current_event_group_id": None,
     }
-    session["updated_at"] = now()
-    save_atomic(args.session, session)
+    staged_session["updated_at"] = now()
+    final_errors = validate_session(staged_session, results=results, final=True)
+    if final_errors:
+        raise ValueError("\n".join(final_errors))
+    args.workbook.parent.mkdir(parents=True, exist_ok=True)
+    temporary = args.workbook.with_name(f".{args.workbook.stem}.{uuid4().hex}.validated.xlsx")
+    try:
+        build_workbook(results, temporary, schema_errors, staged_session)
+        atomic_write_file_pair(
+            args.workbook,
+            temporary.read_bytes(),
+            args.session,
+            serialized_json(staged_session),
+        )
+    finally:
+        temporary.unlink(missing_ok=True)
     return {
         "finished": True,
         "workbook": str(args.workbook.resolve()),
-        "events": event_feedback(results, session),
+        "events": event_feedback(results, staged_session),
     }
 
 
@@ -601,9 +664,20 @@ def parser() -> argparse.ArgumentParser:
             "timeout",
             "interaction_failed",
             "preview_disconnected",
+            "browser_crashed",
+            "network_capture_lost",
+            "surface_unavailable",
         ),
         required=True,
     )
+
+    interrupt = commands.add_parser("interrupt-action")
+    interrupt.add_argument("results", type=Path)
+    interrupt.add_argument("session", type=Path)
+    interrupt.add_argument("runtime_snapshot", type=Path)
+    interrupt.add_argument("--action-id", required=True)
+    interrupt.add_argument("--blocker-id", required=True)
+    interrupt.add_argument("--reason", required=True)
 
     pause = commands.add_parser("pause-run")
     pause.add_argument("session", type=Path)
@@ -640,6 +714,7 @@ def parser() -> argparse.ArgumentParser:
 COMMANDS = {
     "start-event": _start_event,
     "settle-action": _settle_operator_action,
+    "interrupt-action": _interrupt_action,
     "pause-run": _pause_run,
     "resume-run": _resume_run,
     "close-event": _close_event,

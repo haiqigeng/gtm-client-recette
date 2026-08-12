@@ -27,7 +27,11 @@ from layer_contract import (
     normalize_tag_scope,
     tag_scope_decision,
 )
-from runtime_state_contract import runtime_snapshot_errors, validate_runtime_evidence
+from runtime_state_contract import (
+    INTERRUPTION_REASONS,
+    runtime_snapshot_errors,
+    validate_runtime_evidence,
+)
 from tag_evidence_contract import (
     evidence_matches_tag,
     has_network_capture,
@@ -454,7 +458,17 @@ def _validate_session_metadata(ledger: dict[str, Any], errors: list[str]) -> Non
     if missing_roles:
         errors.append("session: missing required browser surfaces " + ", ".join(missing_roles))
     tag_assistants = [row for row in surface_rows if row.get("role") == "tag_assistant"]
-    if tag_assistants and not all(row.get("connected") is True for row in tag_assistants):
+    action_rows = [row for row in ledger.get("actions", []) if isinstance(row, dict)]
+    disconnected_accounted_for = bool(
+        action_rows
+        and action_rows[-1].get("state") == "SETTLED"
+        and action_rows[-1].get("settlement_reason") == "preview_disconnected"
+    )
+    if (
+        tag_assistants
+        and not all(row.get("connected") is True for row in tag_assistants)
+        and not disconnected_accounted_for
+    ):
         errors.append("session: Tag Assistant is not recorded as connected")
     connection_epoch = ledger.get("connection_epoch", 1)
     if (
@@ -932,7 +946,12 @@ def _validate_action_tag_results(
         )
     expected_keys = {(tag_id, layer) for tag_id in inventory_by_id for layer in TAG_RESULT_LAYERS}
     actual_keys = set(keys)
-    require_complete = action.get("state") == "SETTLED" or context.final
+    interrupted = (
+        action.get("state") == "SETTLED"
+        and action.get("settlement_reason") in INTERRUPTION_REASONS
+        and action.get("interaction_outcome") == "uncertain"
+    )
+    require_complete = (action.get("state") == "SETTLED" or context.final) and not interrupted
     if require_complete and actual_keys != expected_keys:
         missing = sorted(expected_keys - actual_keys)
         extra = sorted(actual_keys - expected_keys)
@@ -1105,7 +1124,7 @@ def _validate_operator_action_boundary(
         )
         return
     if (
-        settlement.get("phase") != "after_action"
+        settlement.get("phase") not in {"after_action", "interrupted_action"}
         or settlement.get("action_id") != action_id
         or settlement.get("case_id") != case_id
     ):
@@ -1131,6 +1150,15 @@ def _validate_operator_action_boundary(
         if action.get(action_field) != settlement.get(check_field):
             context.errors.append(
                 f"session action {action_id}: {action_field} differs from settlement capture"
+            )
+    if settlement.get("phase") == "interrupted_action":
+        if action.get("interaction_outcome") != "uncertain":
+            context.errors.append(
+                f"session action {action_id}: interrupted settlement must be uncertain"
+            )
+        if action.get("settlement_reason") != settlement.get("failure_reason"):
+            context.errors.append(
+                f"session action {action_id}: interruption reason differs from its capture"
             )
     after_network = action.get("network_request_cursor_after")
     if not isinstance(after_network, int) or isinstance(after_network, bool) or after_network < 0:
@@ -1956,6 +1984,25 @@ def _validate_runtime_checks(context: _ValidationContext) -> None:
         case_id = str(check.get("case_id", "")).strip()
         action = context.action_by_id.get(action_id)
         case = context.case_by_id.get(case_id)
+        if check.get("voided") is True:
+            if action is not None:
+                context.errors.append(
+                    f"session runtime check {check_id}: a voided check cannot resolve an action"
+                )
+            if check.get("consumed") is True or check.get("consumed_by_action_id") not in (
+                None,
+                "",
+            ):
+                context.errors.append(
+                    f"session runtime check {check_id}: a voided check cannot be consumed"
+                )
+            if not nonempty(check.get("void_reason")):
+                context.errors.append(f"session runtime check {check_id}: void_reason is required")
+            if not iso_timestamp(check.get("voided_at")):
+                context.errors.append(
+                    f"session runtime check {check_id}: voided_at must be ISO 8601"
+                )
+            continue
         if action is None:
             context.errors.append(
                 f"session runtime check {check_id}: action_id is absent from actions"
@@ -1970,7 +2017,12 @@ def _validate_runtime_checks(context: _ValidationContext) -> None:
             context.errors.append(
                 f"session runtime check {check_id}: action, case, and event identities differ"
             )
-        if check.get("phase") not in {"before_action", "resume", "after_action"}:
+        if check.get("phase") not in {
+            "before_action",
+            "resume",
+            "after_action",
+            "interrupted_action",
+        }:
             context.errors.append(
                 f"session runtime check {check_id}: unsupported runtime-check phase"
             )
@@ -2223,12 +2275,12 @@ def validate_session(
                 )
             if (
                 action.get("state") == "SETTLED"
-                and action.get("settlement_reason") == "preview_disconnected"
+                and action.get("settlement_reason") in INTERRUPTION_REASONS
             ):
                 expected_epoch += 1
         if ledger.get("connection_epoch") != expected_epoch:
             errors.append(
-                "session: connection_epoch does not reconcile with settled Preview disconnections"
+                "session: connection_epoch does not reconcile with settled runtime interruptions"
             )
     by_requirement, requirements_by_group, event_by_group, evidence = _result_catalogs(results)
     unexpected_rows = [

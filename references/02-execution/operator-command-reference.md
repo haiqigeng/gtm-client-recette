@@ -54,7 +54,8 @@ The guided operator is the default control plane. The ordered verbs are:
 5. capture a `before_action` runtime snapshot and use operator `start-event`
 6. `record-push` or transactional `import-pushes`
 7. `scaffold-tag-results`, complete its exact rows, then `import-tag-results`
-8. `record-layer` once for each canonical layer
+8. `record-layer` once for each canonical layer, or one transactional
+   `import-layers`
 9. capture an `after_action` runtime snapshot and use operator `settle-action`
 10. use operator `close-event` for mandatory immediate feedback
 11. repeat in plan order, then use operator `finish-run`
@@ -74,6 +75,8 @@ Each runtime snapshot is a direct browser/Preview/network state capture:
   "containers": [{"container_id": "GTM-XXXX", "workspace": "Recette"}],
   "website_url": "https://example.test/product",
   "selected_page_url": "https://example.test/product",
+  "page_match_mode": "exact",
+  "expected_overlay_active": false,
   "preview_connected": true,
   "target_interactive": true,
   "target_uncovered": true,
@@ -106,6 +109,13 @@ network evidence row must bind to this exact check and phase:
 Use separate evidence IDs for `before_action` and `after_action`; generic or
 reused proof is rejected.
 
+Use `page_match_mode: same_origin_spa` only when the website and selected
+Preview URLs differ because of an evidenced client-side route. Add
+`route_transition_evidence_id` and include that same ID in `evidence_ids`.
+This does not permit a different origin. `resume` requires the normal runtime
+checks but may use `expected_overlay_active: true` when the retained action
+legitimately owns the visible overlay.
+
 An `after_action` snapshot additionally supplies `first_event_after` and
 `observed_business_push_count`; its two cursors are the settled final cursors.
 The operator derives action-boundary fields from these snapshots:
@@ -124,6 +134,42 @@ python scripts/recette_operator.py settle-action normalized-results.json session
 The lower-level `record-runtime-check`, `begin-action`, and `settle-action`
 commands remain available for diagnosis. They enforce the same captured-state
 contract; `begin-action` never accepts a manually entered cursor.
+
+If runtime control fails after the action opened, preserve the failed boundary:
+
+```powershell
+python scripts/recette_operator.py interrupt-action normalized-results.json session.json `
+  interrupted-action.json --action-id ACT-001 `
+  --blocker-id BLK-RUNTIME-001 `
+  --reason "Browser network capture became unavailable before settlement"
+```
+
+The snapshot uses phase `interrupted_action`, one supported `failure_reason`
+(`browser_crashed`, `network_capture_lost`, `preview_disconnected`, or
+`surface_unavailable`), the last trustworthy cursors, and the exact observed
+push count. The action is retained as `SETTLED`/`uncertain`; the case becomes
+`BLOCKED`. No unavailable layer or tag result is invented. Restore the runtime
+and use a fresh linked action if a retry is justified.
+
+If a before-action check was captured under a mistaken action ID and no action
+was ever created, retain it explicitly:
+
+```powershell
+python scripts/preview_session_ledger.py void-runtime-check session.json `
+  --check-id READY-WRONG-ID --reason "Corrected action ID before interaction"
+```
+
+Only an unconsumed, unreferenced check can be voided.
+
+Import the complete event-layer card in one write when useful:
+
+```powershell
+python scripts/preview_session_ledger.py import-layers session.json layers.json `
+  --action-id ACT-001
+```
+
+The file is an array or `{ "layer_results": [...] }`. A malformed, duplicate,
+or inapplicable row rejects the whole command without persisting partial rows.
 
 If a material tag appears after the inventory was frozen, first settle the
 current action, then version the inventory and force a retained retry:
@@ -182,7 +228,9 @@ python scripts/recette_operator.py finish-run normalized-results.json session.js
 ```
 
 `finish-run` performs strict normalized/session reconciliation, verifies one
-plan-ordered closure per event, and builds the validated workbook. Use the
+plan-ordered closure per event, and publishes the validated workbook plus
+FINISHED session ledger as one crash-recoverable transaction. Results,
+session, and workbook paths must be distinct. Use the
 lower-level validators and sidecar flags only when additional diagnostic or
 delivery files are required.
 

@@ -115,7 +115,10 @@ inventory revision.
     absence and confirmed out-of-scope cases remain neutral only when their
     declared branch/scope conditions are satisfied.
 13. **Derive action boundaries from runtime state.** Every attempt consumes one
-    fresh `before_action` check and, when settled, one `after_action` check.
+    fresh `before_action` check and, when normally settled, one `after_action`
+    check. A mid-action browser, Preview, network, or surface failure instead
+    uses `interrupted_action`, preserves its last trustworthy cursors/pushes,
+    settles uncertain, and blocks the case without invented downstream proof.
     Exact browser context, container/workspace, selected Preview page,
     connection epoch, Preview cursor, and network cursor must reconcile. Agent-
     entered readiness booleans or cursors are not certification evidence.
@@ -135,8 +138,12 @@ inventory revision.
     the affected event closure and every later closure into auditable history.
     Retain proof, execute the new case, and reclose the suffix in plan order.
 18. **Recover paired writes.** Event closure replaces normalized results and
-    session state as one recoverable operation. A failure during either replace
-    restores both prior files before reporting the error.
+    session state as one journaled, crash-recoverable operation. Finalization
+    applies the same contract to the validated workbook and FINISHED session.
+    A failure during either replace restores both prior files before reporting.
+19. **Retain orphan checks explicitly.** An unconsumed runtime check created
+    before a mistaken action identity can be voided only with an exact reason
+    and timestamp. Never delete, reuse, or attach it silently.
 
 Pause for analyst action only at credentials or protected sign-in, MFA,
 CAPTCHA, verification, magic links, real payment, external approval,

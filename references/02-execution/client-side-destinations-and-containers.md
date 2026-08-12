@@ -168,6 +168,13 @@ is required even for a single container. Record stable
 container ID, workspace, role, Preview environment, and version when visible.
 Assign exactly one owner to each concerned tag requirement.
 
+Every interaction case retains the complete configured client-container set,
+not only the container named by one plan row. Runtime snapshots must prove all
+those configured container/workspace identities. The per-event tag matrix is
+still limited by the declared tag scope; this prevents an unrelated
+every-container/every-tag explosion while allowing a concerned tag discovered
+in any configured container to be evaluated.
+
 Use roles:
 
 - `primary`;

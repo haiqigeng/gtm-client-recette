@@ -14,23 +14,15 @@ from event_feedback import event_feedback, feedback_for_event
 from execution_contract import validate_session
 from init_coverage_ledger import initialize_requirement
 from recette_schema import validate
+from state_io import atomic_write_json, load_json_object
 
 
 def load_object(path: Path) -> dict[str, Any]:
-    value = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(value, dict):
-        raise ValueError(f"{path} must contain a JSON object.")
-    return value
+    return load_json_object(path)
 
 
 def save_atomic(path: Path, value: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.tmp")
-    temporary.write_text(
-        json.dumps(value, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    temporary.replace(path)
+    atomic_write_json(path, value)
 
 
 def rows(value: Any, field: str) -> list[dict[str, Any]]:
@@ -85,6 +77,24 @@ def _blocker_applies(
     return not has_explicit_scope or _row_applies(row, event_group_id, requirement_ids)
 
 
+def _referenced_evidence_ids(value: Any) -> set[str]:
+    """Collect evidence references without retaining unrelated run evidence rows."""
+    references: set[str] = set()
+    if isinstance(value, dict):
+        for key, item in value.items():
+            normalized = str(key).lower()
+            if normalized.endswith("evidence_id") and isinstance(item, str) and item.strip():
+                references.add(item.strip())
+            elif normalized.endswith("evidence_ids") and isinstance(item, list):
+                references.update(str(row).strip() for row in item if str(row).strip())
+            elif key != "evidence":
+                references.update(_referenced_evidence_ids(item))
+    elif isinstance(value, list):
+        for item in value:
+            references.update(_referenced_evidence_ids(item))
+    return references
+
+
 def event_view(data: dict[str, Any], event_group_id: str) -> dict[str, Any]:
     view = deepcopy(data)
     selected = event_requirements(view, event_group_id)
@@ -110,6 +120,12 @@ def event_view(data: dict[str, Any], event_group_id: str) -> dict[str, Any]:
         row
         for row in rows(view.get("blockers"), "blockers")
         if _blocker_applies(row, event_group_id, requirement_ids)
+    ]
+    referenced_evidence = _referenced_evidence_ids(view)
+    view["evidence"] = [
+        row
+        for row in rows(view.get("evidence"), "evidence")
+        if str(row.get("evidence_id", "")).strip() in referenced_evidence
     ]
     return view
 
@@ -188,8 +204,19 @@ def validate_event(
     if errors:
         raise ValueError("\n".join(errors))
     if session is not None:
+        session_view = _session_event_view(session, event_group_id)
+        session_evidence_ids = _referenced_evidence_ids(session_view)
+        visible_evidence_ids = {
+            str(row.get("evidence_id", "")).strip() for row in view.get("evidence", [])
+        }
+        view["evidence"].extend(
+            deepcopy(row)
+            for row in rows(data.get("evidence"), "evidence")
+            if str(row.get("evidence_id", "")).strip() in session_evidence_ids
+            and str(row.get("evidence_id", "")).strip() not in visible_evidence_ids
+        )
         execution_errors = validate_session(
-            _session_event_view(session, event_group_id),
+            session_view,
             results=view,
             final=True,
         )
@@ -231,6 +258,8 @@ def _merge_event_rows(
 def apply_event(
     data: dict[str, Any],
     patch: dict[str, Any],
+    *,
+    validate_result: bool = True,
 ) -> tuple[dict[str, Any], str]:
     event_group_id = str(patch.get("event_group_id", "")).strip()
     if not event_group_id:
@@ -277,7 +306,8 @@ def apply_event(
                 current_ids,
             )
 
-    validate_event(updated, event_group_id)
+    if validate_result:
+        validate_event(updated, event_group_id)
     return updated, event_group_id
 
 
@@ -382,7 +412,7 @@ def main() -> int:
             output = validate_event(data, args.event_group_id, session)
         elif args.command == "apply-event":
             patch = load_object(args.event_patch)
-            updated, event_group_id = apply_event(data, patch)
+            updated, event_group_id = apply_event(data, patch, validate_result=False)
             destination = args.output or args.ledger
             output = validate_event(updated, event_group_id, session)
             save_atomic(destination, updated)

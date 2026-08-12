@@ -3,11 +3,12 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any
 from urllib.parse import urlparse
 
-RUNTIME_CHECK_PHASES = {"before_action", "resume", "after_action"}
+from value_semantics import parse_iso_timestamp
+
+RUNTIME_CHECK_PHASES = {"before_action", "resume", "after_action", "interrupted_action"}
 RUNTIME_CAPTURE_SOURCES = {
     "browser_connector_runtime_probe",
     "playwright_runtime_probe",
@@ -24,24 +25,21 @@ READINESS_TRUE_FIELDS = (
     "network_capture_active",
 )
 BOOLEAN_FIELDS = set(READINESS_TRUE_FIELDS)
+PAGE_MATCH_MODES = {"exact", "same_origin_spa"}
+INTERRUPTION_REASONS = {
+    "browser_crashed",
+    "network_capture_lost",
+    "preview_disconnected",
+    "surface_unavailable",
+}
 
 
 def _nonempty(value: Any) -> bool:
     return isinstance(value, str) and bool(value.strip())
 
 
-def _parsed_timestamp(value: Any) -> datetime | None:
-    if not _nonempty(value):
-        return None
-    try:
-        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return parsed if parsed.tzinfo is not None else None
-
-
 def _iso_timestamp(value: Any) -> bool:
-    return _parsed_timestamp(value) is not None
+    return parse_iso_timestamp(value) is not None
 
 
 def _origin(url: Any) -> str | None:
@@ -142,8 +140,8 @@ def runtime_snapshot_errors(
         errors.append(
             "runtime snapshot capture_source must identify a supported browser runtime probe"
         )
-    captured_at = _parsed_timestamp(snapshot.get("captured_at"))
-    recorded_time = _parsed_timestamp(recorded_at or snapshot.get("recorded_at"))
+    captured_at = parse_iso_timestamp(snapshot.get("captured_at"))
+    recorded_time = parse_iso_timestamp(recorded_at or snapshot.get("recorded_at"))
     if recorded_at is not None and recorded_time is None:
         errors.append("runtime check recorded_at must be ISO 8601 with timezone")
     if captured_at is not None and recorded_time is not None:
@@ -154,14 +152,17 @@ def runtime_snapshot_errors(
             errors.append(
                 "runtime snapshot is stale; capture it immediately before recording the check"
             )
-    action_time = _parsed_timestamp(action_timestamp)
+    action_time = parse_iso_timestamp(action_timestamp)
     if action_timestamp is not None and action_time is None:
         errors.append("runtime action_timestamp must be ISO 8601 with timezone")
     if captured_at is not None and action_time is not None:
         delta_seconds = (captured_at - action_time).total_seconds()
         if phase == "before_action" and delta_seconds > MAX_CLOCK_SKEW_SECONDS:
             errors.append("before-action runtime capture must not follow the action timestamp")
-        if phase in {"resume", "after_action"} and delta_seconds < -MAX_CLOCK_SKEW_SECONDS:
+        if (
+            phase in {"resume", "after_action", "interrupted_action"}
+            and delta_seconds < -MAX_CLOCK_SKEW_SECONDS
+        ):
             errors.append(f"{phase} runtime capture must not precede the action timestamp")
     for field_name in BOOLEAN_FIELDS:
         if not isinstance(snapshot.get(field_name), bool):
@@ -205,7 +206,11 @@ def runtime_snapshot_errors(
         if not isinstance(surface, dict) or surface.get("role") != role:
             errors.append(f"runtime snapshot {field_name} does not resolve a {role} surface")
     assistant = surfaces.get(str(snapshot.get("tag_assistant_surface_id", "")), {})
-    if isinstance(assistant, dict) and assistant.get("connected") is not True:
+    if (
+        phase != "interrupted_action"
+        and isinstance(assistant, dict)
+        and assistant.get("connected") is not True
+    ):
         errors.append("runtime snapshot Tag Assistant surface is not recorded as connected")
 
     approved_origins = set(ledger.get("approved_origins", []))
@@ -218,15 +223,25 @@ def runtime_snapshot_errors(
         errors.append("runtime snapshot selected Tag Assistant page has the wrong origin")
     if case_origin != website_origin:
         errors.append("runtime snapshot website origin differs from the interaction case")
-    if (
+    page_match_mode = str(snapshot.get("page_match_mode", "exact")).strip()
+    if page_match_mode not in PAGE_MATCH_MODES:
+        errors.append("runtime snapshot page_match_mode must be exact or same_origin_spa")
+    urls_differ = (
         website_origin
         and selected_origin
         and _nonempty(snapshot.get("website_url"))
         and _nonempty(snapshot.get("selected_page_url"))
         and _comparable_url(str(snapshot["website_url"]))
         != _comparable_url(str(snapshot["selected_page_url"]))
-    ):
+    )
+    if urls_differ and page_match_mode != "same_origin_spa":
         errors.append("runtime snapshot selected Tag Assistant page differs from the website")
+    if urls_differ and page_match_mode == "same_origin_spa":
+        route_evidence_id = str(snapshot.get("route_transition_evidence_id", "")).strip()
+        if not route_evidence_id or route_evidence_id not in set(snapshot.get("evidence_ids", [])):
+            errors.append(
+                "same_origin_spa page matching requires route_transition_evidence_id in evidence_ids"
+            )
 
     actual_containers = _snapshot_containers(snapshot.get("containers"), errors)
     expected_containers = expected_container_contract(results, case)
@@ -270,11 +285,28 @@ def runtime_snapshot_errors(
             )
         )
 
-    if phase in {"before_action", "resume"}:
+    expected_overlay_active = snapshot.get("expected_overlay_active", False)
+    if not isinstance(expected_overlay_active, bool):
+        errors.append("runtime snapshot expected_overlay_active must be boolean")
+    if phase == "before_action":
         for field_name in READINESS_TRUE_FIELDS:
             if snapshot.get(field_name) is not True:
                 errors.append(f"runtime readiness requires {field_name}=true")
-    else:
+    elif phase == "resume":
+        for field_name in (
+            "preview_connected",
+            "target_interactive",
+            "lifecycle_observed",
+            "stream_quiet",
+            "network_capture_active",
+        ):
+            if snapshot.get(field_name) is not True:
+                errors.append(f"runtime readiness requires {field_name}=true")
+        if snapshot.get("target_uncovered") is not True and expected_overlay_active is not True:
+            errors.append(
+                "resume readiness requires target_uncovered=true or an expected active overlay"
+            )
+    elif phase == "after_action":
         if snapshot.get("network_capture_active") is not True:
             errors.append("after-action settlement requires network_capture_active=true")
         count = snapshot.get("observed_business_push_count")
@@ -285,6 +317,38 @@ def runtime_snapshot_errors(
             not isinstance(first_event, int) or isinstance(first_event, bool) or first_event < 0
         ):
             errors.append("after-action snapshot first_event_after must be non-negative or null")
+    else:
+        failure_reason = str(snapshot.get("failure_reason", "")).strip()
+        if failure_reason not in INTERRUPTION_REASONS:
+            errors.append("interrupted-action snapshot requires a supported failure_reason")
+        failed_condition = {
+            "browser_crashed": "target_interactive",
+            "network_capture_lost": "network_capture_active",
+            "preview_disconnected": "preview_connected",
+            "surface_unavailable": "target_interactive",
+        }.get(failure_reason)
+        if failed_condition and snapshot.get(failed_condition) is not False:
+            errors.append(
+                f"interrupted-action failure_reason {failure_reason} requires "
+                f"{failed_condition}=false"
+            )
+        if all(
+            snapshot.get(field_name) is True
+            for field_name in ("preview_connected", "target_interactive", "network_capture_active")
+        ):
+            errors.append("interrupted-action snapshot must expose a failed runtime condition")
+        count = snapshot.get("observed_business_push_count")
+        if not isinstance(count, int) or isinstance(count, bool) or count < 0:
+            errors.append(
+                "interrupted-action snapshot observed_business_push_count must be non-negative"
+            )
+        first_event = snapshot.get("first_event_after")
+        if first_event is not None and (
+            not isinstance(first_event, int) or isinstance(first_event, bool) or first_event < 0
+        ):
+            errors.append(
+                "interrupted-action snapshot first_event_after must be non-negative or null"
+            )
 
     if not _nonempty(action_id):
         errors.append("runtime check requires a non-empty action_id")
@@ -334,20 +398,27 @@ def normalize_runtime_check(
         "containers": _snapshot_containers(snapshot["containers"], []),
         "website_url": str(snapshot["website_url"]).strip(),
         "selected_page_url": str(snapshot["selected_page_url"]).strip(),
+        "page_match_mode": str(snapshot.get("page_match_mode", "exact")).strip(),
+        "route_transition_evidence_id": (
+            str(snapshot.get("route_transition_evidence_id", "")).strip() or None
+        ),
         "preview_connected": snapshot["preview_connected"],
         "target_interactive": snapshot["target_interactive"],
         "target_uncovered": snapshot["target_uncovered"],
         "lifecycle_observed": snapshot["lifecycle_observed"],
         "stream_quiet": snapshot["stream_quiet"],
         "network_capture_active": snapshot["network_capture_active"],
+        "expected_overlay_active": snapshot.get("expected_overlay_active", False),
         "preview_event_cursor": snapshot["preview_event_cursor"],
         "network_request_cursor": snapshot["network_request_cursor"],
         "evidence_ids": list(snapshot["evidence_ids"]),
         "consumed": False,
     }
-    if phase == "after_action":
+    if phase in {"after_action", "interrupted_action"}:
         normalized["first_event_after"] = snapshot.get("first_event_after")
         normalized["observed_business_push_count"] = snapshot["observed_business_push_count"]
+    if phase == "interrupted_action":
+        normalized["failure_reason"] = str(snapshot["failure_reason"]).strip()
     return normalized
 
 
@@ -362,7 +433,7 @@ def validate_runtime_evidence(
     action_id = str(check.get("action_id", ""))
     check_id = str(check.get("check_id", ""))
     phase = str(check.get("phase", ""))
-    check_captured_at = _parsed_timestamp(check.get("captured_at"))
+    check_captured_at = parse_iso_timestamp(check.get("captured_at"))
     container_ids = {
         str(row.get("container_id", ""))
         for row in check.get("containers", [])
@@ -382,7 +453,7 @@ def validate_runtime_evidence(
             errors.append(f"{label}: evidence '{ref}' is bound to another runtime check")
         if row.get("runtime_phase") != phase:
             errors.append(f"{label}: evidence '{ref}' has the wrong runtime phase")
-        evidence_captured_at = _parsed_timestamp(row.get("captured_at"))
+        evidence_captured_at = parse_iso_timestamp(row.get("captured_at"))
         if evidence_captured_at is None:
             errors.append(f"{label}: evidence '{ref}' requires a timezone-aware captured_at")
         elif (
@@ -399,6 +470,6 @@ def validate_runtime_evidence(
             errors.append(f"{label}: network evidence '{ref}' has the wrong container")
     if "action_boundary" not in kinds:
         errors.append(f"{label}: direct action_boundary evidence is required")
-    if "browser_network_capture" not in kinds:
+    if check.get("network_capture_active") is True and "browser_network_capture" not in kinds:
         errors.append(f"{label}: direct browser_network_capture evidence is required")
     return errors

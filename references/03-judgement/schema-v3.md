@@ -83,6 +83,15 @@ cursor, and direct evidence IDs. An after-action check additionally records
 `first_event_after` and `observed_business_push_count`. Consumed check IDs and
 cursors must match the action exactly.
 
+`page_match_mode` is `exact` by default. `same_origin_spa` is valid only for a
+URL difference backed by a direct route-transition evidence ID in the same
+capture. A mid-action runtime failure uses `interrupted_action`, a supported
+failure reason, last trustworthy cursors and exact observed-push count. It
+settles the retained action as uncertain and blocks the case without requiring
+or fabricating unavailable downstream layer/tag rows. A mistaken, unconsumed
+orphan check can be retained as `voided` with a timestamp and exact reason;
+voided checks cannot be consumed or linked to actions.
+
 Only `playwright_runtime_probe` and `browser_connector_runtime_probe` are valid
 runtime producers. Captured and recorded timestamps must be fresh and ordered
 around the action. Runtime action-boundary/network evidence uses exact
@@ -211,4 +220,6 @@ change canonical component status.
 Generated workbooks and sidecars expose `Output contract: 2`; defect CSV rows
 repeat `output_contract_version`. Consumers that depend on exact headers must
 use that value; it covers the primary-outcome, anomaly, and runtime-cursor
-columns.
+columns. CSV text beginning with `=`, `+`, `-`, or `@` is escaped as literal
+text. The final workbook and FINISHED session state use a crash-recoverable
+paired transaction, and input/output paths cannot alias each other.

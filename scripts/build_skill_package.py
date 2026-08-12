@@ -20,7 +20,7 @@ INCLUDED = (
     "scripts",
     "tests",
 )
-EXCLUDED_NAMES = {"__pycache__", "build_skill_package.py", "check_release.py"}
+EXCLUDED_NAMES = {"__pycache__", "check_release.py"}
 MANIFEST_NAME = "RELEASE-MANIFEST.json"
 
 
