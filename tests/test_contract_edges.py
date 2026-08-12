@@ -33,7 +33,11 @@ from client_side_rules import (  # noqa: E402
 )
 from event_feedback import event_feedback  # noqa: E402
 from execution_contract import validate_session  # noqa: E402
-from incremental_recette import event_view, scaffold_event_patch  # noqa: E402
+from incremental_recette import (  # noqa: E402
+    _session_event_view,
+    event_view,
+    scaffold_event_patch,
+)
 from init_coverage_ledger import initialize_requirement  # noqa: E402
 from layer_contract import applicable_layers  # noqa: E402
 from preview_session_ledger import import_cases, record_push  # noqa: E402
@@ -41,6 +45,43 @@ from recette_schema import validate  # noqa: E402
 
 
 class ContractEdgeTests(unittest.TestCase):
+    def test_event_slice_keeps_only_its_own_reopen_history(self) -> None:
+        data = fixture()
+        session = execution_fixture(data)
+        closure = deepcopy(session["event_closures"][0])
+        session["closure_history"] = [
+            {
+                "reopened_event_group_id": "EVG-001",
+                "reopened_at": "2026-07-25T10:03:00+00:00",
+                "reason": "Late material interaction.",
+                "invalidated_closures": [
+                    closure,
+                    {
+                        **closure,
+                        "event_group_id": "EVG-002",
+                        "plan_order": 2,
+                    },
+                ],
+            }
+        ]
+        sliced = _session_event_view(session, "EVG-001")
+        self.assertEqual(
+            ["EVG-001"],
+            [row["event_group_id"] for row in sliced["closure_history"][0]["invalidated_closures"]],
+        )
+        unchanged = execution_fixture(data)
+        unchanged_closure = deepcopy(unchanged["event_closures"][0])
+        unchanged["closure_history"] = [
+            {
+                "reopened_event_group_id": "EVG-001",
+                "reopened_at": "2026-07-25T10:03:00+00:00",
+                "reason": "Late material interaction.",
+                "invalidated_closures": [unchanged_closure],
+            }
+        ]
+        errors = validate_session(unchanged, results=data, final=True)
+        self.assertTrue(any("requires a new case or final action" in row for row in errors))
+
     def test_workbook_forces_untrusted_formula_text_to_literal_strings(self) -> None:
         data = fixture()
         requirement(data)["notes"] = '=HYPERLINK("https://example.test","click")'
@@ -436,8 +477,13 @@ class ContractEdgeTests(unittest.TestCase):
             write_defects_csv(csv_path, rows)
             write_defects_markdown(markdown_path, rows)
             write_stakeholder_summary(summary_path, data, session)
-            self.assertIn("tag_firing", csv_path.read_text(encoding="utf-8-sig"))
+            csv_text = csv_path.read_text(encoding="utf-8-sig")
+            self.assertTrue(csv_text.startswith("output_contract_version,"))
+            self.assertIn("2,DEF-", csv_text)
+            self.assertIn("tag_firing", csv_text)
             self.assertIn("Expected GA4 tag did not fire", markdown_path.read_text())
+            self.assertIn("Output contract: 2", markdown_path.read_text())
+            self.assertIn("Output contract: 2", summary_path.read_text())
             self.assertIn("Non-PASS events", summary_path.read_text())
 
     def test_supporting_artifact_is_metadata_only_and_has_no_verdict_authority(self) -> None:
@@ -578,6 +624,8 @@ class ContractEdgeTests(unittest.TestCase):
             }
         )
         session["cases"].append(out_of_scope)
+        session["event_closures"][0]["case_ids"].append("CASE-OOS")
+        session["event_closures"][0]["case_ids"].reverse()
         self.assertEqual([], validate_session(session, results=data, final=True))
 
     def test_conditional_absence_can_pass_schema_and_session_contracts(self) -> None:
@@ -664,6 +712,7 @@ class ContractEdgeTests(unittest.TestCase):
         session["business_pushes"] = []
         session["actions"][0]["observed_business_push_count"] = 0
         session["actions"][0]["expected_seen"] = False
+        session["runtime_checks"][1]["observed_business_push_count"] = 0
         self.assertEqual([], evaluate_report_business_rules(data))
         self.assertEqual([], validate(data, strict=True))
         self.assertEqual([], validate_session(session, results=data, final=True))

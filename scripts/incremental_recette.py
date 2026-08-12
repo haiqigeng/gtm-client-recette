@@ -151,6 +151,30 @@ def _session_event_view(
         for row in session.get("business_pushes", [])
         if isinstance(row, dict) and str(row.get("action_id")) in action_ids
     ]
+    view["runtime_checks"] = [
+        row
+        for row in session.get("runtime_checks", [])
+        if isinstance(row, dict) and str(row.get("action_id")) in action_ids
+    ]
+    view["event_closures"] = [
+        row
+        for row in session.get("event_closures", [])
+        if isinstance(row, dict) and str(row.get("event_group_id")) == event_group_id
+    ]
+    view["closure_history"] = []
+    for history in session.get("closure_history", []):
+        if (
+            not isinstance(history, dict)
+            or str(history.get("reopened_event_group_id", "")) != event_group_id
+        ):
+            continue
+        selected_history = deepcopy(history)
+        selected_history["invalidated_closures"] = [
+            row
+            for row in history.get("invalidated_closures", [])
+            if isinstance(row, dict) and str(row.get("event_group_id", "")) == event_group_id
+        ]
+        view["closure_history"].append(selected_history)
     return view
 
 

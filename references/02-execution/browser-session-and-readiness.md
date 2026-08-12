@@ -68,12 +68,31 @@ Before every business action, verify:
 
 Use state checks and event counts. A fixed sleep alone is not readiness proof.
 
+Persist readiness as a direct runtime snapshot, not as an agent assertion. The
+capture must identify the browser context and three registered surfaces, the
+exact client container/workspace set, current website URL, selected Tag
+Assistant page URL, connection epoch, Preview event cursor, browser-network
+request cursor, all six boolean readiness checks, and direct action-boundary
+plus network-capture evidence IDs. `record-runtime-check` rejects a different
+origin/page, workspace, container, epoch, inactive request capture, uncovered
+target failure, or unsettled baseline. `begin-action` consumes this check and
+copies its cursors; it has no manual cursor override.
+
+Use only `playwright_runtime_probe` or `browser_connector_runtime_probe` as the
+capture source. Record the snapshot within five minutes, never in the future,
+and preserve its temporal order around the action. Each referenced
+`action_boundary` and `browser_network_capture` evidence row must carry the
+same `runtime_check_id`, `runtime_phase`, `action_id`, and a capture timestamp
+inside that check's window. Before/after checks use distinct evidence IDs.
+
 ## Action boundary
 
 Record:
 
+- readiness and settlement runtime-check IDs;
 - Preview connection and target readiness before the action;
 - last Preview event index before the action;
+- browser-network request cursor before and after the action;
 - URL, element, action, supplied/synthetic value, and timestamp;
 - independent interaction outcome and safe completion signal;
 - retry relationship when this is a bounded repeat of a retained attempt;
@@ -84,6 +103,12 @@ Record:
 - the independently observed business-push count and every classified push ID;
 - every canonical layer result, conditional predicate result, per-tag subrow,
   and direct evidence ID.
+
+The after-action runtime snapshot records the final Preview and network
+cursors, first event after the action (or `null`), settled state, and observed
+business-push count. `settle-action` consumes it and refuses a backwards
+cursor, stale connection epoch, or a push count that differs from the fully
+classified stream.
 
 Normalize the action value, JSON-compatible type, and source. Use explicit
 `null`/`not_applicable` for a plain click or load. Preserve safe supplied or
@@ -221,5 +246,11 @@ Checkpoint after:
 - consent-scenario changes;
 - connection recovery.
 
-On resume, rediscover surfaces and revalidate container, workspace, domain,
-consent state, and event cursor before continuing.
+On resume inside an open action, rediscover surfaces and revalidate container,
+workspace, domain, consent state, and event cursor before continuing. Resume
+between events without a snapshot; the next `start-event` must establish its
+own fresh `before_action` boundary.
+
+Record that fresh state with phase `resume`; the guided operator consumes it
+before returning the retained action to `ACTIVE`. Evidence captured before the
+pause cannot satisfy the new readiness boundary.

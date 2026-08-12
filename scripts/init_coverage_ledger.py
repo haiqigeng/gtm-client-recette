@@ -16,6 +16,7 @@ from layer_contract import (
     applicable_layers,
     normalize_tag_scope,
 )
+from recette_schema import ACTION_BOUNDARY_CONTRACT_VERSION
 
 
 def parse_args() -> argparse.Namespace:
@@ -286,6 +287,7 @@ def main() -> int:
     result = {
         "schema_version": 3,
         "run": {
+            "action_boundary_contract_version": ACTION_BOUNDARY_CONTRACT_VERSION,
             "run_id": args.run_id,
             "report_title": args.title,
             "client": args.client,

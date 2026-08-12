@@ -2,12 +2,14 @@
 
 ## Boundary
 
-Every new normalized run and session ledger uses `schema_version: 3`.
+Every new normalized run and session ledger uses `schema_version: 3`. New
+normalized runs also use `run.action_boundary_contract_version: 1`; new guided
+session ledgers use `operator_contract_version: 1`.
 
 ```json
 {
   "schema_version": 3,
-  "run": {},
+  "run": {"action_boundary_contract_version": 1},
   "requirements": [],
   "unexpected": [],
   "blockers": [],
@@ -66,9 +68,41 @@ as `MANDATORY` or `CONDITIONAL`. Conditional false is explicit
 `NOT_APPLICABLE`; no row may disappear.
 
 Each action stores its retained retry lineage, connection epoch, Preview
-cursor, page/action context, independent website completion signal, adaptive
+and browser-network cursors before/after, readiness/settlement check IDs,
+page/action context, independent website completion signal, adaptive
 settlement, complete business-push count, 19 layer rows, and the exact 8-row
-matrix for every in-scope tag.
+matrix for every in-scope tag. Its normalized `action_boundary` repeats these
+check IDs and cursors so strict reconciliation detects drift.
+
+New session ledgers carry `operator_contract_version: 1`, `runtime_checks`,
+`event_closures`, `closure_history`, and `operator_state`. A runtime check is a normalized direct
+capture bound to one action/case/connection epoch and the exact registered GTM,
+Tag Assistant, and website surfaces. It records exact containers/workspaces,
+website and selected Preview URLs, readiness booleans, Preview cursor, network
+cursor, and direct evidence IDs. An after-action check additionally records
+`first_event_after` and `observed_business_push_count`. Consumed check IDs and
+cursors must match the action exactly.
+
+Only `playwright_runtime_probe` and `browser_connector_runtime_probe` are valid
+runtime producers. Captured and recorded timestamps must be fresh and ordered
+around the action. Runtime action-boundary/network evidence uses exact
+`runtime_check_id` and `runtime_phase` bindings; before/after checks cannot
+reuse evidence IDs.
+
+Each event closure stores `event_group_id`, original `plan_order`, exact case
+IDs, executed final-action IDs, `closed_at`, and `feedback_emitted_at`.
+Closures form an exact prefix during execution and equal the complete event
+inventory at final validation. A late material tag discovery removes the
+affected closure and reopens the event for the required retained retry.
+`reopen-event` does the same for a late interaction or variant: it moves the
+affected closure suffix into `closure_history` with reason and timestamp, then
+requires plan-ordered reclosure. Closure case/action membership is exact but
+does not depend on incidental list order.
+
+Schema-v3 results created before this boundary contract remain readable when
+the marker is absent. They use the earlier action-boundary validation and
+cannot use the guided operator. Never synthesize missing checks or cursors;
+freshly normalize and recapture when current certification is needed.
 
 If a material tag appears after freeze, `revise-tag-inventory` stores the
 prior inventory/card in `applicability_history`, increments
@@ -167,3 +201,14 @@ pushes, open/pending actions, wrong retry lineage, cross-tag proof, unanchored
 expectations, request-ID mismatches, unsafe session values, action-boundary
 drift, raw/resolved substitution, missing direct evidence, unsupported silent
 transforms, and any aggregate status that hides a worse result.
+
+Feedback also derives `primary_outcome` and `anomaly_flags`. They are output
+taxonomy only: the former names the first actionable broken chain link; the
+latter surfaces missing/duplicate/premature/delayed/wrong-order/wrong-context/
+unplanned occurrences. Neither is stored as acceptance evidence or allowed to
+change canonical component status.
+
+Generated workbooks and sidecars expose `Output contract: 2`; defect CSV rows
+repeat `output_contract_version`. Consumers that depend on exact headers must
+use that value; it covers the primary-outcome, anomaly, and runtime-cursor
+columns.

@@ -15,7 +15,7 @@ preflight and READY
 -> scaffold the exact in-scope tag x eight-layer matrix
 -> capture natural starting consent
 -> execute continuously in plan order
--> readiness and one action boundary per case
+-> direct readiness capture and one derived action boundary per case
 -> classify and count every business push in the continuous cursor
 -> exact planned and relevant unexpected event evidence capture
 -> mandatory raw/resolved/tag/runtime/request/sensitive chain
@@ -114,6 +114,29 @@ inventory revision.
     its own `REVIEW` or `FAIL` to the affected event. Conditional expected
     absence and confirmed out-of-scope cases remain neutral only when their
     declared branch/scope conditions are satisfied.
+13. **Derive action boundaries from runtime state.** Every attempt consumes one
+    fresh `before_action` check and, when settled, one `after_action` check.
+    Exact browser context, container/workspace, selected Preview page,
+    connection epoch, Preview cursor, and network cursor must reconcile. Agent-
+    entered readiness booleans or cursors are not certification evidence.
+14. **Close events before advancing.** Event closures form an exact prefix of
+    the original plan order. Closure requires all cases resolved, all final
+    actions settled, strict event/session validation, and an immediate feedback
+    timestamp. Final validation requires one closure per event.
+15. **Keep diagnosis computed.** `primary_outcome` reports the first actionable
+    broken link and `anomaly_flags` expose missing, duplicate, premature,
+    delayed, wrong-order, wrong-context, or unplanned occurrences. Neither can
+    override canonical layer or event verdicts.
+16. **Preserve compatibility without inventing proof.** A schema-v3 result
+    without `run.action_boundary_contract_version` remains readable under the
+    legacy boundary contract. Only version `1` may enter guided operation; a
+    current certification recaptures checks/cursors instead of backfilling them.
+17. **Reopen explicitly.** A late material interaction, variant, or tag moves
+    the affected event closure and every later closure into auditable history.
+    Retain proof, execute the new case, and reclose the suffix in plan order.
+18. **Recover paired writes.** Event closure replaces normalized results and
+    session state as one recoverable operation. A failure during either replace
+    restores both prior files before reporting the error.
 
 Pause for analyst action only at credentials or protected sign-in, MFA,
 CAPTCHA, verification, magic links, real payment, external approval,

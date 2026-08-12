@@ -91,13 +91,17 @@ REQUIRED_SHEETS = [
     "Evidence Catalogue",
     "Run Context",
 ]
+OUTPUT_CONTRACT_VERSION = 2
 
 DEFECT_HEADERS = [
+    "output_contract_version",
     "defect_id",
     "plan_order",
     "event_group_id",
     "event_name",
     "status",
+    "primary_outcome",
+    "anomaly_flags",
     "case_id",
     "requirement_id",
     "tag_name",
@@ -245,6 +249,13 @@ CASE_HEADERS = [
     "action_id",
     "attempt_number",
     "retry_of_action_id",
+    "readiness_check_id",
+    "settlement_check_id",
+    "last_event_before",
+    "first_event_after",
+    "settled_final_event",
+    "network_request_cursor_before",
+    "network_request_cursor_after",
     "interaction_outcome",
     "completion_signal",
     "stream_settled",
@@ -301,14 +312,18 @@ EVENT_HEADERS = [
     "resolved_field_type",
     "action_id",
     "retry_of_action_id",
+    "readiness_check_id",
+    "settlement_check_id",
     "preview_connected_before",
     "target_ready_before",
     "last_event_before",
+    "network_request_cursor_before",
     "action_timestamp",
     "interaction_outcome",
     "completion_signal",
     "first_event_after",
     "settled_final_event",
+    "network_request_cursor_after",
     "quiet_window_ms",
     "timeout_ms",
     "stream_settled",
@@ -1161,6 +1176,11 @@ def defect_rows(
                     "retest_status": "PENDING",
                 }
             )
+    for row in output:
+        group_feedback = feedback.get(str(row.get("event_group_id", "")), {})
+        row["output_contract_version"] = OUTPUT_CONTRACT_VERSION
+        row["primary_outcome"] = group_feedback.get("primary_outcome")
+        row["anomaly_flags"] = group_feedback.get("anomaly_flags")
     return sorted(
         output,
         key=lambda row: (
@@ -1243,14 +1263,18 @@ def event_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
                 "resolved_field_type": resolved.get("field_type"),
                 "action_id": boundary.get("action_id"),
                 "retry_of_action_id": boundary.get("retry_of_action_id"),
+                "readiness_check_id": boundary.get("readiness_check_id"),
+                "settlement_check_id": boundary.get("settlement_check_id"),
                 "preview_connected_before": boundary.get("preview_connected_before"),
                 "target_ready_before": boundary.get("target_ready_before"),
                 "last_event_before": boundary.get("last_event_before"),
+                "network_request_cursor_before": boundary.get("network_request_cursor_before"),
                 "action_timestamp": boundary.get("action_timestamp"),
                 "interaction_outcome": boundary.get("interaction_outcome"),
                 "completion_signal": boundary.get("completion_signal"),
                 "first_event_after": boundary.get("first_event_after"),
                 "settled_final_event": boundary.get("settled_final_event"),
+                "network_request_cursor_after": boundary.get("network_request_cursor_after"),
                 "quiet_window_ms": boundary.get("quiet_window_ms"),
                 "timeout_ms": boundary.get("timeout_ms"),
                 "stream_settled": boundary.get("stream_settled"),
@@ -1857,6 +1881,7 @@ def add_client_summary(
     ws["A1"].font = Font(size=18, bold=True, color="1F4E78")
     summary_rows = [
         ("Overall status", overall),
+        ("Output contract", OUTPUT_CONTRACT_VERSION),
         ("Acceptance scope", run.get("acceptance_scope")),
         ("Client", run.get("client")),
         ("Environment", run.get("environment")),
@@ -1882,6 +1907,8 @@ def add_client_summary(
         "plan_order",
         "event_name",
         "status",
+        "primary_outcome",
+        "anomaly_flags",
         "requirement_count",
         "case_counts",
         "verified_layers",
@@ -1927,12 +1954,14 @@ def add_client_summary(
     ws.column_dimensions["A"].width = 30
     ws.column_dimensions["B"].width = 42
     ws.column_dimensions["C"].width = 16
-    ws.column_dimensions["D"].width = 20
-    ws.column_dimensions["E"].width = 28
-    ws.column_dimensions["F"].width = 50
-    ws.column_dimensions["G"].width = 80
-    ws.column_dimensions["H"].width = 80
-    ws.column_dimensions["I"].width = 50
+    ws.column_dimensions["D"].width = 32
+    ws.column_dimensions["E"].width = 32
+    ws.column_dimensions["F"].width = 20
+    ws.column_dimensions["G"].width = 28
+    ws.column_dimensions["H"].width = 50
+    ws.column_dimensions["I"].width = 80
+    ws.column_dimensions["J"].width = 80
+    ws.column_dimensions["K"].width = 50
     ws.freeze_panes = "A3"
 
 
@@ -2168,12 +2197,16 @@ def write_defects_markdown(path: Path, rows_to_write: list[dict[str, Any]]) -> N
         "plan_order",
         "event_name",
         "status",
+        "primary_outcome",
+        "anomaly_flags",
         "failed_layer",
         "concise_reason",
         "exact_retest",
     ]
     lines = [
         "# GTM recette defects",
+        "",
+        f"Output contract: {OUTPUT_CONTRACT_VERSION}",
         "",
         "| " + " | ".join(columns) + " |",
         "| " + " | ".join("---" for _ in columns) + " |",
@@ -2195,6 +2228,8 @@ def write_stakeholder_summary(
     lines = [
         f"# {data.get('run', {}).get('report_title', 'GTM Preview recette')}",
         "",
+        f"Output contract: {OUTPUT_CONTRACT_VERSION}",
+        "",
         f"Scope: {_sidecar_text(data.get('run', {}).get('acceptance_scope'))}",
         "",
         "## Event totals",
@@ -2212,7 +2247,9 @@ def write_stakeholder_summary(
         lines.append("No non-PASS event.")
     else:
         lines.extend(
-            f"- {row.get('plan_order')}. {row.get('event_name')} — {row.get('status')}: "
+            f"- {row.get('plan_order')}. {row.get('event_name')} — {row.get('status')} "
+            f"[{row.get('primary_outcome')}; "
+            f"{_sidecar_text(row.get('anomaly_flags')) or 'no anomaly flag'}]: "
             f"{_sidecar_text(row.get('reason'))} Retest: {_sidecar_text(row.get('retest'))}"
             for row in non_pass
         )

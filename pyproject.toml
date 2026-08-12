@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gtm-preview-recette"
-version = "2.0.0"
+version = "2.1.0"
 description = "Operational client-side GTM recette with exhaustive interaction and event-stream reconciliation"
 license = "MIT"
 requires-python = ">=3.11"

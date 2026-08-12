@@ -52,6 +52,7 @@ from layer_contract import (
 from supporting_artifacts import validate_supporting_artifacts
 
 SCHEMA_VERSION = 3
+ACTION_BOUNDARY_CONTRACT_VERSION = 1
 MATCH_RULES = {
     "equals",
     "absent",
@@ -853,21 +854,29 @@ def _validate_action_boundary(
     observed: bool,
     require_ready: bool,
     require_settled: bool = True,
+    contract_version: int | None = None,
 ) -> None:
     if not isinstance(boundary, dict):
         errors.append(f"{label}: missing action_boundary")
         return
-    for field in (
+    required_fields = [
         "action_timestamp",
         "quiet_window_ms",
         "timeout_ms",
         "stream_settled",
         "evidence_id",
-    ):
+    ]
+    if contract_version == ACTION_BOUNDARY_CONTRACT_VERSION:
+        required_fields[:0] = ["readiness_check_id", "settlement_check_id"]
+    for field in required_fields:
         if field not in boundary:
             errors.append(f"{label}: action_boundary missing '{field}'")
     if not _is_nonempty_string(boundary.get("evidence_id")):
         errors.append(f"{label}: action_boundary requires evidence_id")
+    if contract_version == ACTION_BOUNDARY_CONTRACT_VERSION:
+        for field in ("readiness_check_id", "settlement_check_id"):
+            if not _is_nonempty_string(boundary.get(field)):
+                errors.append(f"{label}: action_boundary requires non-empty {field}")
     action_id = boundary.get("action_id")
     if action_id is not None and not _is_nonempty_string(action_id):
         errors.append(f"{label}: action_id must be a non-empty string when supplied")
@@ -911,6 +920,21 @@ def _validate_action_boundary(
         errors.append(f"{label}: action_boundary missing 'last_event_before'")
     if "settled_final_event" not in boundary:
         errors.append(f"{label}: action_boundary missing 'settled_final_event'")
+    if contract_version == ACTION_BOUNDARY_CONTRACT_VERSION:
+        for field in ("network_request_cursor_before", "network_request_cursor_after"):
+            value = boundary.get(field)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                errors.append(f"{label}: {field} must be a non-negative integer")
+        network_before = boundary.get("network_request_cursor_before")
+        network_after = boundary.get("network_request_cursor_after")
+        if (
+            isinstance(network_before, int)
+            and not isinstance(network_before, bool)
+            and isinstance(network_after, int)
+            and not isinstance(network_after, bool)
+            and network_after < network_before
+        ):
+            errors.append(f"{label}: network request cursor cannot move backwards")
     action_timestamp = boundary.get("action_timestamp")
     if not _is_nonempty_string(action_timestamp):
         errors.append(f"{label}: action_timestamp must be ISO 8601 with timezone")
@@ -2529,6 +2553,12 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
             errors.append(f"run: missing required field '{field}'")
     if run.get("environment_class") not in {"test", "preprod", "staging", "production"}:
         errors.append("run: environment_class must be test, preprod, staging, or production")
+    boundary_contract_version = run.get("action_boundary_contract_version")
+    if boundary_contract_version not in (None, ACTION_BOUNDARY_CONTRACT_VERSION):
+        errors.append(
+            "run: action_boundary_contract_version must be 1 when supplied; "
+            "omit it only for a legacy schema-v3 result"
+        )
     _validate_run_client_context(run, errors)
     _validate_run_execution_policy(run, errors)
     errors.extend(validate_supporting_artifacts(run.get("supporting_artifacts")))
@@ -2993,6 +3023,7 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
                 observed=observed,
                 require_ready=not preview_disconnected,
                 require_settled=not preview_disconnected,
+                contract_version=boundary_contract_version,
             )
             boundary = requirement.get("action_boundary")
             if (
