@@ -13,6 +13,7 @@ from typing import Any
 from urllib.parse import parse_qsl, urlsplit
 
 from acceptance_contract import expects_absence
+from value_semantics import is_json_number, strict_equal
 
 MISSING = object()
 
@@ -280,16 +281,7 @@ def path_value(value: Any, path: str) -> Any:
 
 
 def _is_number(value: Any) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
-
-
-def _strict_equal(left: Any, right: Any) -> bool:
-    """Compare JSON values without Python's bool/number equality shortcut."""
-    if isinstance(left, bool) or isinstance(right, bool):
-        return isinstance(left, bool) and isinstance(right, bool) and left == right
-    if _is_number(left) or _is_number(right):
-        return _is_number(left) and _is_number(right) and left == right
-    return type(left) is type(right) and left == right
+    return is_json_number(value)
 
 
 def _compact(value: Any, path_hint: str | None = None) -> Any:
@@ -336,13 +328,13 @@ def _condition(payload: Any, condition: dict[str, Any]) -> bool | None:
     if value is MISSING:
         return False
     if rule == "equals":
-        return _strict_equal(value, expected)
+        return strict_equal(value, expected)
     if rule == "not_empty":
         return value not in ("", [], {}, None)
     if rule == "one_of":
         allowed = condition.get("allowed_values")
         return isinstance(allowed, list) and any(
-            _strict_equal(value, candidate) for candidate in allowed
+            strict_equal(value, candidate) for candidate in allowed
         )
     if rule == "greater_than":
         return _is_number(value) and _is_number(expected) and value > expected
@@ -437,7 +429,7 @@ def evaluate_business_rule(
         right = path_value(payload, right_path)
         actual, expected = left, right
         actual_path_hint, expected_path_hint = left_path, right_path
-        passed = left is not MISSING and right is not MISSING and _strict_equal(left, right)
+        passed = left is not MISSING and right is not MISSING and strict_equal(left, right)
 
     elif operator == "sum_product_equals":
         target_path = str(rule.get("target_path", ""))
@@ -491,7 +483,7 @@ def evaluate_business_rule(
         passed = (
             valid_items
             and expected is not MISSING
-            and all(value is not MISSING and _strict_equal(value, expected) for value in values)
+            and all(value is not MISSING and strict_equal(value, expected) for value in values)
         )
 
     elif operator == "implies":

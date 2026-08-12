@@ -50,6 +50,7 @@ from layer_contract import (
     normalize_tag_scope,
 )
 from supporting_artifacts import validate_supporting_artifacts
+from value_semantics import json_value_type, strict_equal
 
 SCHEMA_VERSION = 3
 ACTION_BOUNDARY_CONTRACT_VERSION = 1
@@ -341,32 +342,8 @@ def evidence_ids(value: Any) -> list[str]:
     return [part.strip() for part in str(value).split(",") if part.strip()]
 
 
-def js_value_type(value: Any) -> str:
-    """Return the JSON-compatible JavaScript type used by the schema."""
-    if value is None:
-        return "null"
-    if isinstance(value, bool):
-        return "boolean"
-    if isinstance(value, (int, float)):
-        return "number"
-    if isinstance(value, str):
-        return "string"
-    if isinstance(value, list):
-        return "array"
-    if isinstance(value, dict):
-        return "object"
-    return type(value).__name__
-
-
-def _strict_equal(left: Any, right: Any) -> bool:
-    """Compare JSON values without treating booleans as numbers."""
-    if isinstance(left, bool) or isinstance(right, bool):
-        return isinstance(left, bool) and isinstance(right, bool) and left == right
-    left_number = isinstance(left, (int, float)) and not isinstance(left, bool)
-    right_number = isinstance(right, (int, float)) and not isinstance(right, bool)
-    if left_number or right_number:
-        return left_number and right_number and left == right
-    return type(left) is type(right) and left == right
+js_value_type = json_value_type
+_strict_equal = strict_equal
 
 
 def field_state_for(value: Any) -> str:

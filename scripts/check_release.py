@@ -45,6 +45,8 @@ REQUIRED_EXECUTION_FILES = (
     "scripts/tag_evidence_contract.py",
     "scripts/execution_contract.py",
     "scripts/runtime_state_contract.py",
+    "scripts/state_io.py",
+    "scripts/value_semantics.py",
     "scripts/event_feedback.py",
     "scripts/build_recette_report.py",
     "scripts/inspect_tracking_plan.py",
@@ -79,6 +81,15 @@ REQUIRED_EXECUTION_FILES = (
     "references/gold-mini-recette.md",
     "tests/fixtures/browser_helpers_smoke.html",
     "tests/run_browser_helpers.py",
+)
+OBSOLETE_REFERENCES = (
+    "references/01-orientation/acceptance-criteria.md",
+    "references/01-orientation/non-goals.md",
+    "references/01-orientation/purpose.md",
+    "references/01-orientation/users-and-questions.md",
+    "references/02-execution/runtime-qa-templates.md",
+    "references/02-execution/validation-commands.md",
+    "references/03-judgement/completion-gates.md",
 )
 
 
@@ -239,6 +250,22 @@ def _check_required_resources(errors: list[str]) -> None:
         for relative in REQUIRED_EXECUTION_FILES
         if not (ROOT / relative).is_file()
     )
+    errors.extend(
+        f"obsolete duplicate reference must stay removed: {relative}"
+        for relative in OBSOLETE_REFERENCES
+        if (ROOT / relative).exists()
+    )
+    legacy_schema = (ROOT / "references/03-judgement/schema-v2.md").read_text(encoding="utf-8")
+    if "Use schema version 2 for every new run" in legacy_schema:
+        errors.append("legacy schema-v2 documentation still instructs new v2 creation")
+    workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    for required in (
+        "Extract and test packaged skill",
+        "python -m unittest discover -s tests -v",
+        "python -B scripts/recette_operator.py --help",
+    ):
+        if required not in workflow:
+            errors.append(f"CI does not verify the installed artifact contract: {required!r}")
 
 
 def main() -> int:

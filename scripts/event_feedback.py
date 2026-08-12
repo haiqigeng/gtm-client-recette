@@ -375,7 +375,9 @@ def _primary_outcome(
         return "DATALAYER_EVENT_ABSENT"
 
     failure_order = (
+        ("event_occurrence", "EVENT_OCCURRENCE_INVALID"),
         ("action_boundary", "ACTION_WINDOW_INVALID"),
+        ("source_signal_when_no_data_layer_push", "SOURCE_SIGNAL_INVALID"),
         ("raw_api_call", "DATALAYER_PAYLOAD_INVALID"),
         ("resolved_data_layer", "RESOLVED_DATA_LAYER_INVALID"),
         ("concerned_tag_inventory", "CONCERNED_TAG_NOT_FOUND"),
@@ -384,8 +386,16 @@ def _primary_outcome(
         ("tag_firing", "TAG_FIRING_INVALID"),
         ("tag_parameter", "TAG_RUNTIME_PARAMETER_INVALID"),
         ("destination_request_when_applicable", "REQUEST_PARAMETER_INVALID"),
+        ("sensitive_data_scan", "SENSITIVE_DATA_INVALID"),
         ("consent_when_applicable", "CONSENT_INVALID"),
         ("trigger_logic_when_applicable", "TRIGGER_LOGIC_INVALID"),
+        ("tag_sequence_when_applicable", "TAG_SEQUENCE_INVALID"),
+        ("business_rules_when_declared", "BUSINESS_RULE_INVALID"),
+        ("client_checks_when_applicable", "CLIENT_CHECK_INVALID"),
+        ("regression_when_baseline_provided", "REGRESSION_INVALID"),
+        ("container_context_when_applicable", "CONTAINER_CONTEXT_INVALID"),
+        ("conditional_scenarios_when_applicable", "CONDITIONAL_SCENARIO_INVALID"),
+        ("unexpected_business_push", "OCCURRENCE_ANOMALY"),
     )
     for layer, outcome in failure_order:
         if status(verified_layers.get(layer)) != "FAIL":
@@ -485,7 +495,12 @@ def event_feedback(
             ]
             + [unexpected.get("status") for unexpected in mapped_unexpected]
             + session_statuses
+            + layer_statuses.get("case_execution", [])
         )
+        if normalized_status == "NOT_TESTED" and any(
+            case.get("execution_status") == "PENDING" for case in unique_cases.values()
+        ):
+            normalized_status = "BLOCKED"
         retest_cases = [
             case
             for case_id, case in unique_cases.items()

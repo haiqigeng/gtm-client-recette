@@ -2181,13 +2181,24 @@ def _sidecar_text(value: Any) -> str:
     return str(serialize(value)).replace("\r", " ").replace("\n", " ").strip()
 
 
+def _csv_safe_text(value: Any) -> str:
+    """Prevent spreadsheet programs from interpreting exported text as a formula."""
+    serialized = serialize(value)
+    text = str(serialized).replace("\r", " ").replace("\n", " ").strip()
+    return (
+        "'" + text
+        if isinstance(serialized, str) and text.startswith(("=", "+", "-", "@"))
+        else text
+    )
+
+
 def write_defects_csv(path: Path, rows_to_write: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8-sig", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=DEFECT_HEADERS, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(
-            {header: _sidecar_text(row.get(header)) for header in DEFECT_HEADERS}
+            {header: _csv_safe_text(row.get(header)) for header in DEFECT_HEADERS}
             for row in rows_to_write
         )
 
@@ -2287,6 +2298,22 @@ def main() -> int:
         output = Path(args.output)
         if output.suffix.lower() != ".xlsx":
             raise ReportValidationError("Output path must use the .xlsx extension.")
+        inputs = [
+            Path(args.input).resolve() if args.input != "-" else None,
+            args.session_ledger.resolve() if args.session_ledger is not None else None,
+        ]
+        outputs = [
+            output.resolve(),
+            *(
+                path.resolve()
+                for path in (args.defects_csv, args.defects_md, args.stakeholder_summary)
+                if path is not None
+            ),
+        ]
+        if len(set(outputs)) != len(outputs):
+            raise ReportValidationError("Workbook and sidecar outputs must use distinct paths.")
+        if any(path in outputs for path in inputs if path is not None):
+            raise ReportValidationError("An output path cannot overwrite an input ledger.")
         build_workbook(data, output, warnings, session)
         defects = defect_rows(data, session)
         if args.defects_csv:

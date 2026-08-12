@@ -85,6 +85,12 @@ and preserve its temporal order around the action. Each referenced
 same `runtime_check_id`, `runtime_phase`, `action_id`, and a capture timestamp
 inside that check's window. Before/after checks use distinct evidence IDs.
 
+Exact page matching is the default. For a same-origin SPA route whose browser
+and selected Preview URLs temporarily differ, set `page_match_mode` to
+`same_origin_spa` and bind a direct `route_transition_evidence_id` included in
+the snapshot evidence IDs. Never use SPA matching to accept another origin or
+an unexplained route mismatch.
+
 ## Action boundary
 
 Record:
@@ -152,6 +158,15 @@ settlement reason:
 - `timeout`;
 - `interaction_failed`; or
 - `preview_disconnected`.
+
+If a browser crash, network-capture loss, Preview disconnect, or unavailable
+controlled surface prevents the normal after-action capture, do not abandon
+the open action. Capture phase `interrupted_action` with the matching
+`failure_reason`, last trustworthy cursors, exact observed business-push
+count, direct action-boundary proof, and network proof only when capture still
+exists. `interrupt-action` settles the retained attempt as `uncertain`, marks
+the case `BLOCKED`, and advances the connection epoch before a fresh retry.
+It never creates missing tag or destination evidence.
 
 If the bounded timeout ends while the relevant stream is still changing,
 retain the incomplete window and block absence, exact count, order, and
@@ -254,3 +269,8 @@ own fresh `before_action` boundary.
 Record that fresh state with phase `resume`; the guided operator consumes it
 before returning the retained action to `ACTIVE`. Evidence captured before the
 pause cannot satisfy the new readiness boundary.
+
+A resume capture still requires Preview, interaction, lifecycle, quiet-stream,
+and network readiness. It may record `expected_overlay_active: true` instead
+of `target_uncovered: true` only when the retained action legitimately owns the
+overlay being resumed.

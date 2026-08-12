@@ -33,7 +33,8 @@ from layer_contract import (
     normalize_tag_scope,
     tag_scope_decision,
 )
-from runtime_state_contract import normalize_runtime_check
+from runtime_state_contract import INTERRUPTION_REASONS, normalize_runtime_check
+from state_io import atomic_write_json, load_json_object
 
 ROLES = {
     "gtm_workspace",
@@ -52,22 +53,21 @@ def now() -> str:
 def load(path: Path) -> dict[str, Any]:
     if not path.exists():
         raise SystemExit(f"Ledger does not exist: {path}")
-    value = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(value, dict):
-        raise SystemExit("Ledger must be a JSON object.")
-    return value
+    try:
+        return load_json_object(path)
+    except ValueError as exc:
+        raise SystemExit("Ledger must be a JSON object.") from exc
 
 
 def load_results(path: Path) -> dict[str, Any]:
-    value = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(value, dict):
-        raise SystemExit("Normalized results must be a JSON object.")
-    return value
+    try:
+        return load_json_object(path)
+    except ValueError as exc:
+        raise SystemExit("Normalized results must be a JSON object.") from exc
 
 
 def save(path: Path, value: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    atomic_write_json(path, value)
 
 
 def origin(url: str) -> str:
@@ -137,7 +137,7 @@ def parser() -> argparse.ArgumentParser:
     runtime_check.add_argument("--results", type=Path, required=True)
     runtime_check.add_argument(
         "--phase",
-        choices=("before_action", "resume", "after_action"),
+        choices=("before_action", "resume", "after_action", "interrupted_action"),
         required=True,
     )
     runtime_check.add_argument("--action-id", required=True)
@@ -285,6 +285,11 @@ def parser() -> argparse.ArgumentParser:
         help="JSON array, or an object with a pushes array, captured for open actions.",
     )
 
+    void_check = subparsers.add_parser("void-runtime-check")
+    void_check.add_argument("ledger", type=Path)
+    void_check.add_argument("--check-id", required=True)
+    void_check.add_argument("--reason", required=True)
+
     import_cases = subparsers.add_parser("import-cases")
     import_cases.add_argument("ledger", type=Path)
     import_cases.add_argument("manifest", type=Path)
@@ -308,6 +313,11 @@ def parser() -> argparse.ArgumentParser:
         choices=("true", "false"),
         help="Required for a conditional layer; false requires NOT_APPLICABLE.",
     )
+
+    import_layers_parser = subparsers.add_parser("import-layers")
+    import_layers_parser.add_argument("ledger", type=Path)
+    import_layers_parser.add_argument("layer_results", type=Path)
+    import_layers_parser.add_argument("--action-id", required=True)
 
     import_tag_results = subparsers.add_parser("import-tag-results")
     import_tag_results.add_argument("ledger", type=Path)
@@ -362,6 +372,9 @@ def parser() -> argparse.ArgumentParser:
             "timeout",
             "interaction_failed",
             "preview_disconnected",
+            "browser_crashed",
+            "network_capture_lost",
+            "surface_unavailable",
         ),
         required=True,
     )
@@ -410,6 +423,25 @@ def runtime_check_by_id(ledger: dict[str, Any], check_id: str) -> dict[str, Any]
     return find_unique(ledger.get("runtime_checks", []), "check_id", check_id)
 
 
+def void_runtime_check(ledger: dict[str, Any], args: argparse.Namespace) -> None:
+    """Retain but explicitly void an unconsumed check that never became an action boundary."""
+    check = runtime_check_by_id(ledger, args.check_id)
+    if check.get("consumed") is True:
+        raise SystemExit("A consumed runtime check cannot be voided.")
+    if any(
+        args.check_id in {row.get("readiness_check_id"), row.get("settlement_check_id")}
+        for row in ledger.get("actions", [])
+        if isinstance(row, dict)
+    ):
+        raise SystemExit("A runtime check referenced by an action cannot be voided.")
+    reason = str(args.reason).strip()
+    if not reason:
+        raise SystemExit("Voiding a runtime check requires an exact reason.")
+    if check.get("voided") is True:
+        raise SystemExit("The runtime check is already voided.")
+    check.update({"voided": True, "void_reason": reason, "voided_at": now()})
+
+
 def record_runtime_check(ledger: dict[str, Any], args: argparse.Namespace) -> None:
     """Record one direct browser/Preview/network state capture."""
     try:
@@ -433,7 +465,7 @@ def record_runtime_check(ledger: dict[str, Any], args: argparse.Namespace) -> No
     ]
     if args.phase == "before_action" and action_matches:
         raise SystemExit("A before-action runtime check must precede action registration.")
-    if args.phase in {"resume", "after_action"}:
+    if args.phase in {"resume", "after_action", "interrupted_action"}:
         if len(action_matches) != 1 or action_matches[0].get("state") != "OPEN":
             raise SystemExit(f"A {args.phase} runtime check requires the matching open action.")
         if action_matches[0].get("case_id") != args.case_id:
@@ -493,16 +525,18 @@ def register_case(ledger: dict[str, Any], args: argparse.Namespace) -> None:
         activated_conditions=activated_conditions,
     )
     layers = [row["layer"] for row in applicability if row["mode"] == "MANDATORY"]
+    run = results.get("run", {}) if isinstance(results.get("run"), dict) else {}
     container_ids = sorted(
         {
-            str(
-                requirement.get("container_id") or results.get("run", {}).get("container_id", "")
-            ).strip()
-            for requirement in group_requirements
-            if str(
-                requirement.get("container_id") or results.get("run", {}).get("container_id", "")
-            ).strip()
+            str(row.get("container_id", "")).strip()
+            for row in run.get("containers", [])
+            if isinstance(row, dict) and str(row.get("container_id", "")).strip()
         }
+        or (
+            {str(run.get("container_id", "")).strip()}
+            if str(run.get("container_id", "")).strip()
+            else set()
+        )
     )
     ledger.setdefault("cases", []).append(
         {
@@ -915,6 +949,8 @@ def begin_action(ledger: dict[str, Any], args: argparse.Namespace) -> None:
     if args.quiet_window_ms <= 0 or args.timeout_ms <= 0:
         raise SystemExit("Quiet window and timeout must be positive.")
     readiness = runtime_check_by_id(ledger, args.readiness_check_id)
+    if readiness.get("voided") is True:
+        raise SystemExit("A voided runtime check cannot begin an action.")
     if readiness.get("phase") != "before_action":
         raise SystemExit("begin-action requires a before_action runtime check.")
     if readiness.get("action_id") != args.action_id or readiness.get("case_id") != args.case_id:
@@ -1231,13 +1267,52 @@ def record_layer(ledger: dict[str, Any], args: argparse.Namespace) -> None:
     )
 
 
+def import_layers(ledger: dict[str, Any], args: argparse.Namespace) -> None:
+    """Import all event-layer results for one open action as one transaction."""
+    try:
+        value = json.loads(args.layer_results.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"Cannot read layer results: {exc}") from exc
+    rows = value.get("layer_results") if isinstance(value, dict) else value
+    if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+        raise SystemExit("Layer results must be an array or an object with a layer_results array.")
+    required = {"layer", "status", "reason", "evidence_ids"}
+    for index, row in enumerate(rows, start=1):
+        missing = sorted(key for key in required if row.get(key) in (None, "", []))
+        if missing:
+            raise SystemExit(f"Layer result row {index} is missing: " + ", ".join(missing))
+        evidence_ids = row.get("evidence_ids")
+        if not isinstance(evidence_ids, list) or any(
+            not str(value).strip() for value in evidence_ids
+        ):
+            raise SystemExit(f"Layer result row {index} evidence_ids must be a string array.")
+        predicate_result = row.get("predicate_result")
+        if isinstance(predicate_result, bool):
+            predicate_result = "true" if predicate_result else "false"
+        record_layer(
+            ledger,
+            argparse.Namespace(
+                action_id=args.action_id,
+                layer=row["layer"],
+                status=row["status"],
+                reason=row["reason"],
+                evidence_id=evidence_ids,
+                semantic_ambiguity=row.get("semantic_ambiguity"),
+                blocker_id=row.get("blocker_id"),
+                predicate_result=predicate_result,
+            ),
+        )
+
+
 def settle_action(ledger: dict[str, Any], args: argparse.Namespace) -> None:
     action = find_unique(ledger.get("actions", []), "action_id", args.action_id)
     if action.get("state") != "OPEN":
         raise SystemExit(f"Action is already settled: {args.action_id}")
     settlement = runtime_check_by_id(ledger, args.settlement_check_id)
-    if settlement.get("phase") != "after_action":
-        raise SystemExit("settle-action requires an after_action runtime check.")
+    if settlement.get("voided") is True:
+        raise SystemExit("A voided runtime check cannot settle an action.")
+    if settlement.get("phase") not in {"after_action", "interrupted_action"}:
+        raise SystemExit("settle-action requires an after_action or interrupted_action check.")
     if settlement.get("action_id") != args.action_id or settlement.get("case_id") != action.get(
         "case_id"
     ):
@@ -1251,12 +1326,21 @@ def settle_action(ledger: dict[str, Any], args: argparse.Namespace) -> None:
         raise SystemExit("A safe independent --completion-signal is required.")
     preview_connected_after = settlement.get("preview_connected") is True
     stream_settled = settlement.get("stream_quiet") is True
+    interrupted = settlement.get("phase") == "interrupted_action"
+    if interrupted and args.settlement_reason != settlement.get("failure_reason"):
+        raise SystemExit("Interrupted settlement reason must equal the captured failure_reason.")
+    if interrupted and args.interaction_outcome != "uncertain":
+        raise SystemExit("An interrupted action must settle with interaction_outcome=uncertain.")
     if not stream_settled and args.settlement_reason in {
         "expected_and_quiet",
         "quiet_without_expected",
     }:
         raise SystemExit("An unsettled stream cannot use a quiet settlement reason.")
-    if not preview_connected_after and args.settlement_reason != "preview_disconnected":
+    if (
+        not interrupted
+        and not preview_connected_after
+        and args.settlement_reason != "preview_disconnected"
+    ):
         raise SystemExit("A disconnected Preview session requires preview_disconnected.")
     recorded_pushes = sum(
         row.get("action_id") == args.action_id
@@ -1308,7 +1392,7 @@ def settle_action(ledger: dict[str, Any], args: argparse.Namespace) -> None:
         case["execution_status"] = "EXECUTED"
         case["final_action_id"] = args.action_id
         case.pop("required_retest_of_action_id", None)
-    if args.settlement_reason == "preview_disconnected":
+    if args.settlement_reason in INTERRUPTION_REASONS:
         ledger["connection_epoch"] = (
             action.get("connection_epoch", ledger.get("connection_epoch", 1)) + 1
         )
@@ -1447,6 +1531,7 @@ def validate_command(ledger: dict[str, Any], args: argparse.Namespace) -> None:
 MUTATING_COMMANDS = {
     "register-surface": register_surface,
     "record-runtime-check": record_runtime_check,
+    "void-runtime-check": void_runtime_check,
     "authorize": authorize,
     "register-case": register_case,
     "register-tag": register_tag,
@@ -1457,6 +1542,7 @@ MUTATING_COMMANDS = {
     "import-pushes": import_pushes,
     "import-cases": import_cases,
     "record-layer": record_layer,
+    "import-layers": import_layers,
     "import-tag-results": import_tag_results,
     "revise-tag-inventory": revise_tag_inventory,
     "settle-action": settle_action,

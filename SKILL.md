@@ -120,6 +120,8 @@ Load only when applicable: [consent and synthetic data](references/02-execution/
 [matching rules](references/03-judgement/matching-rules.md),
 [regression](references/03-judgement/regression-comparison.md), or
 [cross-skill handoff](references/01-orientation/cross-skill-handoff.md).
+Load [legacy schema-v2 migration](references/03-judgement/schema-v2.md) only
+when the supplied normalized artifact actually declares schema version 2.
 Use [the gold mini-recette](references/gold-mini-recette.md) only for calibration.
 
 ## Execution workflow
@@ -217,6 +219,16 @@ connector probes. Bind separate before/after action-boundary and network
 evidence to the exact runtime check, action, phase, timestamp, and container.
 Reject stale, future, manually labelled, reused, or cross-action proof.
 
+Use exact URL matching by default. For an evidenced same-origin SPA route,
+declare `same_origin_spa` and bind the route transition evidence; this never
+permits a cross-origin or unevidenced page mismatch. A normal action still
+requires a complete after-action boundary. If the browser, Preview, network
+capture, or controlled surface fails mid-action, use `interrupt-action` with
+an `interrupted_action` capture. Retain the attempt and observed pushes, mark
+the case honestly `BLOCKED`, and never fabricate the missing downstream rows.
+An unconsumed runtime check created before a mistaken action ID is retained
+through `void-runtime-check`, never deleted or silently reused.
+
 Check recorder integrity after dataLayer reassignment. Treat unreadable,
 circular, replaced-unverified, or truncated snapshots as limitations. Persist,
 reconcile, and privacy-scan records before acknowledging them. Keep monotonic
@@ -254,7 +266,9 @@ For each case:
 6. Capture the after-action state; derive first/final Preview indexes, final
    request cursor, observed push count, settlement, and reason.
 7. Inspect and classify every business push in the action window.
-8. Capture all 19 canonical and 8 per-tag results with direct evidence.
+8. Capture all 19 canonical and 8 per-tag results with direct evidence. Use
+   `import-pushes`, `import-layers`, and `import-tag-results` for transactional
+   batches; one malformed row rejects that complete batch.
 9. Close the event through the guided operator. It validates the complete
    event/session slice and emits the immediate per-layer/per-tag feedback
    before the next plan event can start.
@@ -270,6 +284,12 @@ failed attempt and any tracking emitted during it. Retry once after a clean
 baseline for evidenced transient UI failure; more retries require an evidenced
 reason. A valid completed action with missing/wrong tracking is `FAIL`; an
 unexecutable action is `BLOCKED`.
+
+When runtime control fails after an action starts, capture the last trustworthy
+cursors and every push observed so far, then interrupt the action explicitly.
+Do not delete the open attempt, merge it into a retry, or fill unavailable
+layers with assumed values. Normalize the matching blocker before closure or
+start a fresh linked retry after restoring a controlled boundary.
 
 If a material interaction, variant, or tag is found after event closure, use
 `reopen-event`. Preserve the prior closure/proof in history, invalidate that
@@ -358,6 +378,9 @@ commands reference.
 Use `recette_operator.py finish-run` as the final gate. It refuses an unclosed
 event, open action, stale runtime boundary, incomplete layer/tag matrix, or
 normalized/session mismatch before building the workbook.
+The validated workbook and FINISHED session state are published as one
+crash-recoverable transaction, and none of the results/session/output paths
+may alias another.
 
 Treat schema-v3 results without `action_boundary_contract_version: 1` as
 legacy readable evidence only. Do not run them through the guided operator or
