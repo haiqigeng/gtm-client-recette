@@ -1,9 +1,9 @@
 ---
-name: gtm-preview-recette
+name: gtm-client-recette
 description: Execute expert client-side GTM Preview and Tag Assistant acceptance recette against an existing tracking plan or explicit acceptance rule. Use for plan-ordered analytics and media-tag QA that must cover every applicable interaction and material variant, complete safe gated flows, reconcile every business dataLayer push by action window, compare exact raw and resolved GTM, tag, runtime, and browser-send evidence, detect missing, duplicate, mistimed, or wrong-context occurrences, and deliver one evidence-backed verdict per event plus a validated XLSX. Excludes tracking-plan design, container audit or configuration, implementation fixes, publishing, server-side GTM, and legal consent decisions.
 ---
 
-# GTM Preview Recette
+# GTM Client Recette
 
 ## North star
 

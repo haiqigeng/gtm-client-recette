@@ -10,7 +10,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 from zipfile import ZipFile
 
-ROOT_PREFIX = PurePosixPath("gtm-preview-recette")
+ROOT_PREFIX = PurePosixPath("gtm-client-recette")
 MANIFEST_PATH = (ROOT_PREFIX / "RELEASE-MANIFEST.json").as_posix()
 
 

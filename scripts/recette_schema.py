@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Schema-v2 validation and shared semantics for GTM Preview recette results."""
+"""Schema-v2 validation and shared semantics for GTM Client Recette results."""
 
 from __future__ import annotations
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build and semantically validate a schema-v3 GTM Preview recette workbook."""
+"""Build and semantically validate a schema-v3 GTM Client Recette workbook."""
 
 from __future__ import annotations
 
@@ -1878,7 +1878,7 @@ def add_client_summary(
     )
     counts = Counter(item["status"] for item in rollup)
 
-    set_safe_cell(ws["A1"], run.get("report_title", "GTM Preview Recette"))
+    set_safe_cell(ws["A1"], run.get("report_title", "GTM Client Recette"))
     ws["A1"].font = Font(size=18, bold=True, color="1F4E78")
     summary_rows = [
         ("Overall status", overall),
@@ -2238,7 +2238,7 @@ def write_stakeholder_summary(
     feedback = event_feedback(data, session)
     counts = Counter(row["status"] for row in feedback)
     lines = [
-        f"# {data.get('run', {}).get('report_title', 'GTM Preview recette')}",
+        f"# {data.get('run', {}).get('report_title', 'GTM Client Recette')}",
         "",
         f"Output contract: {OUTPUT_CONTRACT_VERSION}",
         "",
