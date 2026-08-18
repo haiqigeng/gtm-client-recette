@@ -1,26 +1,20 @@
-# GTM Preview Recette
+# GTM Client Recette
 
-[![Latest release](https://img.shields.io/github/v/release/haiqigeng/gtm-preview-recette?sort=semver)](https://github.com/haiqigeng/gtm-preview-recette/releases/latest)
-[![CI](https://github.com/haiqigeng/gtm-preview-recette/actions/workflows/ci.yml/badge.svg)](https://github.com/haiqigeng/gtm-preview-recette/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/haiqigeng/gtm-client-recette?sort=semver)](https://github.com/haiqigeng/gtm-client-recette/releases/latest)
+[![CI](https://github.com/haiqigeng/gtm-client-recette/actions/workflows/ci.yml/badge.svg)](https://github.com/haiqigeng/gtm-client-recette/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ## Current release
 
-[v2.2.1](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v2.2.1) is
+[v3.0.0](https://github.com/haiqigeng/gtm-client-recette/releases/tag/v3.0.0) is
 the current supported release. Download the validated package:
-[gtm-preview-recette-v2.2.1.zip](https://github.com/haiqigeng/gtm-preview-recette/releases/download/v2.2.1/gtm-preview-recette-v2.2.1.zip).
+[gtm-client-recette-v3.0.0.zip](https://github.com/haiqigeng/gtm-client-recette/releases/download/v3.0.0/gtm-client-recette-v3.0.0.zip).
 
-v2.2.1 is a field-safety patch that leaves the approved North Star and fixed
-19-layer/8-sublayer contract unchanged. It restores strictly linked retries
-after retained runtime interruptions, separates normal settlement from failure
-capture, advances Preview epochs only on Preview disconnects, requires direct
-navigation proof for SPA route relaxation, and rejects unsupported
-multi-container certification instead of accepting one cursor as complete.
-
-Canonical-layer batches now prevalidate every row and remain byte-for-byte
-unchanged on malformed status, evidence, predicate, or duplicate input.
-Result/session transaction recovery also runs before paired reads, including
-status, validation, reporting, retest-manifest, and guided operator commands.
+v3.0.0 is an identity-only major release. The skill, package, archive root,
+repository, and invocation name are now `gtm-client-recette`. The approved
+North Star, client-side scope, fixed 19-layer/8-sublayer contract, schemas,
+evidence requirements, and operational behaviour are unchanged from v2.2.1.
+Server-container acceptance remains outside this skill.
 
 An expert-only workflow for testing an existing client-side Google Tag Manager
 implementation against a tracking plan. It coordinates Playwright, GTM Preview,
@@ -196,7 +190,7 @@ release or local installation against its SHA-256 manifest:
 ```powershell
 python -B scripts/migrate_schema_v2_to_v3.py old-results.json normalized-results.json `
   --legacy-session old-session.json --case-manifest retest-cases.json
-python -B scripts/verify_release_artifact.py dist/gtm-preview-recette-v2.2.1.zip
+python -B scripts/verify_release_artifact.py dist/gtm-client-recette-v3.0.0.zip
 ```
 
 Evaluate declared client-side rules, scan for redacted sensitive-data findings,

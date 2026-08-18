@@ -3532,7 +3532,7 @@ class PipelineTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tempdir:
             archives = []
             for directory in ("first", "second"):
-                archive = Path(tempdir) / directory / f"gtm-preview-recette-v{version}.zip"
+                archive = Path(tempdir) / directory / f"gtm-client-recette-v{version}.zip"
                 completed = subprocess.run(
                     [
                         sys.executable,

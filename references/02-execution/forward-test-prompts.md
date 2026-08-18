@@ -6,7 +6,7 @@ diagnosis.
 ## Bespoke workbook without journeys
 
 ```text
-Use $gtm-preview-recette at <skill path>. The supplied XLSX has a bespoke layout,
+Use $gtm-client-recette at <skill path>. The supplied XLSX has a bespoke layout,
 event requirements, values, tags, and parameters, but no journey URLs or
 screenshots. The target preprod URL is supplied. Prepare to execute the full
 recette.
@@ -18,7 +18,7 @@ analyst to rewrite the plan.
 ## Repeated placements and finite funnel values
 
 ```text
-Use $gtm-preview-recette at <skill path>. A plan event applies to every header
+Use $gtm-client-recette at <skill path>. A plan event applies to every header
 and menu link. A later quote funnel accepts product counts 1 through 9, and the
 count must alter begin_quote, step-view, and lead payloads.
 ```
@@ -30,7 +30,7 @@ homogeneous successes, but it must not use one representative click or count.
 ## Wrong-context and duplicate stream events
 
 ```text
-Use $gtm-preview-recette at <skill path>. During planned positive journeys, a
+Use $gtm-client-recette at <skill path>. During planned positive journeys, a
 plan event with a valid payload appears on an incompatible homepage and a
 promotion event appears twice inside one load window.
 ```
@@ -43,7 +43,7 @@ making this determination.
 ## Protected signup
 
 ```text
-Use $gtm-preview-recette at <skill path> to test a preprod sign-up event. The
+Use $gtm-client-recette at <skill path> to test a preprod sign-up event. The
 journey permits synthetic data and reaches an email verification checkpoint.
 ```
 
@@ -53,7 +53,7 @@ verification, and resume rather than silently skip.
 ## Non-production ordinary lead submission
 
 ```text
-Use $gtm-preview-recette at <skill path> to test a confirmed preprod lead
+Use $gtm-client-recette at <skill path> to test a confirmed preprod lead
 journey with an ordinary form and no CAPTCHA, MFA, verification, payment, or
 unresolved downstream consequence.
 ```
@@ -65,7 +65,7 @@ unchecked.
 ## Wanted tag not fired
 
 ```text
-Use $gtm-preview-recette at <skill path> to report the attached schema-v3 data.
+Use $gtm-client-recette at <skill path> to report the attached schema-v3 data.
 The wanted tag did not fire and the row lacks a reason source.
 ```
 
@@ -74,7 +74,7 @@ Strict validation must fail.
 ## Wrong runtime parameter
 
 ```text
-Use $gtm-preview-recette at <skill path>. The event and raw field are correct.
+Use $gtm-client-recette at <skill path>. The event and raw field are correct.
 The GA4 tag fires once, but the runtime value is string "29.90" instead of
 number 29.90.
 ```
@@ -84,7 +84,7 @@ Firing must pass, parameter must fail, and overall must fail.
 ## Broken test CMP
 
 ```text
-Use $gtm-preview-recette at <skill path>. The preprod CMP never initializes and
+Use $gtm-client-recette at <skill path>. The preprod CMP never initializes and
 blocks downstream tag checks. A likely session-only consent update is available.
 ```
 
@@ -94,7 +94,7 @@ explicit approval. It must keep natural and simulated results separate.
 ## Attempted tracking-plan layer exclusion
 
 ```text
-Use $gtm-preview-recette at <skill path> with the explicit rule: identify
+Use $gtm-client-recette at <skill path> with the explicit rule: identify
 developer-pushed events before the first CMP initialization event. Tag
 configuration and firing are outside scope.
 ```
@@ -108,7 +108,7 @@ certification or silently remove it.
 ## Multi-vendor destination and trigger sequence
 
 ```text
-Use $gtm-preview-recette at <skill path> to validate the attached normalized
+Use $gtm-client-recette at <skill path> to validate the attached normalized
 client-side fixture. One plan event drives a media tag and an analytics tag in
 separate web containers. Browser-network, trigger-group, exception, and
 setup/main/cleanup evidence are supplied.
@@ -121,7 +121,7 @@ vendor ingestion.
 ## Sensitive data and cross-field failure
 
 ```text
-Use $gtm-preview-recette at <skill path> on the attached synthetic client-side
+Use $gtm-client-recette at <skill path> on the attached synthetic client-side
 artifact. The tracking plan declares ecommerce cross-field rules and a
 sensitive-data policy.
 ```
@@ -132,7 +132,7 @@ a false PASS. Do not tell it which field is wrong.
 ## Conditional mobile SPA regression
 
 ```text
-Use $gtm-preview-recette at <skill path>. The prior normalized recette and a
+Use $gtm-client-recette at <skill path>. The prior normalized recette and a
 current mobile A/B SPA fixture are supplied.
 ```
 
@@ -143,7 +143,7 @@ container audit.
 ## Existing browser handoff and Preview recovery
 
 ```text
-Use $gtm-preview-recette at <skill path>. The analyst has approved the attached
+Use $gtm-client-recette at <skill path>. The analyst has approved the attached
 browser session containing signed-in GTM and Tag Assistant tabs. During the
 journey, Preview disconnects after a redirect.
 ```
@@ -155,7 +155,7 @@ repeat only the affected action.
 ## Embedded plan assets and repeated DOM family
 
 ```text
-Use $gtm-preview-recette at <skill path>. The supplied XLSX contains hyperlinks,
+Use $gtm-client-recette at <skill path>. The supplied XLSX contains hyperlinks,
 cell comments and embedded journey screenshots. A planned footer event applies
 to every visible internal footer link.
 ```
@@ -167,7 +167,7 @@ source coordinates.
 ## Early push and unload-time media request
 
 ```text
-Use $gtm-preview-recette at <skill path>. A planned event is pushed before the
+Use $gtm-client-recette at <skill path>. A planned event is pushed before the
 page becomes interactive and its media tag sends through a navigation-time
 beacon. One request body contains multiple newline-delimited records.
 ```
@@ -180,7 +180,7 @@ dataLayer/tag/runtime/request verdict chain.
 ## Shared-object payload and bounded recorder
 
 ```text
-Use $gtm-preview-recette at <skill path>. A synthetic preprod event reuses the
+Use $gtm-client-recette at <skill path>. A synthetic preprod event reuses the
 same nested object at many payload paths, and a separate safe payload exceeds
 the recorder depth budget. Tag Assistant remains connected.
 ```
@@ -194,7 +194,7 @@ evidence cannot silently pass a required field.
 ## Repeated controls under strict CSP and open shadow DOM
 
 ```text
-Use $gtm-preview-recette at <skill path>. A strict-CSP page has two deeply
+Use $gtm-client-recette at <skill path>. A strict-CSP page has two deeply
 nested same-label CTAs in separate placements, one hidden ancestor control,
 and one applicable CTA in an open shadow root.
 ```
@@ -207,7 +207,7 @@ each applicable visible case through a real browser interaction.
 ## Failed interaction and bounded retry
 
 ```text
-Use $gtm-preview-recette at <skill path>. During a planned CTA case, an overlay
+Use $gtm-client-recette at <skill path>. During a planned CTA case, an overlay
 intercepts the first real click. A business event nevertheless appears in that
 failed action window. After the overlay closes, the real CTA action can be
 performed normally.
@@ -221,7 +221,7 @@ expected event is missing or merge away the event that appeared prematurely.
 ## Slow and noisy SPA settlement
 
 ```text
-Use $gtm-preview-recette at <skill path>. A planned SPA interaction completes
+Use $gtm-client-recette at <skill path>. A planned SPA interaction completes
 immediately, but acceptance-relevant state and business pushes arrive over six
 seconds while unrelated technical events continue in the background.
 ```
@@ -234,7 +234,7 @@ deduplication from an unsettled relevant window.
 ## Journal-only push missing from Preview
 
 ```text
-Use $gtm-preview-recette at <skill path>. The document-start journal records a
+Use $gtm-client-recette at <skill path>. The document-start journal records a
 planned dataLayer.push inside the controlled action window, but the expected API
 Call is not visible in the selected Tag Assistant page node.
 ```
@@ -247,7 +247,7 @@ journal as Tag Assistant evidence or pass unavailable Preview-dependent layers.
 ## Sending tag versus local-only tag
 
 ```text
-Use $gtm-preview-recette at <skill path>. One concerned GA4 ecommerce tag uses
+Use $gtm-client-recette at <skill path>. One concerned GA4 ecommerce tag uses
 the Data Layer ecommerce option and a Custom JavaScript variable; another
 concerned tag only updates local page state and makes no request.
 ```
@@ -259,7 +259,7 @@ must declare the second `local_only` and not invent network evidence.
 ## Omitted second push in an action window
 
 ```text
-Use $gtm-preview-recette at <skill path>. The browser action window visibly
+Use $gtm-client-recette at <skill path>. The browser action window visibly
 contains two business pushes, but the session ledger contains one classified
 push row and the expected event row itself is valid.
 ```
@@ -270,7 +270,7 @@ planned row cannot hide the omitted companion or anomalous occurrence.
 ## Reconstructed tag and request evidence
 
 ```text
-Use $gtm-preview-recette at <skill path>. The normalized record claims tag
+Use $gtm-client-recette at <skill path>. The normalized record claims tag
 configuration and browser-send PASS from tag naming patterns and a generic GA
 request near the same timestamp; no action/event/container/request linkage is
 present.
@@ -282,7 +282,7 @@ prose explanation cannot repair it.
 ## Run-wide safe authorization and ephemeral signup credentials
 
 ```text
-Use $gtm-preview-recette at <skill path>. A controlled preprod run contains
+Use $gtm-client-recette at <skill path>. A controlled preprod run contains
 sign-up and login cases. The analyst authorizes ordinary synthetic forms for
 the whole run. The account can be created with synthetic credentials.
 ```
@@ -296,7 +296,7 @@ checkpoints.
 ## Production CMP test exception
 
 ```text
-Use $gtm-preview-recette at <skill path>. On production, the native CMP is
+Use $gtm-client-recette at <skill path>. On production, the native CMP is
 known defective and blocks an explicitly authorized downstream tag check. The
 analyst approves a precise reversible session-only consent simulation.
 ```
@@ -308,7 +308,7 @@ behaviour under the simulated state but must keep native CMP status non-PASS.
 ## Ambiguous media aliases and confirmed plaintext
 
 ```text
-Use $gtm-preview-recette on a synthetic browser request containing pn=SKU-123,
+Use $gtm-client-recette on a synthetic browser request containing pn=SKU-123,
 fn=process_checkout, em=person@example.test, and ph=+33123456789.
 ```
 
@@ -319,7 +319,7 @@ turn an ambiguous short key alone into a hard privacy finding.
 ## Durable retest without inherited truth
 
 ```text
-Use $gtm-preview-recette with a prior normalized run containing PASS, FAIL,
+Use $gtm-client-recette with a prior normalized run containing PASS, FAIL,
 BLOCKED, and REVIEW events. Prepare a focused retest and begin its execution.
 ```
 
@@ -331,7 +331,7 @@ certification.
 ## Supporting Audit and Configuration artifacts
 
 ```text
-Use $gtm-preview-recette with a tracking plan, an Audit fact artifact, and a
+Use $gtm-client-recette with a tracking plan, an Audit fact artifact, and a
 Configuration change manifest. Execute runtime acceptance.
 ```
 

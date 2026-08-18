@@ -113,6 +113,8 @@ def _release_identifiers(
     errors: list[str],
 ) -> tuple[str, str, str, str]:
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    if project.get("name") != "gtm-client-recette":
+        errors.append("project name must be 'gtm-client-recette'")
     version = str(project["version"])
     expected_tag = f"v{version}"
     if not SEMVER_PATTERN.fullmatch(version):
@@ -124,8 +126,8 @@ def _release_identifiers(
         errors.append("calendar-date versions are forbidden; use semantic v-versioning")
     if requested_tag and requested_tag != expected_tag:
         errors.append(f"tag {requested_tag!r} does not match project version {expected_tag!r}")
-    repository_url = "https://github.com/haiqigeng/gtm-preview-recette"
-    archive_name = f"gtm-preview-recette-{expected_tag}.zip"
+    repository_url = "https://github.com/haiqigeng/gtm-client-recette"
+    archive_name = f"gtm-client-recette-{expected_tag}.zip"
     release_url = f"{repository_url}/releases/tag/{expected_tag}"
     archive_url = f"{repository_url}/releases/download/{expected_tag}/{archive_name}"
     return expected_tag, archive_name, release_url, archive_url
@@ -139,6 +141,8 @@ def _check_release_documents(
     errors: list[str],
 ) -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    if not readme.startswith("# GTM Client Recette\n"):
+        errors.append("README.md must use the GTM Client Recette identity")
     current_release = markdown_section(readme, "Current release")
     errors.extend(
         (
@@ -209,7 +213,7 @@ def _check_skill_contract(errors: list[str]) -> None:
         for obsolete in ("FULL_TRACKING_PLAN_RECETTE", "SCOPED_ACCEPTANCE_RECETTE")
         if obsolete in skill
     )
-    if not re.search(r"name:\s*gtm-preview-recette", skill):
+    if not re.search(r"name:\s*gtm-client-recette", skill):
         errors.append("SKILL.md has an invalid skill name")
     if NORTH_STAR not in " ".join(skill.split()):
         errors.append("SKILL.md does not contain the exact approved north star")
@@ -243,8 +247,10 @@ def _check_required_resources(errors: list[str]) -> None:
         if required not in content:
             errors.append(f"{relative} is missing required contract {required!r}")
     agent_metadata = (ROOT / "agents/openai.yaml").read_text(encoding="utf-8")
-    if "$gtm-preview-recette" not in agent_metadata:
-        errors.append("agents/openai.yaml default prompt must invoke $gtm-preview-recette")
+    if 'display_name: "GTM Client Recette"' not in agent_metadata:
+        errors.append("agents/openai.yaml must use the GTM Client Recette display name")
+    if "$gtm-client-recette" not in agent_metadata:
+        errors.append("agents/openai.yaml default prompt must invoke $gtm-client-recette")
     errors.extend(
         f"skill is missing required execution resource: {relative}"
         for relative in REQUIRED_EXECUTION_FILES

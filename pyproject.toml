@@ -3,8 +3,8 @@ requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "gtm-preview-recette"
-version = "2.2.1"
+name = "gtm-client-recette"
+version = "3.0.0"
 description = "Operational client-side GTM recette with exhaustive interaction and event-stream reconciliation"
 license = "MIT"
 requires-python = ">=3.11"

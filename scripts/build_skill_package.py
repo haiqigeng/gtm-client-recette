@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a clean, deterministic release ZIP for the GTM Preview Recette skill."""
+"""Build a clean, deterministic release ZIP for the GTM Client Recette skill."""
 
 from __future__ import annotations
 
@@ -47,6 +47,7 @@ def release_files() -> list[Path]:
 def main() -> int:
     args = parse_args()
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    root_prefix = Path(project["name"])
     expected_name = f"{project['name']}-v{project['version']}.zip"
     if args.output.name != expected_name:
         raise SystemExit(
@@ -70,13 +71,13 @@ def main() -> int:
     }
     with ZipFile(args.output, "w", compression=ZIP_DEFLATED, compresslevel=9) as archive:
         for path in files:
-            relative = Path("gtm-preview-recette") / path.relative_to(ROOT)
+            relative = root_prefix / path.relative_to(ROOT)
             info = ZipInfo(relative.as_posix(), date_time=(2026, 1, 1, 0, 0, 0))
             info.compress_type = ZIP_DEFLATED
             info.external_attr = 0o644 << 16
             archive.writestr(info, path.read_bytes())
         manifest_info = ZipInfo(
-            (Path("gtm-preview-recette") / MANIFEST_NAME).as_posix(),
+            (root_prefix / MANIFEST_NAME).as_posix(),
             date_time=(2026, 1, 1, 0, 0, 0),
         )
         manifest_info.compress_type = ZIP_DEFLATED

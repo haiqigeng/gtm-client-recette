@@ -272,6 +272,6 @@ Release archives carry `RELEASE-MANIFEST.json` with the exact source file set,
 per-file SHA-256 hashes, and an aggregate tree hash:
 
 ```powershell
-python scripts/build_skill_package.py --output dist/gtm-preview-recette-vX.Y.Z.zip
-python scripts/verify_release_artifact.py dist/gtm-preview-recette-vX.Y.Z.zip
+python scripts/build_skill_package.py --output dist/gtm-client-recette-vX.Y.Z.zip
+python scripts/verify_release_artifact.py dist/gtm-client-recette-vX.Y.Z.zip
 ```

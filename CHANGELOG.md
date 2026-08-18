@@ -2,7 +2,16 @@
 
 ## Unreleased
 
-## [v2.2.1](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v2.2.1) (2026-08-13)
+## [v3.0.0](https://github.com/haiqigeng/gtm-client-recette/releases/tag/v3.0.0) (2026-08-18)
+
+- Rename the skill, package, repository, archive root, and invocation identity
+  to `gtm-client-recette` / **GTM Client Recette**.
+- Preserve the exact approved North Star, client-side certification boundary,
+  19 canonical layers, 8 per-tag layers, schemas, and runtime verdict logic.
+- Keep server-container Preview acceptance explicitly outside this repository;
+  the rename introduces no server-side execution or end-to-end claims.
+
+## [v2.2.1](https://github.com/haiqigeng/gtm-client-recette/releases/tag/v2.2.1) (2026-08-13)
 
 - Restore a strictly linked retry after an interrupted action while preserving
   the original attempt, blocker, push stream, and evidence.
@@ -17,7 +26,7 @@
 - Recover interrupted result/session pair transactions before every supported
   paired read and add focused regression coverage for all field-safety fixes.
 
-## [v2.2.0](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v2.2.0) (2026-08-12)
+## [v2.2.0](https://github.com/haiqigeng/gtm-client-recette/releases/tag/v2.2.0) (2026-08-12)
 
 - Add honest mid-action recovery for browser, Preview, network-capture, and
   controlled-surface failures: retain the action and observed push stream,
@@ -38,7 +47,7 @@
   focused v2.2.0 regressions, and replace contradictory legacy schema-v2 and
   orphan reference material with one migration-only boundary.
 
-## [v2.1.0](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v2.1.0) (2026-08-12)
+## [v2.1.0](https://github.com/haiqigeng/gtm-client-recette/releases/tag/v2.1.0) (2026-08-12)
 
 - Add a guided, plan-ordered operator that derives action boundaries from
   captured runtime state, closes each event transactionally with immediate
@@ -54,7 +63,7 @@
 - Derive the first actionable `primary_outcome` and occurrence
   `anomaly_flags`, and expose output contract 2 in the workbook and sidecars.
 
-## [v2.0.0](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v2.0.0) (2026-08-02)
+## [v2.0.0](https://github.com/haiqigeng/gtm-client-recette/releases/tag/v2.0.0) (2026-08-02)
 
 - Introduce normalized-results and session schema v3 as a hard certification
   boundary. The v2 migration preserves source order and discovery cases but
@@ -86,7 +95,7 @@
   star, all 19 canonical layers, all 8 per-tag layers, and full safe synthetic
   journey authority.
 
-## [v1.4.0](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v1.4.0) (2026-08-01)
+## [v1.4.0](https://github.com/haiqigeng/gtm-client-recette/releases/tag/v1.4.0) (2026-08-01)
 
 - Make the evidence policy independent of tracking-plan column completeness:
   every planned dataLayer event now requires action, exact API Call, resolved
@@ -116,7 +125,7 @@
 - Add tamper rejection and ordered field-requirement regressions and route the importer from the
   core workflow and input contract.
 
-## [v1.3.0](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v1.3.0) (2026-08-01)
+## [v1.3.0](https://github.com/haiqigeng/gtm-client-recette/releases/tag/v1.3.0) (2026-08-01)
 
 - Correct cross-requirement uniqueness so multiple field requirements tied to
   one captured occurrence are counted once, while a conclusive same-surface
@@ -152,7 +161,7 @@
   retest/scaffolding, supporting artifacts, defect exports, and journal
   acknowledgement.
 
-## [v1.2.2](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v1.2.2) (2026-08-01)
+## [v1.2.2](https://github.com/haiqigeng/gtm-client-recette/releases/tag/v1.2.2) (2026-08-01)
 
 - Bound supplemental dataLayer snapshots by depth, node count, and elapsed
   time; distinguish shared references from real cycles; retain readable array
@@ -182,7 +191,7 @@
   repeated selectors, strict CSP, hidden ancestors, accessible names, and
   shadow-root controls.
 
-## [v1.2.1](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v1.2.1) (2026-07-30)
+## [v1.2.1](https://github.com/haiqigeng/gtm-client-recette/releases/tag/v1.2.1) (2026-07-30)
 
 - Prevent conditional-absence, out-of-scope interaction, mapped unexpected
   push, malformed business-rule path, and non-dataLayer source-surface cases
@@ -211,7 +220,7 @@
   recorder installation, mutation safety, hostile objects, cycles,
   reassignment, wrappers, duplicate installation, and custom data layers.
 
-## [v1.2.0](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v1.2.0) (2026-07-29)
+## [v1.2.0](https://github.com/haiqigeng/gtm-client-recette/releases/tag/v1.2.0) (2026-07-29)
 
 - Promote the session ledger to the strict completion contract: register every
   interaction case and material variant, preserve contiguous retry attempts,
@@ -244,7 +253,7 @@
   every new execution module in release checks; and extend CI through Python
   3.13 with a format gate.
 
-## [v1.1.1](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v1.1.1) (2026-07-26)
+## [v1.1.1](https://github.com/haiqigeng/gtm-client-recette/releases/tag/v1.1.1) (2026-07-26)
 
 - Require independent, non-tracking proof that a real website interaction
   completed before an absent expected event can be judged as an implementation
@@ -274,7 +283,7 @@
 - Preserve one client-side recette workflow; add no container-audit, automatic
   negative-probe, publication, server-side, or legal-consent scope.
 
-## [v1.1.0](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v1.1.0) (2026-07-26)
+## [v1.1.0](https://github.com/haiqigeng/gtm-client-recette/releases/tag/v1.1.0) (2026-07-26)
 
 - Consolidate execution into one acceptance workflow whose required evidence
   layers derive from each tracking-plan requirement; remove the former
@@ -332,14 +341,14 @@
   with re-normalization required for legacy rows missing the new strict fields.
 - Keep server-side GTM explicitly out of scope.
 
-## [v1.0.0](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v1.0.0)
+## [v1.0.0](https://github.com/haiqigeng/gtm-client-recette/releases/tag/v1.0.0)
 
 - Consolidate the optimization handoff into the approved utility-first north star.
 - Cover tracking-plan ingestion, journey inference, live GTM Preview evidence,
   plan-ordered verdicts, coverage control, and validated detailed workbooks.
 - Adopt semantic `v` versioning for releases and reject calendar-date versions.
 
-## [2026.7.11 (legacy calendar release)](https://github.com/haiqigeng/gtm-preview-recette/releases/tag/v2026.7.11)
+## [2026.7.11 (legacy calendar release)](https://github.com/haiqigeng/gtm-client-recette/releases/tag/v2026.7.11)
 
 - Establish the first-maturity orientation, execution, and judgement architecture.
 - Add deterministic browser-surface, consent-readiness, action-boundary, and event-settling rules.
