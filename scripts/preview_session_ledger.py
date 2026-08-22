@@ -978,11 +978,9 @@ def _comparison_template(
     }
 
 
-def scaffold_tag_results(ledger: dict[str, Any], args: argparse.Namespace) -> None:
-    """Write the exact in-scope tag x layer matrix as a fillable import template."""
-    action = find_unique(ledger.get("actions", []), "action_id", args.action_id)
-    if action.get("state") != "OPEN":
-        raise SystemExit("Tag result scaffolding requires an open action.")
+def build_tag_result_scaffold(ledger: dict[str, Any], action_id: str) -> dict[str, Any]:
+    """Return the exact in-scope tag x layer matrix without writing run-specific code."""
+    action = find_unique(ledger.get("actions", []), "action_id", action_id)
     case = find_unique(ledger.get("cases", []), "case_id", str(action.get("case_id")))
     requirement_ids = [str(value) for value in action.get("requirement_ids", []) if str(value)]
     if not requirement_ids:
@@ -1055,7 +1053,7 @@ def scaffold_tag_results(ledger: dict[str, Any], args: argparse.Namespace) -> No
         for layer in TAG_RESULT_LAYERS:
             output.append(
                 {
-                    "action_id": args.action_id,
+                    "action_id": action_id,
                     "tag_id": tag.get("tag_id"),
                     "tag_name": tag.get("tag_name"),
                     "container_id": tag.get("container_id"),
@@ -1070,14 +1068,23 @@ def scaffold_tag_results(ledger: dict[str, Any], args: argparse.Namespace) -> No
                     "blocker_id": None,
                 }
             )
-    artifact = {
+    artifact: dict[str, Any] = {
         "schema_version": SESSION_SCHEMA_VERSION,
-        "action_id": args.action_id,
+        "action_id": action_id,
         "inventory_revision": case.get("inventory_revision", 1),
         "tag_layer_results": output,
     }
     if ledger.get("operator_contract_version") == 2:
         artifact["run_id"] = _session_run_id(ledger)
+    return artifact
+
+
+def scaffold_tag_results(ledger: dict[str, Any], args: argparse.Namespace) -> None:
+    """Write the exact in-scope tag x layer matrix as a fillable import template."""
+    action = find_unique(ledger.get("actions", []), "action_id", args.action_id)
+    if action.get("state") != "OPEN":
+        raise SystemExit("Tag result scaffolding requires an open action.")
+    artifact = build_tag_result_scaffold(ledger, args.action_id)
     save(args.output, artifact)
     print(f"Created {args.output.resolve()}")
 

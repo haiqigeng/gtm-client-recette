@@ -13,7 +13,14 @@ from uuid import uuid4
 
 from event_feedback import event_feedback, feedback_for_event, final_conclusion
 from execution_contract import validate_session
-from incremental_recette import apply_event, load_object, save_atomic, validate_event
+from incremental_recette import (
+    apply_event,
+    build_event_integrity,
+    event_patch_digest,
+    load_object,
+    save_atomic,
+    validate_event,
+)
 from preview_session_ledger import (
     begin_action,
     checkpoint,
@@ -28,6 +35,7 @@ from state_io import (
     recover_file_pair,
     serialized_json,
 )
+from stream_contract import stream_errors, stream_prefix_digest
 
 
 def _ordered_inventory(results: dict[str, Any]) -> list[dict[str, Any]]:
@@ -580,101 +588,250 @@ def _resume_run(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
-def _close_event(args: argparse.Namespace) -> dict[str, Any]:
-    results = load_object(args.results)
-    session = load_object(args.session)
-    _require_guided_contract(results, session)
-    _require_active(session)
-    event = _require_next_event(results, session, args.event_group_id)
-    group_cases = [
+def _event_closure(session: dict[str, Any], event_group_id: str) -> dict[str, Any] | None:
+    return next(
+        (
+            row
+            for row in session.get("event_closures", [])
+            if isinstance(row, dict) and str(row.get("event_group_id", "")) == event_group_id
+        ),
+        None,
+    )
+
+
+def _closed_event_replay(
+    results: dict[str, Any],
+    session: dict[str, Any],
+    event_group_id: str,
+    patch_sha256: str,
+) -> dict[str, Any] | None:
+    closure = _event_closure(session, event_group_id)
+    if closure is None:
+        return None
+    if (
+        closure.get("closure_contract_version") != 2
+        or closure.get("event_patch_sha256") != patch_sha256
+    ):
+        raise ValueError(
+            "The event is already closed with different material results; use reopen-event "
+            "before replacing its proof."
+        )
+    preview_end = closure.get("stream_reviewed_through_preview_event_index")
+    datalayer_end = closure.get("stream_reviewed_through_datalayer_call_index")
+    segment_id = str(closure.get("stream_reviewed_through_segment_id", "")).strip()
+    if not all(
+        (
+            isinstance(preview_end, int) and not isinstance(preview_end, bool),
+            isinstance(datalayer_end, int) and not isinstance(datalayer_end, bool),
+            bool(segment_id),
+        )
+    ):
+        raise ValueError(
+            "The already-closed event has incomplete stream-prefix metadata; "
+            "reopen and recertify it."
+        )
+    actual_digest = stream_prefix_digest(
+        session,
+        preview_event_index=preview_end,
+        datalayer_call_index=datalayer_end,
+        segment_id=segment_id,
+    )
+    if actual_digest != closure.get("stream_prefix_sha256"):
+        raise ValueError(
+            "The already-closed event's certified stream prefix has changed; "
+            "reopen and recertify it."
+        )
+    feedback = feedback_for_event(results, event_group_id, session)
+    feedback["commit_status"] = "ALREADY_CLOSED"
+    return feedback
+
+
+def _ready_event_cases(session: dict[str, Any], event_group_id: str) -> list[dict[str, Any]]:
+    cases = [
         row
         for row in session.get("cases", [])
-        if isinstance(row, dict) and row.get("event_group_id") == args.event_group_id
+        if isinstance(row, dict) and row.get("event_group_id") == event_group_id
     ]
-    if not group_cases:
+    if not cases:
         raise ValueError("The event has no registered interaction cases.")
-    if any(row.get("execution_status") == "PENDING" for row in group_cases):
+    if any(row.get("execution_status") == "PENDING" for row in cases):
         raise ValueError("Close or execute every applicable interaction case first.")
-    coverage_revision = None
-    if session.get("operator_contract_version") == 2:
-        coverage = next(
-            (
-                row
-                for row in session.get("coverage_decisions", [])
-                if isinstance(row, dict) and row.get("event_group_id") == args.event_group_id
-            ),
-            None,
-        )
-        if not isinstance(coverage, dict) or coverage.get("status") != "FROZEN":
-            raise ValueError("Freeze the event scenario coverage before closure.")
-        coverage_revision = coverage.get("revision")
-    group_action_ids = {
-        str(row.get("action_id", ""))
-        for row in session.get("actions", [])
-        if isinstance(row, dict) and row.get("event_group_id") == args.event_group_id
-    }
     if any(
-        row.get("state") == "OPEN" and str(row.get("action_id", "")) in group_action_ids
+        isinstance(row, dict)
+        and row.get("event_group_id") == event_group_id
+        and row.get("state") == "OPEN"
         for row in session.get("actions", [])
-        if isinstance(row, dict)
     ):
         raise ValueError("Settle every action for the event before closure.")
-    prior_target_closure = _reopened_target_closure(session, args.event_group_id)
-    if prior_target_closure is not None:
-        current_case_ids = {str(row.get("case_id", "")) for row in group_cases}
-        current_final_actions = {
-            str(row.get("final_action_id", ""))
-            for row in group_cases
-            if row.get("execution_status") == "EXECUTED"
-        }
-        prior_case_ids = {
-            str(value)
-            for value in prior_target_closure.get("case_ids", [])
-            if isinstance(value, str)
-        }
-        prior_final_actions = {
-            str(value)
-            for value in prior_target_closure.get("final_action_ids", [])
-            if isinstance(value, str)
-        }
-        if current_case_ids == prior_case_ids and current_final_actions == prior_final_actions:
-            raise ValueError(
-                "A reopened target event requires a new material case or a new final action; "
-                "the prior closure cannot be acknowledged unchanged."
-            )
-    patch = load_object(args.event_patch)
-    updated_results, patched_group = apply_event(results, patch, validate_result=False)
-    if patched_group != args.event_group_id:
-        raise ValueError("Event patch and requested event group differ.")
-    updated_session = deepcopy(session)
+    return cases
+
+
+def _frozen_coverage_revision(session: dict[str, Any], event_group_id: str) -> Any:
+    if session.get("operator_contract_version") != 2:
+        return None
+    coverage = next(
+        (
+            row
+            for row in session.get("coverage_decisions", [])
+            if isinstance(row, dict) and row.get("event_group_id") == event_group_id
+        ),
+        None,
+    )
+    if not isinstance(coverage, dict) or coverage.get("status") != "FROZEN":
+        raise ValueError("Freeze the event scenario coverage before closure.")
+    return coverage.get("revision")
+
+
+def _certified_stream_proof(session: dict[str, Any]) -> dict[str, Any]:
+    if session.get("operator_contract_version") != 2:
+        return {}
+    errors = stream_errors(session, final=False, certify_prefix=True)
+    if errors:
+        raise ValueError("\n".join(errors))
+    contract = session["stream_contract"]
+    preview_end = contract["reviewed_through_preview_event_index"]
+    datalayer_end = contract["reviewed_through_datalayer_call_index"]
+    segment_id = str(session["stream_segments"][-1]["segment_id"])
+    return {
+        "stream_reviewed_through_preview_event_index": preview_end,
+        "stream_reviewed_through_datalayer_call_index": datalayer_end,
+        "stream_reviewed_through_segment_id": segment_id,
+        "stream_prefix_sha256": stream_prefix_digest(
+            session,
+            preview_event_index=preview_end,
+            datalayer_call_index=datalayer_end,
+            segment_id=segment_id,
+        ),
+    }
+
+
+def _require_material_reclosure(
+    session: dict[str, Any],
+    event_group_id: str,
+    cases: list[dict[str, Any]],
+    material: tuple[Any, Any, Any],
+) -> None:
+    prior = _reopened_target_closure(session, event_group_id)
+    if prior is None:
+        return
+    current_cases = {str(row.get("case_id", "")) for row in cases}
+    current_actions = {
+        str(row.get("final_action_id", ""))
+        for row in cases
+        if row.get("execution_status") == "EXECUTED"
+    }
+    same_cases = current_cases == {str(value) for value in prior.get("case_ids", [])}
+    same_actions = current_actions == {str(value) for value in prior.get("final_action_ids", [])}
+    prior_material = (
+        prior.get("event_patch_sha256"),
+        prior.get("stream_prefix_sha256"),
+        prior.get("coverage_revision"),
+    )
+    unchanged = session.get("operator_contract_version") != 2 or material == prior_material
+    if same_cases and same_actions and unchanged:
+        extra = (
+            ", changed coverage, event results, or certified stream evidence"
+            if session.get("operator_contract_version") == 2
+            else ""
+        )
+        raise ValueError(
+            "A reopened target event requires a new material case or final action"
+            f"{extra}; the prior closure cannot be acknowledged unchanged."
+        )
+
+
+def _closure_record(
+    session: dict[str, Any],
+    event: dict[str, Any],
+    event_group_id: str,
+    cases: list[dict[str, Any]],
+    patch_sha256: str,
+    coverage_revision: Any,
+    stream_proof: dict[str, Any],
+) -> dict[str, Any]:
     timestamp = now()
     closure = {
-        "event_group_id": args.event_group_id,
+        "event_group_id": event_group_id,
         "plan_order": event.get("plan_order"),
-        "case_ids": [str(row.get("case_id", "")) for row in group_cases],
+        "case_ids": [str(row.get("case_id", "")) for row in cases],
         "final_action_ids": [
             str(row.get("final_action_id", ""))
-            for row in group_cases
+            for row in cases
             if row.get("execution_status") == "EXECUTED"
         ],
         "closed_at": timestamp,
         "feedback_emitted_at": timestamp,
     }
     if session.get("operator_contract_version") == 2:
-        closure["coverage_revision"] = coverage_revision
-    updated_session.setdefault("event_closures", []).append(closure)
-    updated_session["operator_state"] = {
-        "status": "ACTIVE",
-        "current_event_group_id": None,
-    }
-    updated_session["updated_at"] = timestamp
-    validate_event(
-        updated_results,
+        closure.update(
+            {
+                "closure_contract_version": 2,
+                "coverage_revision": coverage_revision,
+                "event_patch_sha256": patch_sha256,
+                **stream_proof,
+            }
+        )
+    return closure
+
+
+def _close_event(args: argparse.Namespace) -> dict[str, Any]:
+    results = load_object(args.results)
+    session = load_object(args.session)
+    _require_guided_contract(results, session)
+    patch = load_object(args.event_patch)
+    if str(patch.get("event_group_id", "")).strip() != args.event_group_id:
+        raise ValueError("Event patch and requested event group differ.")
+    patch_sha256 = event_patch_digest(patch)
+    replay = _closed_event_replay(results, session, args.event_group_id, patch_sha256)
+    if replay is not None:
+        return replay
+
+    _require_active(session)
+    event = _require_next_event(results, session, args.event_group_id)
+    cases = _ready_event_cases(session, args.event_group_id)
+    coverage_revision = _frozen_coverage_revision(session, args.event_group_id)
+    stream_proof = _certified_stream_proof(session)
+    _require_material_reclosure(
+        session,
         args.event_group_id,
-        updated_session,
+        cases,
+        (
+            patch_sha256,
+            stream_proof.get("stream_prefix_sha256"),
+            coverage_revision,
+        ),
     )
+    updated_results, _ = apply_event(
+        results,
+        patch,
+        validate_result=False,
+        allow_identical_evidence=True,
+    )
+    updated_session = deepcopy(session)
+    closure = _closure_record(
+        session,
+        event,
+        args.event_group_id,
+        cases,
+        patch_sha256,
+        coverage_revision,
+        stream_proof,
+    )
+    updated_session.setdefault("event_closures", []).append(closure)
+    updated_session["operator_state"] = {"status": "ACTIVE", "current_event_group_id": None}
+    updated_session["updated_at"] = closure["closed_at"]
+    if session.get("operator_contract_version") == 2:
+        closure["evidence_integrity"] = build_event_integrity(
+            updated_results,
+            args.event_group_id,
+            updated_session,
+            args.evidence_base_dir or args.results.parent,
+        )
+    validate_event(updated_results, args.event_group_id, updated_session)
     _save_pair_atomic(args.results, updated_results, args.session, updated_session)
-    return feedback_for_event(updated_results, args.event_group_id, updated_session)
+    feedback = feedback_for_event(updated_results, args.event_group_id, updated_session)
+    feedback["commit_status"] = "CLOSED"
+    return feedback
 
 
 def _reopen_event(args: argparse.Namespace) -> dict[str, Any]:
@@ -791,6 +948,20 @@ def _status(args: argparse.Namespace) -> dict[str, Any]:
     results = load_object(args.results)
     session = load_object(args.session)
     _require_guided_contract(results, session)
+    all_feedback = {
+        str(row.get("event_group_id", "")): row for row in event_feedback(results, session)
+    }
+    closed_ids = [
+        str(row.get("event_group_id", ""))
+        for row in session.get("event_closures", [])
+        if isinstance(row, dict)
+    ]
+    next_event = _next_event(results, session)
+    operator_state = session.get("operator_state") or {}
+    current_group = str(operator_state.get("current_event_group_id") or "").strip()
+    if not current_group and isinstance(next_event, dict):
+        current_group = str(next_event.get("event_group_id", ""))
+    structural_errors = validate_session(session, results=results, final=False)
     return {
         "guided_contract": {
             "compatible": True,
@@ -798,8 +969,17 @@ def _status(args: argparse.Namespace) -> dict[str, Any]:
             "run_id": session.get("run_id"),
         },
         "operator_state": session.get("operator_state"),
-        "next_event": _next_event(results, session),
-        "closed_events": event_feedback(results, session)[: len(session.get("event_closures", []))],
+        "structural_validation": {
+            "status": "PASS" if not structural_errors else "FAIL",
+            "errors": structural_errors,
+        },
+        "next_event": next_event,
+        "current_event_feedback": all_feedback.get(current_group),
+        "closed_events": [
+            all_feedback[event_group_id]
+            for event_group_id in closed_ids
+            if event_group_id in all_feedback
+        ],
     }
 
 
@@ -865,6 +1045,7 @@ def parser() -> argparse.ArgumentParser:
     close.add_argument("session", type=Path)
     close.add_argument("event_patch", type=Path)
     close.add_argument("--event-group-id", required=True)
+    close.add_argument("--evidence-base-dir", type=Path)
 
     reopen = commands.add_parser("reopen-event")
     reopen.add_argument("results", type=Path)

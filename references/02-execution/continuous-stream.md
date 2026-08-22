@@ -8,6 +8,14 @@ exclusive start and inclusive end cursors for both Tag Assistant Preview events
 and dataLayer calls. Adjacent segments share exact boundaries; gaps and overlaps
 are invalid. Every settled action has exactly one matching `ACTION` segment.
 
+An event may close before the run does. At event closure, require every segment
+recorded so far to be reconciled and every dataLayer argument through the
+current terminal segment to be completely classified. Store that terminal
+segment, both reviewed cursors, and a digest of the exact prefix. Immediate
+feedback treats this immutable prefix as certified while the global stream
+remains `OPEN`; later segments cannot rewrite it. The run still needs one
+trailing `FINAL` segment and strict full-stream certification at finalization.
+
 ## Every dataLayer call is accounted for
 
 For every recorder call index in a segment, classify every push argument:
@@ -43,4 +51,3 @@ and ordering cannot be certified; use `BLOCKED`, not an inferred pass/fail.
 If recorder and Preview disagree, verify node/frame, origin, loaded container,
 connection epoch, and segment boundaries, then repeat once when safe. The
 recorder exposes the disagreement but cannot replace missing Preview proof.
-

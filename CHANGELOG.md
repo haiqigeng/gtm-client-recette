@@ -1,6 +1,23 @@
 # Changelog
 
-## Unreleased
+## [v3.2.0](https://github.com/haiqigeng/gtm-client-recette/releases/tag/v3.2.0) (2026-08-22)
+
+- Let each event prepare and freeze its scenarios just in time, while retaining
+  strict plan-order execution and strict whole-plan final certification.
+- Certify a complete, reconciled dataLayer/Preview prefix at event closure so
+  immediate feedback can pass before the global stream receives its final
+  segment; bind the closure to its terminal segment, cursors, and digest.
+- Make operator-v2 `close-event` the sole atomic event commit, tolerate only
+  byte-for-byte-identical pre-existing evidence on recovery, and make an exact
+  successful replay idempotent while rejecting changed material proof.
+- Verify current-event evidence at closure instead of binding early feedback to
+  the still-growing whole-run catalog; keep full-catalog verification at final.
+- Generate current settled-action boundaries plus canonical and per-tag layer
+  scaffolds without inheriting verdict authority, and compare timezone-offset
+  timestamps by instant rather than text.
+- Isolate event coverage/status feedback from unprepared future events and add
+  multi-event, open-prefix, retry, inter-action-gap, timezone, and strict-final
+  regression coverage.
 
 ## [v3.1.0](https://github.com/haiqigeng/gtm-client-recette/releases/tag/v3.1.0) (2026-08-22)
 

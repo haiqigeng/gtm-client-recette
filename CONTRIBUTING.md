@@ -8,9 +8,9 @@ container IDs, screenshots, reports, credentials, emails, or browser traces.
 Use semantic `v` versioning, never calendar-date versioning:
 
 - Store `MAJOR.MINOR.PATCH` in `pyproject.toml`; the current release is
-  `3.1.0`.
+  `3.2.0`.
 - Prefix Git tags and release archives with `v`, for example `v3.0.0` and
-  `gtm-client-recette-v3.1.0.zip`.
+  `gtm-client-recette-v3.2.0.zip`.
 - Increment PATCH for compatible fixes, MINOR for compatible functionality,
   and MAJOR for incompatible changes.
 
@@ -21,7 +21,7 @@ python -m pip install -e ".[dev]"
 python -m ruff check --no-cache .
 python -m ruff format --check .
 python -m unittest discover -s tests -v
-python -B scripts/check_release.py --tag v3.1.0
+python -B scripts/check_release.py --tag v3.2.0
 ```
 
 Changes to verdict logic require a regression fixture that fails before the
@@ -36,7 +36,8 @@ substitute for another.
 
 Changes to interaction coverage, event-stream reconciliation, or gated-journey
 behaviour also require an anonymized regression in
-`tests/test_v310_optimizations.py`. Keep coverage proportional:
+`tests/test_v310_optimizations.py` or the current versioned lifecycle regression
+module. Keep coverage proportional:
 exhaust practical finite sets, document risk-based large-space coverage, and
 do not add speculative negative crawling.
 

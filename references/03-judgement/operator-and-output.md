@@ -17,11 +17,12 @@ python -B "<skill-root>\scripts\script_name.py" ...
    normalized `run.run_id`, the current browser instance ID, browser context
    ID, profile, and approved origins.
 3. Register existing GTM, Tag Assistant, and site surfaces.
-4. Discover scenario classes, register cases with one `--dimension-value
-   DIMENSION_ID=JSON_VALUE` for every material dimension, and
-   `import-coverage`. Every final class records all four adaptive
+4. Map the whole event order and shared journey/gate skeleton. For the current
+   event only, discover scenario classes, register cases with one
+   `--dimension-value DIMENSION_ID=JSON_VALUE` for every material dimension,
+   and `import-coverage`. Every final class records all four adaptive
    `trigger_reviews`, including explicit not-triggered reviews.
-5. Inventory tags and `complete-tag-inventory` for each case.
+5. Inventory tags and `complete-tag-inventory` for the current event's cases.
 6. Capture a v2 before snapshot and use `recette_operator.py start-event`.
 7. Execute one exact website action, then record every business push and all
    canonical/per-tag rows.
@@ -30,9 +31,16 @@ python -B "<skill-root>\scripts\script_name.py" ...
    handoffs, and gated-flow records as applicable. Every v2 sidecar carries the
    same `run_id`, and every referenced evidence ID resolves to the current
    normalized evidence catalog and action/case binding.
-10. Apply the event result patch with operator `close-event`; it emits immediate
-    per-event feedback and stores the frozen coverage revision.
-11. Repeat in plan order. Close the stream, verify every evidence file, and
+10. Generate `incremental_recette.py scaffold-event` after the final settled
+    attempts. It supplies captured action boundaries plus fillable canonical
+    and per-tag matrices but inherits no verdict or evidence authority.
+11. Apply the completed patch only with operator `close-event`, optionally
+    passing `--evidence-base-dir`. It atomically stores the result, event-only
+    evidence integrity, frozen coverage revision, and certified stream-prefix
+    digest, then emits immediate feedback. Repeating the identical command is
+    safe; changing the patch requires `reopen-event`.
+12. Prepare the next event just in time and repeat in plan order. Close the
+    stream, verify every evidence file, and
     use operator `finish-run`.
 
 Use `--help` for exact command fields. Batch imports are transactional: one
@@ -44,6 +52,11 @@ After each event, output event and case status, every canonical layer with a
 simple reason, per-tag layers, technical delivery, page/journey, business
 semantics, continuous-stream anomaly status, scenario coverage, affected cases,
 evidence IDs, and an exact retest instruction for non-PASS cases.
+
+An open global stream is not itself a blocker for a closed event. Its
+continuous-stream component is `PASS` only when the closure's exact reviewed
+prefix is still digest-valid. Unprepared future events never leak coverage or
+pending-state errors into that event's feedback.
 
 ## Final conclusion
 
@@ -63,6 +76,9 @@ or normalized/session disagreement.
 Resume only from persisted results/session state and a fresh runtime snapshot.
 If coverage, a material case, or a tag changes after closure, reopen that event;
 the affected closure suffix becomes historical and must be reclosed in order.
+The operator close path is the sole event commit path for v2; the low-level
+`apply-event` command is intentionally rejected so results and closure proof
+cannot diverge.
 
 Schema-v2 and operator-v1 artifacts remain readable for regression. Their
 legacy workbook remains output contract 2; operator-v2 uses output contract 3.

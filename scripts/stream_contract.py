@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections import Counter, defaultdict
 from datetime import datetime
 from typing import Any
@@ -102,7 +104,7 @@ def _validate_datalayer_argument(
     call_index: Any,
     pushes: dict[str, dict[str, Any]],
     referenced_business_pushes: list[str],
-    final: bool,
+    complete_required: bool,
     errors: list[str],
 ) -> None:
     argument_index = argument.get("argument_index")
@@ -140,8 +142,8 @@ def _validate_datalayer_argument(
         errors.append(f"{label}: TECHNICAL_EVENT requires a gtm.* event name")
     if disposition in {"STATE_UPDATE", "NON_EVENT"} and event_present:
         errors.append(f"{label}: an argument with an event field cannot be hidden as {disposition}")
-    if final and argument.get("capture_complete") is not True:
-        errors.append(f"{label}: final review requires capture_complete=true")
+    if complete_required and argument.get("capture_complete") is not True:
+        errors.append(f"{label}: certified review requires capture_complete=true")
 
 
 def _validate_datalayer_reviews(
@@ -150,7 +152,7 @@ def _validate_datalayer_reviews(
     label: str,
     pushes: dict[str, dict[str, Any]],
     referenced_business_pushes: list[str],
-    final: bool,
+    complete_required: bool,
     errors: list[str],
 ) -> None:
     """Require every recorder call and argument to be explicitly classified."""
@@ -184,7 +186,7 @@ def _validate_datalayer_reviews(
                 call_index=call_index,
                 pushes=pushes,
                 referenced_business_pushes=referenced_business_pushes,
-                final=final,
+                complete_required=complete_required,
                 errors=errors,
             )
 
@@ -220,6 +222,7 @@ def _validate_segment(
     referenced_push_ids: list[str],
     reviewed_business_push_ids: list[str],
     final: bool,
+    certify_prefix: bool,
     errors: list[str],
 ) -> None:
     segment_id = str(segment.get("segment_id", "")).strip() or str(index)
@@ -230,8 +233,8 @@ def _validate_segment(
     status = str(segment.get("status", "")).strip().upper()
     if status not in SEGMENT_STATUSES:
         errors.append(f"{label}: invalid status")
-    if final and status != "RECONCILED":
-        errors.append(f"{label}: final certification requires RECONCILED")
+    if (final or certify_prefix) and status != "RECONCILED":
+        errors.append(f"{label}: certified stream prefix requires RECONCILED")
     epoch = segment.get("connection_epoch")
     if not isinstance(epoch, int) or isinstance(epoch, bool) or epoch < 1:
         errors.append(f"{label}: connection_epoch must be a positive integer")
@@ -268,7 +271,7 @@ def _validate_segment(
         label=label,
         pushes=pushes,
         referenced_business_pushes=reviewed_business_push_ids,
-        final=final,
+        complete_required=final or certify_prefix,
         errors=errors,
     )
 
@@ -551,8 +554,29 @@ def _validate_push_bounds(
         errors.append(f"session business push {push_id}: inter-action push cannot claim action_id")
 
 
-def stream_errors(ledger: dict[str, Any], *, final: bool) -> list[str]:
+def _validate_certified_prefix(
+    segments: list[dict[str, Any]], contract: dict[str, Any], errors: list[str]
+) -> None:
+    if not segments:
+        errors.append("session event certification requires a reviewed stream prefix")
+        return
+    if segments[0].get("kind") != "INITIAL_LOAD":
+        errors.append("session certified stream prefix requires a leading INITIAL_LOAD segment")
+    if contract.get("status") == "OPEN" and any(
+        segment.get("kind") == "FINAL" for segment in segments
+    ):
+        errors.append("session open stream prefix cannot contain a FINAL segment")
+
+
+def stream_errors(
+    ledger: dict[str, Any],
+    *,
+    final: bool,
+    certify_prefix: bool = False,
+) -> list[str]:
     """Return continuity and mapping errors for an operator-contract-v2 stream."""
+    if final and certify_prefix:
+        raise ValueError("Stream validation cannot be both prefix and final certification.")
     errors: list[str] = []
     contract = _validate_contract(ledger.get("stream_contract"), final=final, errors=errors)
     if not contract:
@@ -583,6 +607,7 @@ def stream_errors(ledger: dict[str, Any], *, final: bool) -> list[str]:
             referenced_push_ids=referenced_push_ids,
             reviewed_business_push_ids=reviewed_business_push_ids,
             final=final,
+            certify_prefix=certify_prefix,
             errors=errors,
         )
     _validate_epoch_continuity(
@@ -592,6 +617,8 @@ def stream_errors(ledger: dict[str, Any], *, final: bool) -> list[str]:
         errors=errors,
     )
     _validate_segment_sequence(segments, final=final, errors=errors)
+    if certify_prefix:
+        _validate_certified_prefix(segments, contract, errors)
     _validate_terminal_cursors(segments, contract=contract, final=final, errors=errors)
     for action_id, action in actions.items():
         _validate_action_segment(
@@ -611,6 +638,104 @@ def stream_errors(ledger: dict[str, Any], *, final: bool) -> list[str]:
     return errors
 
 
+def _stream_prefix_segments(
+    ledger: dict[str, Any],
+    *,
+    preview_event_index: int,
+    datalayer_call_index: int,
+    segment_id: str | None = None,
+) -> list[dict[str, Any]]:
+    selected_segments: list[dict[str, Any]] = []
+    for segment in ledger.get("stream_segments", []):
+        if not isinstance(segment, dict):
+            continue
+        if segment_id:
+            selected_segments.append(segment)
+            if str(segment.get("segment_id", "")) == segment_id:
+                break
+            continue
+        preview_end = segment.get("end_preview_event_index")
+        datalayer_end = segment.get("end_datalayer_call_index")
+        if not isinstance(preview_end, int) or not isinstance(datalayer_end, int):
+            continue
+        if preview_end <= preview_event_index and datalayer_end <= datalayer_call_index:
+            selected_segments.append(segment)
+    if not selected_segments:
+        raise ValueError("The certified stream prefix has no segments.")
+    last = selected_segments[-1]
+    if segment_id and str(last.get("segment_id", "")) != segment_id:
+        raise ValueError("The certified stream prefix terminal segment is absent.")
+    if (
+        last.get("end_preview_event_index") != preview_event_index
+        or last.get("end_datalayer_call_index") != datalayer_call_index
+    ):
+        raise ValueError("The certified stream prefix does not end at the requested cursors.")
+    return selected_segments
+
+
+def stream_prefix_digest(
+    ledger: dict[str, Any],
+    *,
+    preview_event_index: int,
+    datalayer_call_index: int,
+    segment_id: str | None = None,
+) -> str:
+    """Bind one already-reviewed stream prefix without binding its future suffix."""
+    selected_segments = _stream_prefix_segments(
+        ledger,
+        preview_event_index=preview_event_index,
+        datalayer_call_index=datalayer_call_index,
+        segment_id=segment_id,
+    )
+    segment_ids = {
+        str(segment.get("segment_id", "")).strip()
+        for segment in selected_segments
+        if str(segment.get("segment_id", "")).strip()
+    }
+    selected_pushes = [
+        row
+        for row in ledger.get("business_pushes", [])
+        if isinstance(row, dict) and str(row.get("segment_id", "")).strip() in segment_ids
+    ]
+    contract = ledger.get("stream_contract") or {}
+    payload = {
+        "run_id": ledger.get("run_id"),
+        "start_preview_event_index": contract.get("start_preview_event_index"),
+        "start_datalayer_call_index": contract.get("start_datalayer_call_index"),
+        "preview_event_index": preview_event_index,
+        "datalayer_call_index": datalayer_call_index,
+        "segment_id": segment_id,
+        "segments": selected_segments,
+        "business_pushes": selected_pushes,
+    }
+    serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _closure_prefix_status(ledger: dict[str, Any], closure: dict[str, Any]) -> str:
+    preview_end = closure.get("stream_reviewed_through_preview_event_index")
+    datalayer_end = closure.get("stream_reviewed_through_datalayer_call_index")
+    expected_digest = closure.get("stream_prefix_sha256")
+    if not (
+        isinstance(preview_end, int)
+        and isinstance(datalayer_end, int)
+        and isinstance(expected_digest, str)
+        and expected_digest
+    ):
+        return "STALE_PREFIX"
+    segment_id = closure.get("stream_reviewed_through_segment_id")
+    try:
+        actual_digest = stream_prefix_digest(
+            ledger,
+            preview_event_index=preview_end,
+            datalayer_call_index=datalayer_end,
+            segment_id=str(segment_id) if segment_id is not None else None,
+        )
+    except ValueError:
+        return "STALE_PREFIX"
+    return "CERTIFIED_PREFIX" if actual_digest == expected_digest else "STALE_PREFIX"
+
+
 def stream_summary(ledger: dict[str, Any], event_group_id: str) -> dict[str, Any]:
     """Return event-relevant action and inter-action stream facts."""
     pushes = [
@@ -619,8 +744,20 @@ def stream_summary(ledger: dict[str, Any], event_group_id: str) -> dict[str, Any
         if isinstance(row, dict) and str(row.get("event_group_id", "")).strip() == event_group_id
     ]
     segments = _row_catalog(ledger.get("stream_segments"), "segment_id")
+    contract_status = (ledger.get("stream_contract") or {}).get("status")
+    review_status = contract_status
+    closure = next(
+        (
+            row
+            for row in ledger.get("event_closures", [])
+            if isinstance(row, dict) and str(row.get("event_group_id", "")) == event_group_id
+        ),
+        None,
+    )
+    if contract_status == "OPEN" and isinstance(closure, dict):
+        review_status = _closure_prefix_status(ledger, closure)
     return {
-        "review_status": (ledger.get("stream_contract") or {}).get("status"),
+        "review_status": review_status,
         "observed_push_count": len(pushes),
         "inter_action_push_count": sum(
             segments.get(str(row.get("segment_id", "")), {}).get("kind") != "ACTION"

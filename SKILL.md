@@ -80,8 +80,9 @@ immediately before connecting or executing.
 
 ## Scenario discovery and sampling
 
-Before the first action, build and freeze an explainable coverage decision for
-each event:
+At run setup, map the full event order, known journeys, and protected gates.
+Then, immediately before each event's first action, build and freeze that
+event's explainable coverage decision:
 
 1. Discover candidate interactions from the plan, supplied assets, journeys,
    and live site.
@@ -195,17 +196,25 @@ for exact command fields.
    normalized `run_id`, current browser instance/context, profile, origins, and
    container.
 3. Register the existing GTM, Tag Assistant, and site surfaces.
-4. Register cases with explicit material-dimension values and tag inventory;
-   import and freeze scenario coverage.
-5. Capture a v2 before-runtime snapshot and start the plan-ordered event with
+4. For the current plan-ordered event, discover/register its cases with exact
+   dimension values and tag inventory, then import and freeze its coverage.
+   Do not require future events to be fully prepared before event 1 can close.
+5. Capture a v2 before-runtime snapshot and start that event with
    `recette_operator.py start-event`.
 6. Execute one exact action. Capture website outcome, all pushes, all canonical
    and tag rows, before/after journey state, and a v2 after snapshot.
 7. Settle the action, import stream/semantic records and any acquisition,
-   handoff, or gated-flow records, then close the event through
-   `recette_operator.py close-event`.
-8. Emit its immediate event/case/layer feedback before starting the next event.
-9. After the final event, close the stream, verify every evidence-file digest,
+   handoff, or gated-flow records, and generate the event patch scaffold from
+   the settled final actions. Replace every scaffold placeholder with current
+   direct proof.
+8. Close through `recette_operator.py close-event`. It atomically commits the
+   event patch, verified event-only evidence catalog, frozen coverage revision,
+   and digest-bound reviewed stream prefix. Safe replay of the identical close
+   is idempotent; a different patch requires explicit reopening.
+9. Emit its immediate event/case/layer feedback before preparing the next
+   event. The continuous stream may remain `OPEN`; the closed event passes that
+   component only when its exact prefix is certified and unchanged.
+10. After the final event, close the stream, verify every evidence-file digest,
    call `recette_operator.py finish-run`, and build the validated XLSX.
 
 Batch imports are transactional. Preserve interrupted attempts and observed

@@ -37,7 +37,7 @@ from runtime_state_contract import (
 )
 from scenario_coverage import coverage_errors
 from semantic_contract import semantic_contract_errors, semantic_statuses_by_group
-from stream_contract import stream_errors
+from stream_contract import stream_errors, stream_prefix_digest
 from tag_evidence_contract import (
     evidence_matches_tag,
     has_network_capture,
@@ -381,6 +381,23 @@ def _validate_direct_evidence(
         )
 
 
+def _action_boundary_values_match(field_name: str, expected: Any, actual: Any) -> bool:
+    if expected == actual:
+        return True
+    if field_name != "action_timestamp":
+        return False
+    try:
+        expected_time = datetime.fromisoformat(str(expected).replace("Z", "+00:00"))
+        actual_time = datetime.fromisoformat(str(actual).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return (
+        expected_time.tzinfo is not None
+        and actual_time.tzinfo is not None
+        and expected_time == actual_time
+    )
+
+
 def _validate_action_boundary_link(
     requirement: dict[str, Any],
     action: dict[str, Any],
@@ -390,14 +407,16 @@ def _validate_action_boundary_link(
     boundary = requirement.get("action_boundary")
     if not isinstance(boundary, dict):
         return
-    errors.extend(
-        (
-            f"requirement {requirement_id}: action_boundary.{field_name} "
-            "does not match the session ledger"
-        )
-        for field_name in ACTION_BOUNDARY_FIELDS
-        if boundary.get(field_name) != action.get(field_name)
-    )
+    for field_name in ACTION_BOUNDARY_FIELDS:
+        if not _action_boundary_values_match(
+            field_name,
+            boundary.get(field_name),
+            action.get(field_name),
+        ):
+            errors.append(
+                f"requirement {requirement_id}: action_boundary.{field_name} "
+                "does not match the session ledger"
+            )
 
 
 @dataclass
@@ -405,6 +424,7 @@ class _ValidationContext:
     ledger: dict[str, Any]
     operator_contract_version: int | None
     final: bool
+    verify_closure_digest: bool
     results_provided: bool
     errors: list[str]
     cases: list[dict[str, Any]]
@@ -2021,9 +2041,10 @@ def _validate_event_statuses(context: _ValidationContext) -> None:
             if str(case.get("event_group_id", "")).strip() == group_id
         ]
         if not group_cases:
-            context.errors.append(
-                f"session: event_group_id {group_id} has no registered interaction case"
-            )
+            if context.final:
+                context.errors.append(
+                    f"session: event_group_id {group_id} has no registered interaction case"
+                )
             continue
         session_status = _session_event_status(context, group_id, group_cases)
         normalized_status = _normalized_event_status(
@@ -2158,6 +2179,71 @@ def _ordered_event_inventory(context: _ValidationContext) -> list[dict[str, Any]
     ]
 
 
+def _sha256_digest(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value.lower())
+    )
+
+
+def _validate_v2_closure_proof(
+    context: _ValidationContext, closure: dict[str, Any], label: str
+) -> None:
+    for field_name in ("event_patch_sha256", "stream_prefix_sha256"):
+        if not _sha256_digest(closure.get(field_name)):
+            context.errors.append(f"{label}: {field_name} must be a SHA-256 digest")
+    for field_name in (
+        "stream_reviewed_through_preview_event_index",
+        "stream_reviewed_through_datalayer_call_index",
+    ):
+        value = closure.get(field_name)
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            context.errors.append(f"{label}: {field_name} must be a non-negative integer")
+    terminal_segment_id = str(closure.get("stream_reviewed_through_segment_id", "")).strip()
+    terminal_segment = next(
+        (
+            row
+            for row in context.ledger.get("stream_segments", [])
+            if isinstance(row, dict) and str(row.get("segment_id", "")) == terminal_segment_id
+        ),
+        None,
+    )
+    if not terminal_segment_id or terminal_segment is None:
+        context.errors.append(
+            f"{label}: stream_reviewed_through_segment_id must identify a stream segment"
+        )
+    elif terminal_segment.get("end_preview_event_index") != closure.get(
+        "stream_reviewed_through_preview_event_index"
+    ) or terminal_segment.get("end_datalayer_call_index") != closure.get(
+        "stream_reviewed_through_datalayer_call_index"
+    ):
+        context.errors.append(f"{label}: certified stream cursors differ from its segment")
+    if (
+        context.verify_closure_digest
+        and terminal_segment is not None
+        and isinstance(closure.get("stream_reviewed_through_preview_event_index"), int)
+        and not isinstance(closure.get("stream_reviewed_through_preview_event_index"), bool)
+        and isinstance(closure.get("stream_reviewed_through_datalayer_call_index"), int)
+        and not isinstance(closure.get("stream_reviewed_through_datalayer_call_index"), bool)
+    ):
+        try:
+            actual_digest = stream_prefix_digest(
+                context.ledger,
+                preview_event_index=closure["stream_reviewed_through_preview_event_index"],
+                datalayer_call_index=closure["stream_reviewed_through_datalayer_call_index"],
+                segment_id=terminal_segment_id,
+            )
+        except ValueError:
+            context.errors.append(f"{label}: certified stream prefix cannot be reconstructed")
+        else:
+            if actual_digest != closure.get("stream_prefix_sha256"):
+                context.errors.append(f"{label}: certified stream prefix digest is stale")
+    event_integrity = closure.get("evidence_integrity")
+    if not isinstance(event_integrity, dict) or event_integrity.get("status") != "VERIFIED":
+        context.errors.append(f"{label}: current-event evidence integrity must be VERIFIED")
+
+
 def _validate_event_closures(context: _ValidationContext) -> None:
     """Require plan-ordered event closure and immediate feedback acknowledgement."""
     if context.operator_contract_version not in {1, 2}:
@@ -2186,6 +2272,8 @@ def _validate_event_closures(context: _ValidationContext) -> None:
         for field_name in ("closed_at", "feedback_emitted_at"):
             if not iso_timestamp(closure.get(field_name)):
                 context.errors.append(f"{label}: {field_name} must be ISO 8601 with timezone")
+        if closure.get("closure_contract_version") == 2:
+            _validate_v2_closure_proof(context, closure, label)
         group_cases = [
             case
             for case in context.cases
@@ -2298,9 +2386,29 @@ def _validate_closure_history(context: _ValidationContext) -> None:
             prior_actions = {
                 value for value in prior.get("final_action_ids", []) if isinstance(value, str)
             }
-            if current_cases == prior_cases and current_actions == prior_actions:
+            current_material = (
+                current.get("event_patch_sha256"),
+                current.get("stream_prefix_sha256"),
+                current.get("coverage_revision"),
+            )
+            prior_material = (
+                prior.get("event_patch_sha256"),
+                prior.get("stream_prefix_sha256"),
+                prior.get("coverage_revision"),
+            )
+            same_cases_and_actions = (
+                current_cases == prior_cases and current_actions == prior_actions
+            )
+            if same_cases_and_actions and (
+                context.operator_contract_version != 2 or current_material == prior_material
+            ):
                 context.errors.append(
                     f"{label}: reopened target requires a new case or final action"
+                    + (
+                        ", coverage revision, event patch, or certified stream prefix"
+                        if context.operator_contract_version == 2
+                        else ""
+                    )
                 )
 
 
@@ -2392,13 +2500,48 @@ def _auxiliary_evidence_errors(
     return errors
 
 
+def _validate_v2_extensions(
+    context: _ValidationContext,
+    *,
+    results: dict[str, Any] | None,
+    final: bool,
+    certify_event: bool,
+) -> None:
+    ledger = context.ledger
+    context.errors.extend(coverage_errors(ledger, results=results, final=context.final))
+    if not certify_event:
+        context.errors.extend(stream_errors(ledger, final=final))
+    context.errors.extend(semantic_contract_errors(ledger, results=results, final=context.final))
+    context.errors.extend(handoff_errors(ledger, final=context.final))
+    context.errors.extend(gated_flow_errors(ledger, final=context.final))
+    context.errors.extend(_auxiliary_evidence_errors(ledger, context.evidence))
+    for case in context.cases:
+        case_id = str(case.get("case_id", "")).strip()
+        context.errors.extend(
+            f"session case {case_id}: {error}"
+            for error in acquisition_errors(case.get("acquisition_context"))
+        )
+    integrity = ledger.get("evidence_integrity")
+    verify_integrity = (
+        not certify_event
+        and results is not None
+        and (final or not isinstance(integrity, dict) or integrity.get("status") != "PENDING")
+    )
+    if verify_integrity:
+        context.errors.extend(integrity_errors(ledger, results=results, verify_files=final))
+
+
 def validate_session(
     ledger: dict[str, Any],
     *,
     results: dict[str, Any] | None = None,
     final: bool = False,
+    certify_event: bool = False,
 ) -> list[str]:
     """Return structural and final-certification errors for a session ledger."""
+    if final and certify_event:
+        return ["session: choose event certification or final certification, not both"]
+    strict_completion = final or certify_event
     if ledger.get("schema_version") != SESSION_SCHEMA_VERSION:
         return [
             "session: schema_version must be 3; migrate or recreate the session ledger "
@@ -2408,8 +2551,8 @@ def validate_session(
     operator_contract_version = ledger.get("operator_contract_version")
     if operator_contract_version not in (None, 1, 2):
         errors.append("session: operator_contract_version must be 1 or 2 when supplied")
-    if final and operator_contract_version in {1, 2} and results is None:
-        errors.append("session: operator-contract final validation requires normalized results")
+    if strict_completion and operator_contract_version in {1, 2} and results is None:
+        errors.append("session: operator certification requires normalized results")
     if operator_contract_version == 2:
         session_run_id = str(ledger.get("run_id", "")).strip()
         if not session_run_id:
@@ -2440,7 +2583,7 @@ def validate_session(
         if operator_contract_version in {1, 2}
         else []
     )
-    if "connection_epoch" in ledger:
+    if "connection_epoch" in ledger and not certify_event:
         expected_epoch = 1
         for action in actions:
             if action.get("connection_epoch") != expected_epoch:
@@ -2464,7 +2607,8 @@ def validate_session(
     context = _ValidationContext(
         ledger=ledger,
         operator_contract_version=operator_contract_version,
-        final=final,
+        final=strict_completion,
+        verify_closure_digest=not certify_event,
         results_provided=results is not None,
         errors=errors,
         cases=cases,
@@ -2510,35 +2654,12 @@ def validate_session(
     _validate_closure_history(context)
     _validate_result_alignment(context)
     if operator_contract_version == 2:
-        errors.extend(coverage_errors(ledger, results=results, final=final))
-        errors.extend(stream_errors(ledger, final=final))
-        errors.extend(
-            semantic_contract_errors(
-                ledger,
-                results=results,
-                final=final,
-            )
+        _validate_v2_extensions(
+            context,
+            results=results,
+            final=final,
+            certify_event=certify_event,
         )
-        errors.extend(handoff_errors(ledger, final=final))
-        errors.extend(gated_flow_errors(ledger, final=final))
-        errors.extend(_auxiliary_evidence_errors(ledger, evidence))
-        for case in cases:
-            case_id = str(case.get("case_id", "")).strip()
-            errors.extend(
-                f"session case {case_id}: {error}"
-                for error in acquisition_errors(case.get("acquisition_context"))
-            )
-        integrity = ledger.get("evidence_integrity")
-        if results is not None and (
-            final or not isinstance(integrity, dict) or integrity.get("status") != "PENDING"
-        ):
-            errors.extend(
-                integrity_errors(
-                    ledger,
-                    results=results,
-                    verify_files=final,
-                )
-            )
     unsafe_session_findings = [
         finding
         for finding in session_sensitive_findings(ledger)
