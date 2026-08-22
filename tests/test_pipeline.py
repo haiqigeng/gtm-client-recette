@@ -12,6 +12,7 @@ from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
+from zipfile import ZipFile
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.comments import Comment
@@ -65,7 +66,7 @@ from preview_session_ledger import (  # noqa: E402
 from recette_operator import _save_pair_atomic  # noqa: E402
 from recette_schema import ReportValidationError, event_rollup, validate  # noqa: E402
 from runtime_state_contract import runtime_snapshot_errors  # noqa: E402
-from verify_release_artifact import verify_archive  # noqa: E402
+from verify_release_artifact import verify_archive, verify_install  # noqa: E402
 
 
 def fixture(name: str = "valid_full.json") -> dict:
@@ -2668,6 +2669,8 @@ class PipelineTests(unittest.TestCase):
                 str(Path(tempdir) / "profile"),
                 "--approved-origin",
                 "https://shop.example.test",
+                "--operator-contract-version",
+                "1",
             )
             run(
                 "register-surface",
@@ -3548,10 +3551,20 @@ class PipelineTests(unittest.TestCase):
                 archives.append(archive)
             manifest = verify_archive(archives[0])
             self.assertEqual(archives[0].read_bytes(), archives[1].read_bytes())
+            install_parent = Path(tempdir) / "installed"
+            with ZipFile(archives[0]) as archive:
+                archive.extractall(install_parent)
+            installed_skill = install_parent / "gtm-client-recette"
+            verify_install(manifest, installed_skill)
+            (installed_skill / "previous-run.log").write_text("residue", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "unexpected residue"):
+                verify_install(manifest, installed_skill)
         self.assertEqual(f"v{version}", manifest["release"])
         self.assertIn("SKILL.md", manifest["files"])
-        self.assertIn("scripts/build_skill_package.py", manifest["files"])
-        self.assertIn("tests/test_v220_regressions.py", manifest["files"])
+        self.assertNotIn("scripts/build_skill_package.py", manifest["files"])
+        self.assertNotIn("scripts/check_release.py", manifest["files"])
+        self.assertNotIn("scripts/verify_release_artifact.py", manifest["files"])
+        self.assertFalse(any(name.startswith("tests/") for name in manifest["files"]))
 
 
 if __name__ == "__main__":

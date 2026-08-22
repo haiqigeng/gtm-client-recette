@@ -10,6 +10,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from path_safety import ensure_distinct_output
+from state_io import atomic_write_json
+
 
 class HandoffError(ValueError):
     """Raised when the upstream delivery is invalid or not review-ready."""
@@ -235,11 +238,8 @@ def main() -> int:
     try:
         handoff, plan, expected = verify_delivery(args.delivery)
         result = interpreted_requirements(handoff, plan, expected)
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(
-            json.dumps(result, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
+        ensure_distinct_output(args.output, args.delivery)
+        atomic_write_json(args.output, result)
     except HandoffError as error:
         print(str(error), file=sys.stderr)
         return 2

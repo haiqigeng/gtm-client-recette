@@ -4,14 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gtm-client-recette"
-version = "3.0.0"
-description = "Operational client-side GTM recette with exhaustive interaction and event-stream reconciliation"
+version = "3.1.0"
+description = "Expert client-side GTM recette with semantic, scenario, and continuous-stream validation"
 license = "MIT"
 requires-python = ">=3.11"
 dependencies = ["openpyxl>=3.1.2", "pillow>=10.0.0"]
 
 [project.optional-dependencies]
-dev = ["ruff>=0.12.0"]
+dev = ["ruff>=0.12.0", "vulture>=2.14", "radon>=6.0"]
 browser-test = ["playwright>=1.50.0,<2"]
 
 [tool.setuptools]

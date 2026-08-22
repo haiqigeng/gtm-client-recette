@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from event_feedback import event_feedback, feedback_for_event
+from event_feedback import event_feedback, feedback_for_event, final_conclusion
 from execution_contract import validate_session
 from incremental_recette import apply_event, load_object, save_atomic, validate_event
 from preview_session_ledger import (
@@ -115,8 +115,26 @@ def _require_guided_contract(
             "Legacy schema-v3 results remain readable, but guided execution requires "
             "fresh normalization and runtime proof; missing historical fields are never fabricated."
         )
-    if session.get("operator_contract_version") != 1:
-        raise ValueError("The guided operator requires operator_contract_version=1.")
+    required_operator_version = run.get("operator_contract_version_required", 1)
+    if required_operator_version not in {1, 2}:
+        raise ValueError("The normalized run declares an unsupported operator contract.")
+    if session.get("operator_contract_version") != required_operator_version:
+        raise ValueError(
+            "The guided operator requires operator_contract_version="
+            f"{required_operator_version} for this normalized run."
+        )
+    if required_operator_version == 2:
+        normalized_run_id = str(run.get("run_id", "")).strip()
+        session_run_id = str(session.get("run_id", "")).strip()
+        if not session_run_id:
+            raise ValueError(
+                "The operator-v2 session is not bound to normalized run.run_id; recreate it."
+            )
+        if session_run_id != normalized_run_id:
+            raise ValueError(
+                "The operator-v2 session run_id differs from normalized run.run_id; "
+                "previous-run state cannot be reused."
+            )
 
 
 def _save_pair_atomic(
@@ -355,17 +373,119 @@ def _interrupt_action(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def _pause_contract(session: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "pause_contract_version": 1,
+        "operator_contract_version": 2,
+        "run_id": session.get("run_id"),
+        "connection_epoch": session.get("connection_epoch"),
+        "browser_binding": deepcopy(session.get("browser_binding")),
+        "stream_contract": deepcopy(session.get("stream_contract")),
+        "open_action_ids": sorted(
+            str(row.get("action_id", ""))
+            for row in session.get("actions", [])
+            if isinstance(row, dict) and row.get("state") == "OPEN"
+        ),
+    }
+
+
+def _require_v2_pause_continuity(session: dict[str, Any]) -> dict[str, Any]:
+    checkpoint_row = next(
+        (
+            row
+            for row in reversed(session.get("checkpoints", []))
+            if isinstance(row, dict) and row.get("pause_contract_version") == 1
+        ),
+        None,
+    )
+    if checkpoint_row is None:
+        raise ValueError("Operator-v2 resume requires its recorded pause continuity checkpoint.")
+    current = _pause_contract(session)
+    for field in (
+        "operator_contract_version",
+        "run_id",
+        "connection_epoch",
+        "browser_binding",
+        "stream_contract",
+        "open_action_ids",
+    ):
+        if checkpoint_row.get(field) != current.get(field):
+            raise ValueError(
+                f"Operator-v2 pause continuity changed for {field}; capture cannot resume safely."
+            )
+    return checkpoint_row
+
+
+def _require_v2_resume_check_continuity(
+    session: dict[str, Any],
+    action: dict[str, Any],
+    check: dict[str, Any],
+    pause_checkpoint: dict[str, Any],
+) -> None:
+    readiness = next(
+        (
+            row
+            for row in session.get("runtime_checks", [])
+            if isinstance(row, dict) and row.get("check_id") == action.get("readiness_check_id")
+        ),
+        None,
+    )
+    if readiness is None:
+        raise ValueError("Operator-v2 resume cannot resolve the action readiness capture.")
+    for field in (
+        "browser_instance_id",
+        "browser_context_id",
+        "tab_id",
+        "preview_session_id",
+    ):
+        if check.get(field) != readiness.get(field):
+            raise ValueError(f"Operator-v2 resume {field} differs from the opened action boundary.")
+    if sorted(check.get("loaded_client_container_ids", [])) != sorted(
+        readiness.get("loaded_client_container_ids", [])
+    ):
+        raise ValueError(
+            "Operator-v2 resume loaded containers differ from the opened action boundary."
+        )
+    for field in (
+        "preview_event_cursor",
+        "network_request_cursor",
+        "datalayer_call_cursor",
+    ):
+        if check.get(field, -1) < readiness.get(field, -1):
+            raise ValueError(f"Operator-v2 resume {field} moved backwards while paused.")
+    paused_stream = pause_checkpoint.get("stream_contract", {})
+    if isinstance(paused_stream, dict):
+        cursor_pairs = {
+            "preview_event_cursor": "reviewed_through_preview_event_index",
+            "datalayer_call_cursor": "reviewed_through_datalayer_call_index",
+        }
+        for check_field, stream_field in cursor_pairs.items():
+            paused_cursor = paused_stream.get(stream_field)
+            if isinstance(paused_cursor, int) and check.get(check_field, -1) < paused_cursor:
+                raise ValueError(
+                    f"Operator-v2 resume {check_field} precedes the reviewed stream checkpoint."
+                )
+
+
 def _pause_run(args: argparse.Namespace) -> dict[str, Any]:
     session = load_object(args.session)
     state = session.get("operator_state", {})
-    if session.get("operator_contract_version") != 1:
-        raise ValueError("pause-run requires operator_contract_version=1.")
+    contract_version = session.get("operator_contract_version")
+    if contract_version not in {1, 2}:
+        raise ValueError("pause-run requires operator_contract_version=1 or 2.")
+    results = load_object(args.results) if args.results is not None else None
+    if contract_version == 2 and results is None:
+        raise ValueError("Operator-v2 pause-run requires --results for run compatibility.")
+    if results is not None:
+        _require_guided_contract(results, session)
     if isinstance(state, dict) and state.get("status") == "FINISHED":
         raise ValueError("A finished run cannot be paused; reopen an event first.")
     if isinstance(state, dict) and state.get("status") == "PAUSED":
         raise ValueError("The run is already paused.")
     staged = deepcopy(session)
     checkpoint(staged, Namespace(label=args.label))
+    if contract_version == 2:
+        staged["checkpoints"][-1].update(_pause_contract(staged))
     staged["operator_state"] = {
         "status": "PAUSED",
         "current_event_group_id": (
@@ -373,8 +493,16 @@ def _pause_run(args: argparse.Namespace) -> dict[str, Any]:
         ),
     }
     staged["updated_at"] = now()
+    if contract_version == 2 or results is not None:
+        errors = validate_session(staged, results=results, final=False)
+        if errors:
+            raise ValueError("\n".join(errors))
     save_atomic(args.session, staged)
-    return {"paused": True, "label": args.label}
+    return {
+        "paused": True,
+        "label": args.label,
+        "operator_contract_version": contract_version,
+    }
 
 
 def _resume_run(args: argparse.Namespace) -> dict[str, Any]:
@@ -384,6 +512,11 @@ def _resume_run(args: argparse.Namespace) -> dict[str, Any]:
     state = session.get("operator_state", {})
     if not isinstance(state, dict) or state.get("status") != "PAUSED":
         raise ValueError("resume-run requires a paused run.")
+    pause_checkpoint = (
+        _require_v2_pause_continuity(session)
+        if session.get("operator_contract_version") == 2
+        else {}
+    )
     action = next(
         (
             row
@@ -427,6 +560,8 @@ def _resume_run(args: argparse.Namespace) -> dict[str, Any]:
         ),
     )
     check = staged["runtime_checks"][-1]
+    if session.get("operator_contract_version") == 2:
+        _require_v2_resume_check_continuity(staged, action, check, pause_checkpoint)
     check["consumed"] = True
     check["consumed_by_action_id"] = action.get("action_id")
     staged["operator_state"] = {
@@ -460,6 +595,19 @@ def _close_event(args: argparse.Namespace) -> dict[str, Any]:
         raise ValueError("The event has no registered interaction cases.")
     if any(row.get("execution_status") == "PENDING" for row in group_cases):
         raise ValueError("Close or execute every applicable interaction case first.")
+    coverage_revision = None
+    if session.get("operator_contract_version") == 2:
+        coverage = next(
+            (
+                row
+                for row in session.get("coverage_decisions", [])
+                if isinstance(row, dict) and row.get("event_group_id") == args.event_group_id
+            ),
+            None,
+        )
+        if not isinstance(coverage, dict) or coverage.get("status") != "FROZEN":
+            raise ValueError("Freeze the event scenario coverage before closure.")
+        coverage_revision = coverage.get("revision")
     group_action_ids = {
         str(row.get("action_id", ""))
         for row in session.get("actions", [])
@@ -500,20 +648,21 @@ def _close_event(args: argparse.Namespace) -> dict[str, Any]:
         raise ValueError("Event patch and requested event group differ.")
     updated_session = deepcopy(session)
     timestamp = now()
-    updated_session.setdefault("event_closures", []).append(
-        {
-            "event_group_id": args.event_group_id,
-            "plan_order": event.get("plan_order"),
-            "case_ids": [str(row.get("case_id", "")) for row in group_cases],
-            "final_action_ids": [
-                str(row.get("final_action_id", ""))
-                for row in group_cases
-                if row.get("execution_status") == "EXECUTED"
-            ],
-            "closed_at": timestamp,
-            "feedback_emitted_at": timestamp,
-        }
-    )
+    closure = {
+        "event_group_id": args.event_group_id,
+        "plan_order": event.get("plan_order"),
+        "case_ids": [str(row.get("case_id", "")) for row in group_cases],
+        "final_action_ids": [
+            str(row.get("final_action_id", ""))
+            for row in group_cases
+            if row.get("execution_status") == "EXECUTED"
+        ],
+        "closed_at": timestamp,
+        "feedback_emitted_at": timestamp,
+    }
+    if session.get("operator_contract_version") == 2:
+        closure["coverage_revision"] = coverage_revision
+    updated_session.setdefault("event_closures", []).append(closure)
     updated_session["operator_state"] = {
         "status": "ACTIVE",
         "current_event_group_id": None,
@@ -634,13 +783,20 @@ def _finish_run(args: argparse.Namespace) -> dict[str, Any]:
         "finished": True,
         "workbook": str(args.workbook.resolve()),
         "events": event_feedback(results, staged_session),
+        "conclusion": final_conclusion(results, staged_session),
     }
 
 
 def _status(args: argparse.Namespace) -> dict[str, Any]:
     results = load_object(args.results)
     session = load_object(args.session)
+    _require_guided_contract(results, session)
     return {
+        "guided_contract": {
+            "compatible": True,
+            "operator_contract_version": session.get("operator_contract_version"),
+            "run_id": session.get("run_id"),
+        },
         "operator_state": session.get("operator_state"),
         "next_event": _next_event(results, session),
         "closed_events": event_feedback(results, session)[: len(session.get("event_closures", []))],

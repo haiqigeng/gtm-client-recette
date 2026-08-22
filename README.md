@@ -6,247 +6,86 @@
 
 ## Current release
 
-[v3.0.0](https://github.com/haiqigeng/gtm-client-recette/releases/tag/v3.0.0) is
-the current supported release. Download the validated package:
-[gtm-client-recette-v3.0.0.zip](https://github.com/haiqigeng/gtm-client-recette/releases/download/v3.0.0/gtm-client-recette-v3.0.0.zip).
+[v3.1.0](https://github.com/haiqigeng/gtm-client-recette/releases/tag/v3.1.0)
+is the current supported release. Download the validated package:
+[gtm-client-recette-v3.1.0.zip](https://github.com/haiqigeng/gtm-client-recette/releases/download/v3.1.0/gtm-client-recette-v3.1.0.zip).
 
-v3.0.0 is an identity-only major release. The skill, package, archive root,
-repository, and invocation name are now `gtm-client-recette`. The approved
-North Star, client-side scope, fixed 19-layer/8-sublayer contract, schemas,
-evidence requirements, and operational behaviour are unchanged from v2.2.1.
-Server-container acceptance remains outside this skill.
+This is a personal expert skill for client-side GTM Preview acceptance testing.
+It tests an existing tracking plan on the real site and behaves like an analyst
+during recette: it validates tags, but also notices dead pages, wrong business
+state, odd events between interactions, wrong containers, broken journeys, and
+coherent-looking tracking that is semantically false.
 
-An expert-only workflow for testing an existing client-side Google Tag Manager
-implementation against a tracking plan. It coordinates Playwright, GTM Preview,
-Tag Assistant, analytics and media tags, browser destination requests,
-container-scoped client-web runs, consent scenarios, cross-field and privacy checks, browser
-contexts, prior-run comparison, and a detailed XLSX result workbook.
+## What v3.1 adds
 
-## Who It Serves
+- Explainable scenario classes and sampling instead of either one arbitrary
+  example or every product/page.
+- Complete accounting for the dataLayer stream before, during, and between
+  planned interactions.
+- Separate technical-delivery and overall semantic verdicts.
+- Page-health and before/after journey-state evidence.
+- Positive business anchors, so two matching empty systems do not prove a
+  populated cart or another positive state.
+- Binding to the already-approved browser, tab, Preview session, and actually
+  loaded GTM container.
+- Same-session protected handoffs for CAPTCHA/authentication.
+- Natural or explicitly simulated acquisition/referrer scenarios.
+- Exact current-run identity across normalized results, session ledgers,
+  recorder snapshots, and imported sidecars, with stale-run rejection.
+- Complete evidence-catalog hashing, capture-time request redaction, safer
+  configurable regexes, and transactional path/import guards.
+- One simple layer-by-layer result per event and a plan-ordered conclusion.
 
-- Web analysts, analytics consultants, GTM specialists, and agencies.
-- Expert QA teams that already understand dataLayer, GTM variables, triggers,
-  tags, consent, and Tag Assistant.
-- Codex and other Markdown-capable agents that can operate a Playwright browser.
+## Default inspection
 
-It is intentionally not a beginner marketing-team guide.
+All 19 canonical rows remain visible for auditability, but only applicable
+layers are substantive. A normal planned dataLayer event with a browser-sending
+tag requires ten default layers: action boundary, raw push, resolved Data Layer,
+tag inventory, variables, configuration, firing/count, runtime parameters,
+browser request, and sensitive-data scan. Consent, trigger, sequence, business,
+regression, container, and conditional layers activate only when applicable.
 
-## How It Works
+## Coverage policy
 
-The workflow is organized into three layers:
+The skill tests every finite material branch and samples only within large
+groups that share one behavior signature. A sampled class includes an ordinary
+and contrasting member, plus applicable boundaries and exceptions. Any failure,
+ambiguity, unseen material value, or new runtime branch reopens coverage review.
+Every case stores explicit material-dimension values, and every class closes all
+four adaptive trigger reviews even when no trigger was observed.
 
-1. **Orientation**: establish scope, interpret the client's bespoke tracking plan,
-   define journeys, and confirm expectations.
-2. **Execution**: open the dedicated browser, connect GTM Preview, reproduce
-   journeys, test every applicable interaction and material finite value,
-   reconcile every business push in the ordered action-window stream, complete
-   ordinary synthetic-data gates, and capture evidence.
-3. **Judgement**: compare raw or native client signals, resolved Data Layer
-   state, variables, tag values/firing, destination requests, trigger and
-   sequence logic, consent, business rules, redacted sensitive-data results,
-   context checks, and optional regressions against the confirmed specification.
+## Output
 
-Strict validation reconciles destination IDs, vendor event names, and tested
-parameters with their raw browser-request paths. It also rejects omitted
-canonical or per-tag verdicts, missing tag scope/inventory, inconsistent
-trigger/consent/client-check claims,
-incomplete privacy scans, provenance-free evidence, and unreconciled
-baseline comparisons. Final certification additionally cross-checks the
-normalized result against the session's interaction cases, attempts, layer
-results, classified push counts, and direct evidence linkage. Literal vendor
-keys such as `ep.value` are supported through quoted request paths.
+Each event receives immediate case and layer statuses, a plain reason,
+technical versus semantic components, evidence IDs, and a retest instruction
+when needed. The final conclusion lists every event in tracking-plan order.
 
-There is one operational recette workflow, not a separate dataLayer-only mode.
-The tracking plan supplies expected values and optional journey hints; it never
-selects evidence layers. Tag scope is a separate declared policy:
-`analytics_only` by default, exact plan-declared media destinations when
-present, all relevant client-side tags only on explicit request, or a fixed tag
-set. The central comparison remains:
-
-```text
-tracking plan -> raw push/API Call -> resolved Data Layer
--> concerned-tag inventory and scope -> each in-scope tag's GTM variables
--> configuration -> firing/non-firing/count -> runtime tag values/types
--> decoded browser send -> per-layer/per-tag verdict -> event verdict
-```
-
-Every link keeps its own status. A correct dataLayer payload therefore cannot
-hide a wrong configured source, firing decision, runtime value or type, or
-browser request.
-
-Before an absent event can fail, the real website interaction must have
-independently completed and the acceptance-relevant stream must have settled.
-A failed click is retained, its event window is reconciled, and one transient
-retry uses a new linked action ID. A journal-only push missing from Tag
-Assistant triggers a controlled connection/page-node/window check and cannot
-substitute for required Preview evidence.
-
-Every run begins with a concise responsibility-labelled preflight, waits for
-`READY`, and then pauses only at protected checkpoints.
-
-Coverage is exhaustive where the website exposes a safe finite set: repeated
-header/menu/footer controls, cards, CTAs, placements, and low-cardinality
-values are parameterized and all executed. Large combinatorial spaces use
-documented boundary and risk-based pairwise coverage. The workflow does not
-invent arbitrary negative journeys; it detects duplicate, premature, delayed,
-wrong-order, and wrong-context events while reconciling the planned positive
-journey, then reproduces an anomaly only when useful.
-
-An encountered ordinary form, sign-up, login preparation, lead, or account
-gate remains part of the journey. Ordinary fields, privacy acknowledgements,
-tested-conversion opt-ins, and submissions use safe synthetic data without
-repeated prompts. An inoperable checkbox is a `UI_CONTROL_BLOCKER` only after
-all safe control/retry methods, not a consent or authorization boundary.
-Synthetic credentials may be used ephemerally in the same controlled run and
-reused for login, but are never stored or shown in chat. Protected credentials
-or sign-in, MFA, CAPTCHA, verification links/codes, real payment, external
-approval, and irreversible actions stay under analyst control. CMP simulation
-keeps its separate one-time approval.
-
-## Inputs And Outputs
-
-Inputs may be an XLSX, CSV, sheet export, document, screenshot, mock-up, or
-analyst explanation. The skill recognizes the client's structure and maps it to
-an internal test matrix without forcing a new template. XLSX hyperlinks,
-comments, merged/hidden structure, and embedded images are retained during
-inspection so supplied journey guidance is not lost.
-
-The required output is a concise XLSX validation matrix backed by 21 validated
-worksheets, including the Defect Register, interaction cases, Layer Verdicts,
-and the observed business-push stream.
-Each row shows the tracking-plan value, raw/resolved client signal, GTM/tag
-configuration, runtime and outbound values, component verdicts, exact
-mismatch, and evidence.
+Operator-v2 workbooks contain the 21 legacy detailed sheets plus eight expert
+sheets for coverage decisions, scenario classes, semantic checks, journey
+state, stream segments, protected handoffs, gated flows, and final conclusion.
+Legacy operator-v1 output remains contract 2 with its exact columns;
+operator-v2 output is explicitly contract 3.
 
 ## Boundaries
 
-The workflow tests behaviour only. It does not create a tracking plan, audit or
-clean a GTM container, debug or fix implementation, change the website, publish
-GTM, or make legal/privacy decisions. Server-side GTM clients,
-transformations, requests, and browser/server deduplication are not included.
-Unallowlisted sensitive content is reported only through redacted scanner
-findings and is refused by workbook generation until the source is quarantined
-or replaced with safe synthetic/redacted evidence.
+The skill does not design tracking plans, mutate or publish GTM, fix websites,
+certify server-side GTM or vendor ingestion, or make legal consent decisions.
+It can exercise acquisition/SEO-related tracking scenarios, but it does not
+test indexing or ranking.
 
-## Run
-
-Install the small deterministic dependency set:
+## Development validation
 
 ```powershell
 python -m pip install -e ".[dev]"
-```
-
-Close the plan-ordered event through the guided validation/feedback gate, then
-build the final workbook only after every event is closed:
-
-```powershell
-python -B scripts/recette_operator.py close-event `
-  normalized-results.json session.json event-001-patch.json `
-  --event-group-id EVG-001
-python -B scripts/recette_operator.py finish-run `
-  normalized-results.json session.json gtm-recette-results.xlsx
-```
-
-New guided runs declare `run.action_boundary_contract_version: 1`. Runtime
-snapshots must come from the supported Playwright/browser-connector probes and
-use fresh, phase-bound, distinct action/network evidence. Older schema-v3
-results without this marker remain readable, but the operator never invents
-their missing checks or cursors.
-
-Reopen late-discovered coverage without losing history:
-
-```powershell
-python -B scripts/recette_operator.py reopen-event `
-  normalized-results.json session.json --event-group-id EVG-001 `
-  --reason "Late material footer interaction discovered"
-```
-
-The workbook and sidecars identify `Output contract: 2` (the CSV repeats it on
-every row) so exact-header consumers can distinguish the outcome/anomaly/
-runtime-cursor interface from the earlier output contract.
-
-Inspect a plan, decode safe browser-request captures, and validate results
-event by event:
-
-```powershell
-python -B scripts/inspect_tracking_plan.py tracking-plan.xlsx plan-inspection.json
-python -B scripts/decode_browser_requests.py requests.json decoded-requests.json
-python -B scripts/incremental_recette.py status normalized-results.json `
-  --session-ledger session.json
-python -B scripts/incremental_recette.py validate-event normalized-results.json `
-  --event-group-id EVG-001 `
-  --session-ledger session.json
-python -B scripts/preview_session_ledger.py import-pushes session.json pushes.json
-python -B scripts/preview_session_ledger.py import-layers session.json layers.json `
-  --action-id ACT-001
-python -B scripts/preview_session_ledger.py scaffold-tag-results session.json `
-  --action-id ACT-001 --output tag-results.json
-python -B scripts/recette_operator.py status normalized-results.json session.json
-```
-
-Migrate legacy v2 discovery without inheriting proof, and verify a packaged
-release or local installation against its SHA-256 manifest:
-
-```powershell
-python -B scripts/migrate_schema_v2_to_v3.py old-results.json normalized-results.json `
-  --legacy-session old-session.json --case-manifest retest-cases.json
-python -B scripts/verify_release_artifact.py dist/gtm-client-recette-v3.0.0.zip
-```
-
-Evaluate declared client-side rules, scan for redacted sensitive-data findings,
-or compare a supplied previous run:
-
-```powershell
-python -B scripts/validate_business_rules.py normalized-results.json
-python -B scripts/scan_sensitive_data.py normalized-results.json
-python -B scripts/diff_recette_runs.py previous-results.json normalized-results.json
-python -B scripts/build_retest_manifest.py normalized-results.json session.json retest.json
-```
-
-Register optional upstream context without granting it verdict authority, or
-emit concise report sidecars:
-
-```powershell
-python -B scripts/register_supporting_artifact.py normalized-results.json audit-facts.json `
-  --artifact-id ART-AUDIT-001 `
-  --artifact-type gtm_container_audit_facts `
-  --source-skill gtm-container-audit-cleanup `
-  --source-run-id AUDIT-001 `
-  --source-version 1.0.0
-python -B scripts/build_recette_report.py normalized-results.json gtm-recette-results.xlsx `
-  --strict --session-ledger session.json `
-  --defects-csv defects.csv --defects-md defects.md `
-  --stakeholder-summary summary.md
-```
-
-Run regression tests:
-
-```powershell
+python -m ruff check --no-cache .
+python -m ruff format --check .
 python -m unittest discover -s tests -v
-```
-
-Run the browser-helper regression:
-
-```powershell
-python -m pip install -e ".[browser-test]"
-python -m playwright install chromium
 python -B tests/run_browser_helpers.py
+python -B scripts/check_release.py --tag v3.1.0
+python -B scripts/build_skill_package.py --output dist/gtm-client-recette-v3.1.0.zip
+python -B scripts/verify_release_artifact.py dist/gtm-client-recette-v3.1.0.zip
 ```
 
-The full agent workflow starts in `SKILL.md`. It loads the compact interaction
-and execution contracts first, then loads detailed references only at the stage
-that uses them. The reference map is:
-
-- `references/01-orientation/`: concise input/output and cross-skill boundaries.
-- `references/02-execution/`: interaction, browser readiness, multi-vendor
-  destinations/containers, Tag Assistant operations, interaction capture,
-  incremental evidence, runtime contexts, consent, and test data.
-- `references/03-judgement/`: comparison, evidence, matching, conditional and
-  business/privacy rules, regression, schema, verdict, and workbook contracts.
-- `scripts/`: deterministic schema, plan inspection, browser helpers, request
-  decoding, incremental validation, business-rule, privacy, regression, and
-  XLSX tooling.
-- `tests/`: regression coverage for strict evidence and report output.
-
-Do not store client exports, screenshots, container IDs, domains, emails,
-credentials, or generated reports in a release bundle.
+The release archive intentionally contains only runtime skill files. Tests,
+repository governance files, caches, previous-run output, and packaging tools
+remain outside the installed skill.

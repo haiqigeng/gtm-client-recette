@@ -33,6 +33,8 @@ DIRECT_CAPTURE_KINDS = {
     "direct_vendor_call",
     "custom_html",
     "ga4_enhanced_measurement",
+    "page_health",
+    "journey_state",
 }
 
 DETERMINISTIC_CAPTURE_KINDS = {

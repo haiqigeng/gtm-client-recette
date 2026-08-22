@@ -15,6 +15,8 @@ from evidence_contract import (
     DIRECT_CAPTURE_KINDS,
     EVENT_INDEX_EVIDENCE_KINDS,
 )
+from evidence_integrity import integrity_errors
+from gated_flow_contract import gated_flow_errors
 from layer_contract import (
     CANONICAL_LAYERS,
     LAYER_APPLICABILITY_MODES,
@@ -27,11 +29,15 @@ from layer_contract import (
     normalize_tag_scope,
     tag_scope_decision,
 )
+from page_context_contract import acquisition_errors, handoff_errors
 from runtime_state_contract import (
     INTERRUPTION_REASONS,
     runtime_snapshot_errors,
     validate_runtime_evidence,
 )
+from scenario_coverage import coverage_errors
+from semantic_contract import semantic_contract_errors, semantic_statuses_by_group
+from stream_contract import stream_errors
 from tag_evidence_contract import (
     evidence_matches_tag,
     has_network_capture,
@@ -55,7 +61,10 @@ PUSH_CLASSIFICATIONS = {
     "wrong_context",
     "unplanned_relevant",
 }
-ANOMALOUS_PUSH_CLASSIFICATIONS = PUSH_CLASSIFICATIONS - {"expected", "companion"}
+ANOMALOUS_PUSH_CLASSIFICATIONS = PUSH_CLASSIFICATIONS - {
+    "expected",
+    "companion",
+}
 DISCOVERY_SOURCES = {
     "tracking_plan",
     "supplied_url",
@@ -1054,7 +1063,7 @@ def _validate_operator_action_boundary(
     action: dict[str, Any],
 ) -> None:
     """Bind action cursors and readiness claims to captured runtime checks."""
-    if context.operator_contract_version != 1:
+    if context.operator_contract_version not in {1, 2}:
         return
     action_id = str(action.get("action_id", "")).strip()
     case_id = str(action.get("case_id", "")).strip()
@@ -1089,14 +1098,20 @@ def _validate_operator_action_boundary(
             "observed_url_before": "website_url",
             "selected_page_url_before": "selected_page_url",
         }
+        if context.operator_contract_version == 2:
+            expected_pairs["datalayer_call_index_before"] = "datalayer_call_cursor"
         for action_field, check_field in expected_pairs.items():
             if action.get(action_field) != readiness.get(check_field):
                 context.errors.append(
                     f"session action {action_id}: {action_field} differs from readiness capture"
                 )
-        if (
-            action.get("preview_connected_before") is not True
-            or action.get("target_ready_before") is not True
+        invalid_page_capture = (
+            context.operator_contract_version == 2
+            and isinstance(readiness.get("page_health"), dict)
+            and readiness["page_health"].get("status") == "FAIL"
+        )
+        if action.get("preview_connected_before") is not True or (
+            action.get("target_ready_before") is not True and not invalid_page_capture
         ):
             context.errors.append(
                 f"session action {action_id}: captured readiness is not fully satisfied"
@@ -1146,6 +1161,8 @@ def _validate_operator_action_boundary(
         "preview_connected_after": "preview_connected",
         "stream_settled": "stream_quiet",
     }
+    if context.operator_contract_version == 2:
+        expected_pairs["datalayer_call_index_after"] = "datalayer_call_cursor"
     for action_field, check_field in expected_pairs.items():
         if action.get(action_field) != settlement.get(check_field):
             context.errors.append(
@@ -1625,11 +1642,14 @@ def _completed_case_actions(
     context: _ValidationContext,
     case_id: str,
 ) -> list[dict[str, Any]]:
+    accepted_outcomes = (
+        {"completed", "failed"} if context.operator_contract_version == 2 else {"completed"}
+    )
     return [
         row
         for row in context.actions_by_case.get(case_id, [])
         if row.get("state") == "SETTLED"
-        and row.get("interaction_outcome") == "completed"
+        and row.get("interaction_outcome") in accepted_outcomes
         and row.get("stream_settled") is True
         and row.get("preview_connected_after") is True
     ]
@@ -1693,9 +1713,11 @@ def _validate_push_index(
     context: _ValidationContext,
     push_id: str,
     push: dict[str, Any],
-    action: dict[str, Any],
+    action: dict[str, Any] | None,
 ) -> None:
     event_index = push.get("event_index")
+    if context.operator_contract_version == 2 and event_index is None:
+        event_index = push.get("preview_event_index")
     stream_id = str(push.get("stream_id", "tag_assistant")).strip()
     connection_epoch = push.get("connection_epoch", 1)
     if not isinstance(event_index, int) or isinstance(event_index, bool):
@@ -1710,7 +1732,7 @@ def _validate_push_index(
             f"session business push {push_id}: connection_epoch must be a positive integer"
         )
         return
-    if connection_epoch != action.get("connection_epoch", 1):
+    if action is not None and connection_epoch != action.get("connection_epoch", 1):
         context.errors.append(
             f"session business push {push_id}: connection_epoch differs from its action"
         )
@@ -1720,6 +1742,8 @@ def _validate_push_index(
             f"session business push {push_id}: duplicate stream/connection-epoch/event index"
         )
     context.push_indexes.add(key)
+    if action is None:
+        return
     last_event = action.get("last_event_before")
     settled_event = action.get("settled_final_event")
     if isinstance(last_event, int) and event_index <= last_event:
@@ -1736,7 +1760,7 @@ def _validate_push_evidence(
     context: _ValidationContext,
     push_id: str,
     push: dict[str, Any],
-    action_id: str,
+    action_id: str | None,
 ) -> None:
     if not context.results_provided:
         return
@@ -1748,9 +1772,21 @@ def _validate_push_evidence(
         return
     if evidence_row.get("capture_mode") != "direct":
         context.errors.append(f"session business push {push_id}: evidence is not a direct capture")
-    if evidence_row.get("action_id") != action_id:
-        context.errors.append(f"session business push {push_id}: evidence action_id mismatch")
-    if evidence_row.get("event_index") != push.get("event_index"):
+    if action_id:
+        if evidence_row.get("action_id") != action_id:
+            context.errors.append(f"session business push {push_id}: evidence action_id mismatch")
+    elif evidence_row.get("action_id") not in (None, ""):
+        context.errors.append(
+            f"session business push {push_id}: inter-action evidence cannot claim action_id"
+        )
+    if (
+        context.operator_contract_version == 2
+        and not action_id
+        and evidence_row.get("segment_id") != push.get("segment_id")
+    ):
+        context.errors.append(f"session business push {push_id}: evidence segment_id mismatch")
+    expected_event_index = push.get("event_index", push.get("preview_event_index"))
+    if evidence_row.get("event_index") != expected_event_index:
         context.errors.append(f"session business push {push_id}: evidence event_index mismatch")
 
 
@@ -1768,7 +1804,7 @@ def _validate_push_anomaly(
     context: _ValidationContext,
     push_id: str,
     push: dict[str, Any],
-    action_id: str,
+    action_id: str | None,
     group_id: str,
 ) -> None:
     classification = push.get("classification")
@@ -1783,8 +1819,19 @@ def _validate_push_anomaly(
         return
     if unexpected is None:
         return
-    if unexpected.get("action_id") != action_id:
-        context.errors.append(f"session business push {push_id}: unexpected action_id mismatch")
+    if action_id:
+        if unexpected.get("action_id") != action_id:
+            context.errors.append(f"session business push {push_id}: unexpected action_id mismatch")
+    elif unexpected.get("action_id") not in (None, ""):
+        context.errors.append(
+            f"session business push {push_id}: inter-action unexpected cannot claim action_id"
+        )
+    if (
+        context.operator_contract_version == 2
+        and not action_id
+        and unexpected.get("segment_id") != push.get("segment_id")
+    ):
+        context.errors.append(f"session business push {push_id}: unexpected segment_id mismatch")
     if str(unexpected.get("event_group_id", "")).strip() != group_id:
         context.errors.append(
             f"session business push {push_id}: unexpected event_group_id mismatch"
@@ -1815,13 +1862,22 @@ def _validate_push(
     push: dict[str, Any],
 ) -> None:
     action_id = str(push.get("action_id", "")).strip()
-    action = context.action_by_id.get(action_id)
-    if action is None:
+    action = context.action_by_id.get(action_id) if action_id else None
+    if action is None and context.operator_contract_version != 2:
         context.errors.append(f"session business push {push_id}: unknown action_id '{action_id}'")
         return
-    context.pushes_by_action[action_id].append(push)
-    if push.get("case_id") != action.get("case_id"):
-        context.errors.append(f"session business push {push_id}: case_id differs from its action")
+    if action_id and action is None:
+        context.errors.append(f"session business push {push_id}: unknown action_id '{action_id}'")
+    if action is not None:
+        context.pushes_by_action[action_id].append(push)
+        if push.get("case_id") != action.get("case_id"):
+            context.errors.append(
+                f"session business push {push_id}: case_id differs from its action"
+            )
+    elif push.get("case_id") not in (None, ""):
+        context.errors.append(
+            f"session business push {push_id}: inter-action push cannot claim case_id"
+        )
     classification = push.get("classification")
     if classification not in PUSH_CLASSIFICATIONS:
         context.errors.append(f"session business push {push_id}: invalid classification")
@@ -1847,7 +1903,9 @@ def _validate_push(
     _validate_push_index(context, push_id, push, action)
     group_value = push.get("event_group_id")
     group_id = group_value.strip() if isinstance(group_value, str) else ""
-    if classification != "unplanned_relevant" and not group_id:
+    if (
+        context.operator_contract_version == 2 or classification != "unplanned_relevant"
+    ) and not group_id:
         context.errors.append(
             f"session business push {push_id}: classification requires event_group_id"
         )
@@ -1855,8 +1913,8 @@ def _validate_push(
         context.errors.append(
             f"session business push {push_id}: unknown event_group_id '{group_id}'"
         )
-    _validate_push_evidence(context, push_id, push, action_id)
-    _validate_push_anomaly(context, push_id, push, action_id, group_id)
+    _validate_push_evidence(context, push_id, push, action_id or None)
+    _validate_push_anomaly(context, push_id, push, action_id or None, group_id)
     if (
         classification not in {"companion", "unplanned_relevant"}
         and group_id in context.event_by_group
@@ -1949,6 +2007,9 @@ def _session_event_status(
             statuses.append(unexpected.get("status"))
         else:
             statuses.append("FAIL")
+    semantic_status = semantic_statuses_by_group(context.ledger).get(group_id)
+    if semantic_status:
+        statuses.append(semantic_status)
     return worst_status(statuses)
 
 
@@ -1973,6 +2034,9 @@ def _validate_event_statuses(context: _ValidationContext) -> None:
                 if str(row.get("event_group_id", "")).strip() == group_id
             ],
         )
+        semantic_status = semantic_statuses_by_group(context.ledger).get(group_id)
+        if semantic_status:
+            normalized_status = worst_status([normalized_status, semantic_status])
         if context.final and session_status != normalized_status:
             context.errors.append(
                 f"session event {group_id}: execution status {session_status} "
@@ -1989,7 +2053,7 @@ def _validate_result_alignment(context: _ValidationContext) -> None:
 
 def _validate_runtime_checks(context: _ValidationContext) -> None:
     """Validate captured readiness/settlement records and their direct proof."""
-    if context.operator_contract_version != 1:
+    if context.operator_contract_version not in {1, 2}:
         return
     for check in context.runtime_checks:
         check_id = str(check.get("check_id", "")).strip()
@@ -2047,7 +2111,7 @@ def _validate_runtime_checks(context: _ValidationContext) -> None:
                 action_id=action_id,
                 case=case,
                 ledger=context.ledger,
-                results={"run": context.run},
+                results={"run": context.run, "evidence": list(context.evidence.values())},
                 expected_connection_epoch=action.get("connection_epoch", 1),
                 recorded_at=check.get("recorded_at"),
                 action_timestamp=action.get("action_timestamp"),
@@ -2096,7 +2160,7 @@ def _ordered_event_inventory(context: _ValidationContext) -> list[dict[str, Any]
 
 def _validate_event_closures(context: _ValidationContext) -> None:
     """Require plan-ordered event closure and immediate feedback acknowledgement."""
-    if context.operator_contract_version != 1:
+    if context.operator_contract_version not in {1, 2}:
         return
     ordered_inventory = _ordered_event_inventory(context)
     expected_groups = [str(row.get("event_group_id", "")) for row in ordered_inventory]
@@ -2165,7 +2229,7 @@ def _validate_event_closures(context: _ValidationContext) -> None:
 
 def _validate_closure_history(context: _ValidationContext) -> None:
     """Keep every explicit reopening auditable without treating old proof as current."""
-    if context.operator_contract_version != 1:
+    if context.operator_contract_version not in {1, 2}:
         return
     inventory_order = {
         str(row.get("event_group_id", "")): index
@@ -2240,6 +2304,94 @@ def _validate_closure_history(context: _ValidationContext) -> None:
                 )
 
 
+def _auxiliary_evidence_errors(
+    ledger: dict[str, Any],
+    evidence: dict[str, dict[str, Any]],
+) -> list[str]:
+    """Resolve operator-v2 sidecar references and bind gated proof to its action."""
+    errors: list[str] = []
+
+    def references(value: Any, path: str) -> list[tuple[str, str]]:
+        output: list[tuple[str, str]] = []
+        if isinstance(value, dict):
+            for key, child in value.items():
+                child_path = f"{path}.{key}"
+                if key == "evidence_id" and nonempty(child):
+                    output.append((child_path, str(child).strip()))
+                elif key == "evidence_ids" and isinstance(child, list):
+                    output.extend(
+                        (f"{child_path}[{index}]", str(item).strip())
+                        for index, item in enumerate(child)
+                        if nonempty(item)
+                    )
+                else:
+                    output.extend(references(child, child_path))
+        elif isinstance(value, list):
+            for index, child in enumerate(value):
+                output.extend(references(child, f"{path}[{index}]"))
+        return output
+
+    sidecars = {
+        key: ledger.get(key)
+        for key in (
+            "coverage_decisions",
+            "stream_contract",
+            "stream_segments",
+            "journey_states",
+            "semantic_checks",
+            "protected_handoffs",
+            "gated_flows",
+        )
+    }
+    for path, evidence_id in references(sidecars, "session.v2"):
+        if evidence_id not in evidence:
+            errors.append(f"{path}: unknown evidence ID '{evidence_id}'")
+
+    for collection in ("protected_handoffs", "gated_flows"):
+        for row in ledger.get(collection, []):
+            if not isinstance(row, dict):
+                continue
+            action_id = str(row.get("action_id", "")).strip()
+            case_id = str(row.get("case_id", "")).strip()
+            row_id = str(row.get("handoff_id") or row.get("flow_id") or "unknown").strip()
+            for evidence_id in row.get("evidence_ids", []):
+                actual = evidence.get(str(evidence_id).strip())
+                if not isinstance(actual, dict):
+                    continue
+                if actual.get("capture_mode") not in {"direct", "analyst_supplied"}:
+                    errors.append(
+                        f"session {collection} {row_id}: evidence {evidence_id} "
+                        "must be direct or analyst-supplied"
+                    )
+                if str(actual.get("action_id", "")).strip() != action_id:
+                    errors.append(
+                        f"session {collection} {row_id}: evidence {evidence_id} "
+                        "is bound to another action"
+                    )
+                evidence_case = str(actual.get("case_id", "")).strip()
+                if evidence_case and evidence_case != case_id:
+                    errors.append(
+                        f"session {collection} {row_id}: evidence {evidence_id} "
+                        "is bound to another case"
+                    )
+
+    for segment in ledger.get("stream_segments", []):
+        if not isinstance(segment, dict):
+            continue
+        segment_id = str(segment.get("segment_id", "")).strip()
+        for evidence_id in segment.get("evidence_ids", []):
+            actual = evidence.get(str(evidence_id).strip())
+            if not isinstance(actual, dict):
+                continue
+            bound_segment = str(actual.get("segment_id", "")).strip()
+            if bound_segment and bound_segment != segment_id:
+                errors.append(
+                    f"session stream segment {segment_id}: evidence {evidence_id} "
+                    "is bound to another segment"
+                )
+    return errors
+
+
 def validate_session(
     ledger: dict[str, Any],
     *,
@@ -2254,10 +2406,20 @@ def validate_session(
         ]
     errors: list[str] = []
     operator_contract_version = ledger.get("operator_contract_version")
-    if operator_contract_version not in (None, 1):
-        errors.append("session: operator_contract_version must be 1 when supplied")
-    if final and operator_contract_version == 1 and results is None:
+    if operator_contract_version not in (None, 1, 2):
+        errors.append("session: operator_contract_version must be 1 or 2 when supplied")
+    if final and operator_contract_version in {1, 2} and results is None:
         errors.append("session: operator-contract final validation requires normalized results")
+    if operator_contract_version == 2:
+        session_run_id = str(ledger.get("run_id", "")).strip()
+        if not session_run_id:
+            errors.append("session: operator-contract-v2 requires run_id")
+        if results is not None:
+            normalized_run_id = str((results.get("run") or {}).get("run_id", "")).strip()
+            if not normalized_run_id:
+                errors.append("session: normalized results require run.run_id for operator-v2")
+            elif session_run_id and session_run_id != normalized_run_id:
+                errors.append("session: run_id differs from normalized run.run_id")
     _validate_session_metadata(ledger, errors)
     cases = rows(ledger.get("cases"), "cases", errors)
     actions = rows(ledger.get("actions"), "actions", errors)
@@ -2265,17 +2427,17 @@ def validate_session(
     authorizations = rows(ledger.get("authorizations"), "authorizations", errors)
     runtime_checks = (
         rows(ledger.get("runtime_checks"), "runtime_checks", errors)
-        if operator_contract_version == 1
+        if operator_contract_version in {1, 2}
         else []
     )
     event_closures = (
         rows(ledger.get("event_closures"), "event_closures", errors)
-        if operator_contract_version == 1
+        if operator_contract_version in {1, 2}
         else []
     )
     closure_history = (
         rows(ledger.get("closure_history", []), "closure_history", errors)
-        if operator_contract_version == 1
+        if operator_contract_version in {1, 2}
         else []
     )
     if "connection_epoch" in ledger:
@@ -2347,6 +2509,36 @@ def validate_session(
     _validate_event_closures(context)
     _validate_closure_history(context)
     _validate_result_alignment(context)
+    if operator_contract_version == 2:
+        errors.extend(coverage_errors(ledger, results=results, final=final))
+        errors.extend(stream_errors(ledger, final=final))
+        errors.extend(
+            semantic_contract_errors(
+                ledger,
+                results=results,
+                final=final,
+            )
+        )
+        errors.extend(handoff_errors(ledger, final=final))
+        errors.extend(gated_flow_errors(ledger, final=final))
+        errors.extend(_auxiliary_evidence_errors(ledger, evidence))
+        for case in cases:
+            case_id = str(case.get("case_id", "")).strip()
+            errors.extend(
+                f"session case {case_id}: {error}"
+                for error in acquisition_errors(case.get("acquisition_context"))
+            )
+        integrity = ledger.get("evidence_integrity")
+        if results is not None and (
+            final or not isinstance(integrity, dict) or integrity.get("status") != "PENDING"
+        ):
+            errors.extend(
+                integrity_errors(
+                    ledger,
+                    results=results,
+                    verify_files=final,
+                )
+            )
     unsafe_session_findings = [
         finding
         for finding in session_sensitive_findings(ledger)
@@ -2390,6 +2582,13 @@ def case_action_rows(ledger: dict[str, Any]) -> list[dict[str, Any]]:
                 "action": case.get("action"),
                 "material_variant": case.get("material_variant"),
                 "discovered_from": case.get("discovered_from"),
+                "coverage_decision_id": case.get("coverage_decision_id"),
+                "scenario_class_id": case.get("scenario_class_id"),
+                "sample_role": case.get("sample_role"),
+                "selection_rationale": case.get("selection_rationale"),
+                "population_member_id": case.get("population_member_id"),
+                "acquisition_context": case.get("acquisition_context"),
+                "gated_flow_kind": case.get("gated_flow_kind"),
                 "tag_scope": case.get("tag_scope"),
                 "tag_inventory_status": case.get("tag_inventory_status"),
                 "tag_inventory": case.get("tag_inventory"),
@@ -2409,6 +2608,8 @@ def case_action_rows(ledger: dict[str, Any]) -> list[dict[str, Any]]:
                 "settled_final_event": action.get("settled_final_event"),
                 "network_request_cursor_before": action.get("network_request_cursor_before"),
                 "network_request_cursor_after": action.get("network_request_cursor_after"),
+                "datalayer_call_index_before": action.get("datalayer_call_index_before"),
+                "datalayer_call_index_after": action.get("datalayer_call_index_after"),
                 "interaction_outcome": action.get("interaction_outcome"),
                 "completion_signal": action.get("completion_signal"),
                 "stream_settled": action.get("stream_settled"),

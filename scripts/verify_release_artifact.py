@@ -69,12 +69,26 @@ def verify_install(manifest: dict[str, Any], installed_skill: Path) -> None:
             missing.append(relative)
         elif digest(path.read_bytes()) != expected:
             mismatched.append(relative)
-    if missing or mismatched:
+    actual = {
+        path.relative_to(installed_skill).as_posix()
+        for path in installed_skill.rglob("*")
+        if path.is_file()
+        and path.relative_to(installed_skill).as_posix() != "RELEASE-MANIFEST.json"
+    }
+    extras = sorted(actual - set(files))
+    manifest_path = installed_skill / "RELEASE-MANIFEST.json"
+    if not manifest_path.is_file():
+        missing.append("RELEASE-MANIFEST.json")
+    elif json.loads(manifest_path.read_text(encoding="utf-8")) != manifest:
+        mismatched.append("RELEASE-MANIFEST.json")
+    if missing or mismatched or extras:
         parts = []
         if missing:
             parts.append("missing: " + ", ".join(missing[:10]))
         if mismatched:
             parts.append("hash mismatch: " + ", ".join(mismatched[:10]))
+        if extras:
+            parts.append("unexpected residue: " + ", ".join(extras[:10]))
         raise ValueError(
             "Installed skill differs from the release artifact (" + "; ".join(parts) + ")"
         )

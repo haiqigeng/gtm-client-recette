@@ -12,7 +12,9 @@ from typing import Any
 
 from init_coverage_ledger import event_inventory, initialize_requirement
 from layer_contract import CANONICAL_LAYERS, applicable_layers, normalize_tag_scope
+from path_safety import ensure_distinct_output, ensure_distinct_paths
 from recette_schema import ACTION_BOUNDARY_CONTRACT_VERSION
+from state_io import atomic_write_json, atomic_write_json_pair
 
 
 def parse_args() -> argparse.Namespace:
@@ -59,6 +61,7 @@ def migrate_results(legacy: dict[str, Any]) -> dict[str, Any]:
     run.update(
         {
             "action_boundary_contract_version": ACTION_BOUNDARY_CONTRACT_VERSION,
+            "operator_contract_version_required": 2,
             "tag_scope": normalize_tag_scope(run.get("tag_scope")),
             "included_layers": included,
             "requirement_inventory": [row.get("requirement_id") for row in requirements],
@@ -127,19 +130,26 @@ def migration_case_manifest(legacy_session: dict[str, Any]) -> dict[str, Any]:
 
 def main() -> int:
     args = parse_args()
-    migrated = migrate_results(load_object(args.legacy_results))
-    args.output_results.parent.mkdir(parents=True, exist_ok=True)
-    args.output_results.write_text(
-        json.dumps(migrated, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
     if bool(args.legacy_session) != bool(args.case_manifest):
         raise ValueError("Use --legacy-session and --case-manifest together.")
+    protected_inputs = [args.legacy_results]
+    if args.legacy_session is not None:
+        protected_inputs.append(args.legacy_session)
+    ensure_distinct_output(args.output_results, *protected_inputs)
+    if args.case_manifest:
+        ensure_distinct_paths(args.output_results, args.case_manifest)
+        ensure_distinct_output(args.case_manifest, *protected_inputs)
+    migrated = migrate_results(load_object(args.legacy_results))
     if args.legacy_session and args.case_manifest:
         manifest = migration_case_manifest(load_object(args.legacy_session))
-        args.case_manifest.parent.mkdir(parents=True, exist_ok=True)
-        args.case_manifest.write_text(
-            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        atomic_write_json_pair(
+            args.output_results,
+            migrated,
+            args.case_manifest,
+            manifest,
         )
+    else:
+        atomic_write_json(args.output_results, migrated)
     print(f"Created {args.output_results.resolve()}")
     return 0
 

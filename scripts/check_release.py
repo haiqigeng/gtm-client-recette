@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate release metadata and reject sensitive or generated artifacts."""
+"""Check the lean runtime skill contract before packaging."""
 
 from __future__ import annotations
 
@@ -9,88 +9,73 @@ import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-FORBIDDEN_SUFFIXES = {".xlsx", ".log", ".png", ".jpg", ".jpeg"}
-FORBIDDEN_NAMES = {"normalized-results.json"}
-SEMVER_PATTERN = re.compile(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)")
-CALVER_PATTERN = re.compile(r"(?:19|20)\d{2}\.(?:0?[1-9]|1[0-2])\.(?:0?[1-9]|[12]\d|3[01])")
-NORTH_STAR = (
-    "Execute an expert, tracking-plan-led GTM recette on the actual test website, "
-    "covering every planned event in its original order. Use supplied URLs, screenshots, "
-    "and journeys when available; otherwise identify and execute the relevant website "
-    "interactions. For every event, use GTM Preview to compare the tracking-plan "
-    "expectation with the exact live dataLayer.push payload, its variables, values and "
-    "types, the resolved GTM variables, the expected tag firing or non-firing behaviour, "
-    "and every required runtime tag parameter and value. Complete ordinary and "
-    "authentication-gated journeys with safe synthetic data whenever possible, requesting "
-    "analyst intervention only at protected, consequential, or genuinely ambiguous "
-    "boundaries. Return an immediate, evidence-backed verdict and precise reason for each "
-    "event, omit nothing silently, and finish with a complete plan-ordered status summary "
-    "and validated detailed workbook."
-)
-SAFETY_CONTRACTS = {
-    "references/02-execution/browser-session-and-readiness.md": ("## Adaptive settlement"),
-    "references/02-execution/interaction-and-capture-playbook.md": (
-        "## Verify completion and retry safely"
-    ),
-    "references/02-execution/tag-assistant-operations.md": (
-        "## Reconcile a recorder and Preview gap"
-    ),
-    "references/03-judgement/execution-contract.md": ("## Verdict-safety invariants"),
+SEMVER = re.compile(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)")
+REFERENCE_LINK = re.compile(r"\((references/[^)]+\.md)\)")
+
+REQUIRED_REFERENCES = {
+    "references/01-orientation/scope-and-inputs.md",
+    "references/02-execution/scenario-coverage-and-sampling.md",
+    "references/02-execution/browser-preview-runtime.md",
+    "references/02-execution/forms-consent-acquisition.md",
+    "references/02-execution/continuous-stream.md",
+    "references/03-judgement/evidence-and-layers.md",
+    "references/03-judgement/semantic-verdict.md",
+    "references/03-judgement/operator-and-output.md",
 }
-REQUIRED_EXECUTION_FILES = (
-    "scripts/recette_schema.py",
-    "scripts/acceptance_contract.py",
-    "scripts/layer_contract.py",
-    "scripts/evidence_contract.py",
-    "scripts/tag_evidence_contract.py",
-    "scripts/execution_contract.py",
-    "scripts/runtime_state_contract.py",
-    "scripts/state_io.py",
-    "scripts/value_semantics.py",
-    "scripts/event_feedback.py",
-    "scripts/build_recette_report.py",
-    "scripts/inspect_tracking_plan.py",
-    "scripts/init_coverage_ledger.py",
-    "scripts/import_ga4_tracking_plan_handoff.py",
-    "scripts/preview_session_ledger.py",
-    "scripts/recette_operator.py",
-    "scripts/migrate_schema_v2_to_v3.py",
-    "scripts/datalayer_recorder.js",
-    "scripts/dom_interaction_census.js",
-    "scripts/decode_browser_requests.py",
-    "scripts/incremental_recette.py",
-    "scripts/build_retest_manifest.py",
-    "scripts/register_supporting_artifact.py",
-    "scripts/supporting_artifacts.py",
-    "scripts/client_side_rules.py",
-    "scripts/validate_business_rules.py",
-    "scripts/scan_sensitive_data.py",
-    "scripts/diff_recette_runs.py",
-    "scripts/verify_release_artifact.py",
-    "references/03-judgement/schema-v3.md",
-    "references/01-orientation/cross-skill-handoff.md",
-    "references/02-execution/journey-inference-and-coverage.md",
-    "references/02-execution/tag-assistant-operations.md",
-    "references/02-execution/interaction-and-capture-playbook.md",
-    "references/02-execution/incremental-evidence-workflow.md",
-    "references/02-execution/operator-command-reference.md",
-    "references/02-execution/client-side-destinations-and-containers.md",
-    "references/02-execution/client-side-runtime-contexts.md",
-    "references/03-judgement/conditional-business-and-privacy-rules.md",
-    "references/03-judgement/regression-comparison.md",
-    "references/gold-mini-recette.md",
-    "tests/fixtures/browser_helpers_smoke.html",
-    "tests/run_browser_helpers.py",
-)
-OBSOLETE_REFERENCES = (
-    "references/01-orientation/acceptance-criteria.md",
-    "references/01-orientation/non-goals.md",
-    "references/01-orientation/purpose.md",
-    "references/01-orientation/users-and-questions.md",
-    "references/02-execution/runtime-qa-templates.md",
-    "references/02-execution/validation-commands.md",
-    "references/03-judgement/completion-gates.md",
-)
+REQUIRED_RUNTIME_SCRIPTS = {
+    "acceptance_contract.py",
+    "build_recette_report.py",
+    "build_retest_manifest.py",
+    "classify_datalayer_snapshot.py",
+    "client_side_rules.py",
+    "datalayer_recorder.js",
+    "decode_browser_requests.py",
+    "diff_recette_runs.py",
+    "dom_interaction_census.js",
+    "event_feedback.py",
+    "evidence_contract.py",
+    "evidence_integrity.py",
+    "execution_contract.py",
+    "gated_flow_contract.py",
+    "generate_synthetic_profile.py",
+    "import_ga4_tracking_plan_handoff.py",
+    "incremental_recette.py",
+    "init_coverage_ledger.py",
+    "inspect_tracking_plan.py",
+    "layer_contract.py",
+    "migrate_schema_v2_to_v3.py",
+    "page_context_contract.py",
+    "path_safety.py",
+    "preview_session_ledger.py",
+    "recette_operator.py",
+    "recette_schema.py",
+    "register_supporting_artifact.py",
+    "runtime_state_contract.py",
+    "safe_regex.py",
+    "scan_sensitive_data.py",
+    "scenario_coverage.py",
+    "semantic_contract.py",
+    "state_io.py",
+    "stream_contract.py",
+    "supporting_artifacts.py",
+    "tag_evidence_contract.py",
+    "validate_business_rules.py",
+    "value_semantics.py",
+}
+PACKAGING_SCRIPTS = {
+    "build_skill_package.py",
+    "check_release.py",
+    "verify_release_artifact.py",
+}
+FORBIDDEN_RUNTIME_SUFFIXES = {".xlsx", ".log", ".png", ".jpg", ".jpeg", ".zip"}
+FORBIDDEN_RUNTIME_PARTS = {
+    "__pycache__",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".playwright-mcp",
+    "evidence",
+    "screenshots",
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -99,201 +84,95 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def markdown_section(text: str, heading: str) -> str:
-    match = re.search(
-        rf"^## {re.escape(heading)}\s*$([\s\S]*?)(?=^## |\Z)",
-        text,
-        flags=re.MULTILINE,
-    )
-    return match.group(1) if match else ""
-
-
-def _release_identifiers(
-    requested_tag: str | None,
-    errors: list[str],
-) -> tuple[str, str, str, str]:
+def check_metadata(requested_tag: str | None, errors: list[str]) -> str:
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
     if project.get("name") != "gtm-client-recette":
-        errors.append("project name must be 'gtm-client-recette'")
-    version = str(project["version"])
-    expected_tag = f"v{version}"
-    if not SEMVER_PATTERN.fullmatch(version):
-        errors.append(
-            "project version must use MAJOR.MINOR.PATCH metadata; "
-            "release tags and archives add the leading v"
-        )
-    if CALVER_PATTERN.fullmatch(version):
-        errors.append("calendar-date versions are forbidden; use semantic v-versioning")
-    if requested_tag and requested_tag != expected_tag:
-        errors.append(f"tag {requested_tag!r} does not match project version {expected_tag!r}")
-    repository_url = "https://github.com/haiqigeng/gtm-client-recette"
-    archive_name = f"gtm-client-recette-{expected_tag}.zip"
-    release_url = f"{repository_url}/releases/tag/{expected_tag}"
-    archive_url = f"{repository_url}/releases/download/{expected_tag}/{archive_name}"
-    return expected_tag, archive_name, release_url, archive_url
+        errors.append("project name must be gtm-client-recette")
+    version = str(project.get("version", ""))
+    if not SEMVER.fullmatch(version):
+        errors.append("project version must be MAJOR.MINOR.PATCH")
+    tag = f"v{version}"
+    if requested_tag and requested_tag != tag:
+        errors.append(f"requested tag {requested_tag!r} does not match {tag!r}")
+    for relative in ("README.md", "CHANGELOG.md", "CONTRIBUTING.md"):
+        if tag not in (ROOT / relative).read_text(encoding="utf-8"):
+            errors.append(f"{relative} is not aligned to {tag}")
+    return tag
 
 
-def _check_release_documents(
-    expected_tag: str,
-    archive_name: str,
-    release_url: str,
-    archive_url: str,
-    errors: list[str],
-) -> None:
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    if not readme.startswith("# GTM Client Recette\n"):
-        errors.append("README.md must use the GTM Client Recette identity")
-    current_release = markdown_section(readme, "Current release")
-    errors.extend(
-        (
-            f"README.md current-release section is not aligned to {expected_tag}: "
-            f"missing {required!r}"
-        )
-        for required in (expected_tag, release_url, archive_name, archive_url)
-        if required not in current_release
-    )
-
-    changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    newest_changelog = re.search(r"^## \[(v\d+\.\d+\.\d+)\]", changelog, flags=re.MULTILINE)
-    if not newest_changelog or newest_changelog.group(1) != expected_tag:
-        errors.append(f"CHANGELOG.md newest release must be {expected_tag}")
-    if release_url not in changelog:
-        errors.append(f"CHANGELOG.md does not link the {expected_tag} release")
-
-    contributing = (ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
-    version = expected_tag.removeprefix("v")
-    errors.extend(
-        (f"CONTRIBUTING.md is not aligned to {expected_tag}: missing {required!r}")
-        for required in (
-            f"`{version}`",
-            f"`{expected_tag}`",
-            f"`{archive_name}`",
-            f"--tag {expected_tag}",
-        )
-        if required not in contributing
-    )
-
-    security = (ROOT / "SECURITY.md").read_text(encoding="utf-8")
-    errors.extend(
-        f"SECURITY.md is not aligned to {expected_tag}: missing {required!r}"
-        for required in (expected_tag, release_url)
-        if required not in security
-    )
-
-    bug_template = (ROOT / ".github/ISSUE_TEMPLATE/bug_report.yml").read_text(encoding="utf-8")
-    if bug_template.count(expected_tag) < 2:
-        errors.append(f"bug-report release example and placeholder must both use {expected_tag}")
-
-
-def _check_release_tree(errors: list[str]) -> None:
-    for path in (path for path in ROOT.rglob("*") if path.is_file()):
-        relative = path.relative_to(ROOT)
-        if any(part in {".git", "dist", ".venv", "__pycache__"} for part in relative.parts):
-            continue
-        if path.suffix.lower() in FORBIDDEN_SUFFIXES or FORBIDDEN_NAMES.intersection(
-            relative.parts
-        ):
-            errors.append(f"release tree contains forbidden artifact: {relative}")
-
-
-def _check_skill_contract(errors: list[str]) -> None:
+def check_skill(errors: list[str]) -> None:
     skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
-    errors.extend(
-        f"SKILL.md does not route to {required}"
-        for required in ("01-orientation", "02-execution", "03-judgement")
-        if required not in skill
-    )
-    if "observation mode" in skill.lower():
-        errors.append("SKILL.md must not introduce observation mode")
-    errors.extend(
-        (
-            f"SKILL.md contains obsolete workflow label {obsolete}; "
-            "applicability must derive from the acceptance requirements"
-        )
-        for obsolete in ("FULL_TRACKING_PLAN_RECETTE", "SCOPED_ACCEPTANCE_RECETTE")
-        if obsolete in skill
-    )
-    if not re.search(r"name:\s*gtm-client-recette", skill):
-        errors.append("SKILL.md has an invalid skill name")
-    if NORTH_STAR not in " ".join(skill.split()):
-        errors.append("SKILL.md does not contain the exact approved north star")
-    if "Do not preload the complete reference library." not in skill:
-        errors.append("SKILL.md does not enforce progressive reference loading")
-    if len(skill.splitlines()) > 500:
-        errors.append("SKILL.md exceeds the 500-line progressive-disclosure budget")
-    if "core execution contract" not in skill:
-        errors.append("SKILL.md does not route to the compact execution contract")
+    if not skill.startswith("---\nname: gtm-client-recette\n"):
+        errors.append("SKILL.md frontmatter name is invalid")
+    if len(skill.splitlines()) > 350:
+        errors.append("SKILL.md exceeds the 350-line progressive-disclosure budget")
     for required in (
-        "It never decides which evidence layers are inspected.",
-        "--tag-scope analytics_only",
-        "complete-tag-inventory",
-        "import-tag-results",
-        "UI_CONTROL_BLOCKER",
-        "one row/status for every canonical layer",
+        "technical_delivery",
+        "operator_contract_version_required: 2",
+        "INTER_ACTION",
+        "PAGE_ACTION_VALIDITY",
+        "ORDINARY",
+        "CONTRAST",
+        "404",
+        "existing authenticated GTM",
+        "overall event verdict",
     ):
         if required not in skill:
-            errors.append(f"SKILL.md is missing deterministic recette contract {required!r}")
+            errors.append(f"SKILL.md is missing required contract {required!r}")
+    linked = set(REFERENCE_LINK.findall(skill))
+    if linked != REQUIRED_REFERENCES:
+        errors.append(
+            "SKILL.md reference routing differs from the exact consolidated reference set"
+        )
+    for relative in linked:
+        if not (ROOT / relative).is_file():
+            errors.append(f"SKILL.md links missing reference: {relative}")
 
-    workbook = (ROOT / "references/03-judgement/workbook-architecture.md").read_text(
-        encoding="utf-8"
-    )
-    if "6. `Layer Verdicts`" not in workbook or "Keep all 21 sheets" not in workbook:
-        errors.append("workbook contract must expose the Layer Verdicts sheet and 21-sheet total")
+
+def check_runtime_tree(errors: list[str]) -> None:
+    references = {path.relative_to(ROOT).as_posix() for path in (ROOT / "references").rglob("*.md")}
+    if references != REQUIRED_REFERENCES:
+        errors.append("references tree contains missing, stale, or duplicate guides")
+    scripts = {path.name for path in (ROOT / "scripts").iterdir() if path.is_file()}
+    missing = REQUIRED_RUNTIME_SCRIPTS - scripts
+    if missing:
+        errors.append("missing runtime scripts: " + ", ".join(sorted(missing)))
+    unexpected = scripts - REQUIRED_RUNTIME_SCRIPTS - PACKAGING_SCRIPTS
+    if unexpected:
+        errors.append("unclassified scripts: " + ", ".join(sorted(unexpected)))
+    for relative in ("agents/openai.yaml", "LICENSE"):
+        if not (ROOT / relative).is_file():
+            errors.append(f"missing runtime resource: {relative}")
+    agent = (ROOT / "agents/openai.yaml").read_text(encoding="utf-8")
+    if "$gtm-client-recette" not in agent:
+        errors.append("agent default prompt does not invoke the skill")
 
 
-def _check_required_resources(errors: list[str]) -> None:
-    for relative, required in SAFETY_CONTRACTS.items():
-        content = (ROOT / relative).read_text(encoding="utf-8")
-        if required not in content:
-            errors.append(f"{relative} is missing required contract {required!r}")
-    agent_metadata = (ROOT / "agents/openai.yaml").read_text(encoding="utf-8")
-    if 'display_name: "GTM Client Recette"' not in agent_metadata:
-        errors.append("agents/openai.yaml must use the GTM Client Recette display name")
-    if "$gtm-client-recette" not in agent_metadata:
-        errors.append("agents/openai.yaml default prompt must invoke $gtm-client-recette")
-    errors.extend(
-        f"skill is missing required execution resource: {relative}"
-        for relative in REQUIRED_EXECUTION_FILES
-        if not (ROOT / relative).is_file()
-    )
-    errors.extend(
-        f"obsolete duplicate reference must stay removed: {relative}"
-        for relative in OBSOLETE_REFERENCES
-        if (ROOT / relative).exists()
-    )
-    legacy_schema = (ROOT / "references/03-judgement/schema-v2.md").read_text(encoding="utf-8")
-    if "Use schema version 2 for every new run" in legacy_schema:
-        errors.append("legacy schema-v2 documentation still instructs new v2 creation")
-    workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-    for required in (
-        "Extract and test packaged skill",
-        "python -m unittest discover -s tests -v",
-        "python -B scripts/recette_operator.py --help",
-    ):
-        if required not in workflow:
-            errors.append(f"CI does not verify the installed artifact contract: {required!r}")
+def check_source_residue(errors: list[str]) -> None:
+    for path in ROOT.rglob("*"):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(ROOT)
+        if any(
+            part in {".git", "dist", ".venv", *FORBIDDEN_RUNTIME_PARTS} for part in relative.parts
+        ):
+            continue
+        if path.suffix.lower() in FORBIDDEN_RUNTIME_SUFFIXES:
+            errors.append(f"source tree contains run/output residue: {relative}")
+        if path.name in {"normalized-results.json"}:
+            errors.append(f"source tree contains run-bound result: {relative}")
 
 
 def main() -> int:
     args = parse_args()
     errors: list[str] = []
-    expected_tag, archive_name, release_url, archive_url = _release_identifiers(
-        args.tag,
-        errors,
-    )
-    _check_release_documents(
-        expected_tag,
-        archive_name,
-        release_url,
-        archive_url,
-        errors,
-    )
-    _check_release_tree(errors)
-    _check_skill_contract(errors)
-    _check_required_resources(errors)
+    tag = check_metadata(args.tag, errors)
+    check_skill(errors)
+    check_runtime_tree(errors)
+    check_source_residue(errors)
     if errors:
         raise SystemExit("\n".join(errors))
-    print(f"Release checks passed for {expected_tag}")
+    print(f"Lean runtime release checks passed for {tag}")
     return 0
 
 

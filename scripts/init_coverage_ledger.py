@@ -16,7 +16,9 @@ from layer_contract import (
     applicable_layers,
     normalize_tag_scope,
 )
+from path_safety import ensure_distinct_output
 from recette_schema import ACTION_BOUNDARY_CONTRACT_VERSION
+from state_io import atomic_write_json
 
 
 def parse_args() -> argparse.Namespace:
@@ -288,6 +290,7 @@ def main() -> int:
         "schema_version": 3,
         "run": {
             "action_boundary_contract_version": ACTION_BOUNDARY_CONTRACT_VERSION,
+            "operator_contract_version_required": 2,
             "run_id": args.run_id,
             "report_title": args.title,
             "client": args.client,
@@ -349,11 +352,8 @@ def main() -> int:
         "blockers": [],
         "evidence": [],
     }
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(
-        json.dumps(result, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    ensure_distinct_output(args.output, args.requirements)
+    atomic_write_json(args.output, result)
     print(f"Created {args.output.resolve()}")
     return 0
 

@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import json
-import re
 from collections import Counter
 from datetime import datetime
 from typing import Any
@@ -49,6 +48,9 @@ from layer_contract import (
     is_browser_sending_tag,
     normalize_tag_scope,
 )
+from safe_regex import compile_pattern
+from safe_regex import fullmatch as safe_fullmatch
+from safe_regex import search as safe_search
 from supporting_artifacts import validate_supporting_artifacts
 from value_semantics import json_value_type, strict_equal
 
@@ -246,6 +248,8 @@ EVIDENCE_KIND_SOURCES = {
     "direct_vendor_call": {"Browser Console", "Browser Network", "Playwright"},
     "custom_html": {"Tag Assistant", "Browser Console"},
     "ga4_enhanced_measurement": {"Tag Assistant", "Browser Network"},
+    "page_health": {"Playwright", "Browser Network"},
+    "journey_state": {"Playwright"},
 }
 CONTAINER_ROLES = {"primary", "analytics", "marketing", "shared"}
 CONTAINER_TYPES = {"web", "client_side"}
@@ -774,7 +778,10 @@ def _matches_expectation(expectation: dict[str, Any], observation: dict[str, Any
         pattern = expectation.get("pattern")
         if not isinstance(pattern, str) or not isinstance(actual, str):
             return False
-        return re.fullmatch(pattern, actual) is not None
+        try:
+            return safe_fullmatch(pattern, actual)
+        except ValueError:
+            return False
     if rule == "one_of":
         allowed = expectation.get("allowed_values")
         return isinstance(allowed, list) and actual in allowed and actual_type == expected_type
@@ -808,8 +815,8 @@ def _matches_expectation(expectation: dict[str, Any], observation: dict[str, Any
         if not isinstance(pattern, str) or not isinstance(actual, str):
             return False
         try:
-            return re.search(pattern, actual) is None
-        except re.error:
+            return not safe_search(pattern, actual)
+        except ValueError:
             return False
     if rule == "vendor_equivalent":
         return (
@@ -1417,13 +1424,11 @@ def _validate_destination(
         endpoint_pattern = expectation.get("expected_endpoint_pattern")
         if endpoint_pattern:
             try:
-                endpoint_matches = re.search(
-                    str(endpoint_pattern), str(destination.get("request_url", ""))
-                )
-            except re.error:
-                endpoint_matches = None
+                endpoint_matches = safe_search(endpoint_pattern, destination.get("request_url", ""))
+            except ValueError:
+                endpoint_matches = False
                 errors.append(f"{label}: invalid expected_endpoint_pattern")
-            if endpoint_matches is None:
+            if not endpoint_matches:
                 errors.append(f"{label}: PASS destination endpoint differs from expectation")
 
     for expectation_field, destination_field, field_label in (
@@ -1524,8 +1529,8 @@ def _trigger_condition_matches(condition: dict[str, Any]) -> bool | None:
         if not isinstance(actual, str) or not isinstance(expected, str):
             return False
         try:
-            return re.fullmatch(expected, actual) is not None
-        except re.error:
+            return safe_fullmatch(expected, actual)
+        except ValueError:
             return None
     numeric = (
         isinstance(actual, (int, float))
@@ -1933,8 +1938,8 @@ def _validate_business_rule_results(
             errors.append(f"{label}: business rule {rule_id or index} has unsupported format")
         if operator == "regex":
             try:
-                re.compile(str(rule.get("pattern", "")))
-            except re.error:
+                compile_pattern(rule.get("pattern", ""), label="business rule pattern")
+            except ValueError:
                 errors.append(
                     f"{label}: business rule {rule_id or index} has invalid regular expression"
                 )
@@ -2062,8 +2067,8 @@ def _validate_sensitive_data(
                     f"{label}: custom pattern {pattern_id or index} has invalid confidence"
                 )
             try:
-                re.compile(str(custom.get("pattern", "")))
-            except re.error:
+                compile_pattern(custom.get("pattern", ""), label="custom sensitive pattern")
+            except ValueError:
                 errors.append(
                     f"{label}: custom pattern {pattern_id or index} has invalid regular expression"
                 )
@@ -2146,8 +2151,8 @@ def _client_check_matches(check: dict[str, Any]) -> bool | None:
         return actual in (None, "", [], {})
     if comparison == "regex":
         try:
-            return isinstance(actual, str) and re.fullmatch(str(expected), actual) is not None
-        except re.error:
+            return isinstance(actual, str) and safe_fullmatch(expected, actual)
+        except ValueError:
             return None
     if comparison == "ordered":
         return isinstance(expected, list) and isinstance(actual, list) and expected == actual
@@ -2377,7 +2382,10 @@ def _validate_run_execution_policy(run: dict[str, Any], errors: list[str]) -> No
 
 
 def _validate_evidence_catalog(
-    evidence: list[dict[str, Any]], errors: list[str]
+    evidence: list[dict[str, Any]],
+    errors: list[str],
+    *,
+    allow_segment_binding: bool = False,
 ) -> tuple[set[str], dict[str, dict[str, Any]]]:
     """Validate evidence provenance/link fields and return its indexed catalogue."""
     evidence_catalog = [str(row.get("evidence_id", "")).strip() for row in evidence]
@@ -2415,8 +2423,20 @@ def _validate_evidence_catalog(
                 f"evidence {evidence_label}: analyst evidence requires "
                 "capture_mode=analyst_supplied or direct"
             )
-        if kind in ACTION_BOUND_EVIDENCE_KINDS and not _is_nonempty_string(row.get("action_id")):
-            errors.append(f"evidence {evidence_label}: direct action evidence requires action_id")
+        segment_bound = (
+            allow_segment_binding
+            and kind == "api_call"
+            and _is_nonempty_string(row.get("segment_id"))
+        )
+        if (
+            kind in ACTION_BOUND_EVIDENCE_KINDS
+            and not _is_nonempty_string(row.get("action_id"))
+            and not segment_bound
+        ):
+            errors.append(
+                f"evidence {evidence_label}: direct action evidence requires action_id "
+                "or an operator-v2 stream segment"
+            )
         if kind in EVENT_INDEX_EVIDENCE_KINDS and (
             not isinstance(row.get("event_index"), int) or isinstance(row.get("event_index"), bool)
         ):
@@ -2536,6 +2556,12 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
             "run: action_boundary_contract_version must be 1 when supplied; "
             "omit it only for a legacy schema-v3 result"
         )
+    operator_contract_version = run.get("operator_contract_version_required")
+    if operator_contract_version not in (None, 1, 2):
+        errors.append(
+            "run: operator_contract_version_required must be 1 or 2 when supplied; "
+            "omit it only for a marker-less legacy schema-v3 result"
+        )
     _validate_run_client_context(run, errors)
     _validate_run_execution_policy(run, errors)
     errors.extend(validate_supporting_artifacts(run.get("supporting_artifacts")))
@@ -2587,7 +2613,11 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
             + ", ".join(missing_declared_layers)
         )
 
-    known_evidence, evidence_by_id = _validate_evidence_catalog(evidence, errors)
+    known_evidence, evidence_by_id = _validate_evidence_catalog(
+        evidence,
+        errors,
+        allow_segment_binding=run.get("operator_contract_version_required") == 2,
+    )
     regression_context = run.get("regression_context")
     if regression_context is not None:
         if not isinstance(regression_context, dict):
@@ -2848,8 +2878,8 @@ def semantic_errors(data: dict[str, Any]) -> list[str]:
                 errors.append(f"{label}: anti_pattern requires a valid regular expression")
             else:
                 try:
-                    re.compile(pattern)
-                except re.error:
+                    compile_pattern(pattern, label="anti-pattern")
+                except ValueError:
                     errors.append(f"{label}: anti_pattern requires a valid regular expression")
         if expectation.get("match_rule") == "vendor_equivalent" and not _is_nonempty_string(
             expectation.get("vendor_parameter_name")

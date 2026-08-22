@@ -6,9 +6,14 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import time
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
+
+LOCK_TIMEOUT_SECONDS = 10.0
+STALE_LOCK_SECONDS = 120.0
 
 
 def serialized_json(value: dict[str, Any]) -> bytes:
@@ -52,14 +57,63 @@ def _replace(source: Path, target: Path) -> None:
     _sync_directory(target.parent)
 
 
-def atomic_write_bytes(path: Path, content: bytes) -> None:
-    """Publish bytes through a unique, synchronized temporary file."""
+def _lock_path(path: Path) -> Path:
+    return path.with_name(f".{path.name}.lock")
+
+
+@contextmanager
+def file_lock(path: Path, *, timeout_seconds: float = LOCK_TIMEOUT_SECONDS):
+    """Hold a small cross-process lock beside a state file."""
+    lock = _lock_path(path)
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    deadline = time.monotonic() + timeout_seconds
+    descriptor: int | None = None
+    while descriptor is None:
+        try:
+            descriptor = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            try:
+                stale = time.time() - lock.stat().st_mtime > STALE_LOCK_SECONDS
+            except FileNotFoundError:
+                continue
+            if stale:
+                lock.unlink(missing_ok=True)
+                continue
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"Timed out waiting for state lock {lock}") from None
+            time.sleep(0.05)
+    try:
+        os.write(descriptor, f"pid={os.getpid()}\ncreated={time.time()}\n".encode("ascii"))
+        os.fsync(descriptor)
+        yield
+    finally:
+        os.close(descriptor)
+        lock.unlink(missing_ok=True)
+
+
+@contextmanager
+def file_locks(paths: list[Path]):
+    """Acquire several state locks in deterministic order."""
+    ordered = sorted({path.resolve(strict=False) for path in paths}, key=str)
+    with ExitStack() as stack:
+        for path in ordered:
+            stack.enter_context(file_lock(path))
+        yield
+
+
+def _atomic_write_bytes_unlocked(path: Path, content: bytes) -> None:
     temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
     try:
         _write_synced(temporary, content)
         _replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def atomic_write_bytes(path: Path, content: bytes) -> None:
+    """Publish bytes through a locked, unique, synchronized temporary file."""
+    with file_lock(path):
+        _atomic_write_bytes_unlocked(path, content)
 
 
 def atomic_write_json(path: Path, value: dict[str, Any]) -> None:
@@ -79,7 +133,7 @@ def _restore(path: Path, backup: Path | None, existed: bool) -> None:
         return
     if backup is None or not backup.is_file():
         raise OSError(f"Missing rollback backup for {path}")
-    atomic_write_bytes(path, backup.read_bytes())
+    _atomic_write_bytes_unlocked(path, backup.read_bytes())
 
 
 def _cleanup(paths: list[Path]) -> None:
@@ -87,8 +141,7 @@ def _cleanup(paths: list[Path]) -> None:
         path.unlink(missing_ok=True)
 
 
-def recover_file_pair(first: Path, second: Path) -> bool:
-    """Recover an interrupted pair transaction; return whether a journal existed."""
+def _recover_file_pair_unlocked(first: Path, second: Path) -> bool:
     journal_path = _pair_journal_path(first, second)
     if not journal_path.is_file():
         return False
@@ -112,6 +165,12 @@ def recover_file_pair(first: Path, second: Path) -> bool:
     return True
 
 
+def recover_file_pair(first: Path, second: Path) -> bool:
+    """Recover an interrupted pair transaction; return whether a journal existed."""
+    with file_locks([first, second, _pair_journal_path(first, second)]):
+        return _recover_file_pair_unlocked(first, second)
+
+
 def atomic_write_file_pair(
     first: Path,
     first_content: bytes,
@@ -123,7 +182,19 @@ def atomic_write_file_pair(
         raise ValueError("Paired paths must be different files.")
     first.parent.mkdir(parents=True, exist_ok=True)
     second.parent.mkdir(parents=True, exist_ok=True)
-    recover_file_pair(first, second)
+    pair_lock_target = _pair_journal_path(first, second)
+    with file_locks([first, second, pair_lock_target]):
+        _atomic_write_file_pair_unlocked(first, first_content, second, second_content)
+
+
+def _atomic_write_file_pair_unlocked(
+    first: Path,
+    first_content: bytes,
+    second: Path,
+    second_content: bytes,
+) -> None:
+    """Publish a pair while the caller holds the pair transaction lock."""
+    _recover_file_pair_unlocked(first, second)
 
     transaction_id = uuid4().hex
     first_temp = first.with_name(f".{first.name}.{transaction_id}.tmp")
@@ -143,35 +214,39 @@ def atomic_write_file_pair(
             _write_synced(second_backup, second.read_bytes())
         _write_synced(first_temp, first_content)
         _write_synced(second_temp, second_content)
-        atomic_write_json(
+        _atomic_write_bytes_unlocked(
             journal_path,
-            {
-                "transaction_id": transaction_id,
-                "state": "PREPARED",
-                "targets": [str(first.resolve()), str(second.resolve())],
-                "target_existed": [first_existed, second_existed],
-                "backups": [
-                    str(first_backup.resolve()) if first_existed else None,
-                    str(second_backup.resolve()) if second_existed else None,
-                ],
-            },
+            serialized_json(
+                {
+                    "transaction_id": transaction_id,
+                    "state": "PREPARED",
+                    "targets": [str(first.resolve()), str(second.resolve())],
+                    "target_existed": [first_existed, second_existed],
+                    "backups": [
+                        str(first_backup.resolve()) if first_existed else None,
+                        str(second_backup.resolve()) if second_existed else None,
+                    ],
+                }
+            ),
         )
         _replace(first_temp, first)
         replaced[0] = True
         _replace(second_temp, second)
         replaced[1] = True
-        atomic_write_json(
+        _atomic_write_bytes_unlocked(
             journal_path,
-            {
-                "transaction_id": transaction_id,
-                "state": "COMMITTED",
-                "targets": [str(first.resolve()), str(second.resolve())],
-                "target_existed": [first_existed, second_existed],
-                "backups": [
-                    str(first_backup.resolve()) if first_existed else None,
-                    str(second_backup.resolve()) if second_existed else None,
-                ],
-            },
+            serialized_json(
+                {
+                    "transaction_id": transaction_id,
+                    "state": "COMMITTED",
+                    "targets": [str(first.resolve()), str(second.resolve())],
+                    "target_existed": [first_existed, second_existed],
+                    "backups": [
+                        str(first_backup.resolve()) if first_existed else None,
+                        str(second_backup.resolve()) if second_existed else None,
+                    ],
+                }
+            ),
         )
     except BaseException as exc:
         for path, backup, existed, was_replaced in (
