@@ -67,6 +67,13 @@ PACKAGING_SCRIPTS = {
     "check_release.py",
     "verify_release_artifact.py",
 }
+RELEASE_METADATA_FILES = (
+    "README.md",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    ".github/ISSUE_TEMPLATE/bug_report.yml",
+)
 FORBIDDEN_RUNTIME_SUFFIXES = {".xlsx", ".log", ".png", ".jpg", ".jpeg", ".zip"}
 FORBIDDEN_RUNTIME_PARTS = {
     "__pycache__",
@@ -94,8 +101,11 @@ def check_metadata(requested_tag: str | None, errors: list[str]) -> str:
     tag = f"v{version}"
     if requested_tag and requested_tag != tag:
         errors.append(f"requested tag {requested_tag!r} does not match {tag!r}")
-    for relative in ("README.md", "CHANGELOG.md", "CONTRIBUTING.md"):
-        if tag not in (ROOT / relative).read_text(encoding="utf-8"):
+    for relative in RELEASE_METADATA_FILES:
+        path = ROOT / relative
+        if not path.is_file():
+            errors.append(f"{relative} is missing")
+        elif tag not in path.read_text(encoding="utf-8"):
             errors.append(f"{relative} is not aligned to {tag}")
     return tag
 
