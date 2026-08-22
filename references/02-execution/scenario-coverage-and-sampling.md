@@ -9,7 +9,9 @@ page/component, or journey precondition.
 
 ## Discovery algorithm
 
-For each plan event:
+At run setup, map the plan-ordered event inventory, shared journeys, and known
+gates. Do not front-load every event's detailed site discovery. For each event,
+just before its first action:
 
 1. Inspect supplied journeys, URLs, screenshots, and the live site.
 2. List candidate interactions and material dimensions: route/template,
@@ -20,7 +22,13 @@ For each plan event:
    action path, page/component, data source, payload contract, tag contract,
    consent context, acquisition context, and journey precondition.
 5. Freeze one coverage decision and bind every in-scope case to one scenario
-   class and explicit value for each material dimension before the first action.
+   class and explicit value for each material dimension before that event's
+   first action.
+
+This just-in-time boundary keeps event 1 independently certifiable while later
+events remain unprepared. It does not reduce coverage: every event must still
+complete this process before its own execution and final closure remains strict
+across the entire plan.
 
 Pass those bindings explicitly when registering the case (one
 `--dimension-value DIMENSION_ID=JSON_VALUE` per material dimension). Do not let

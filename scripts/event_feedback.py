@@ -92,6 +92,66 @@ def _contract_component_status(value: Any, *, passing_state: str) -> str:
     return "BLOCKED"
 
 
+def _event_coverage_errors(
+    session: dict[str, Any],
+    data: dict[str, Any],
+    event_group_id: str,
+) -> list[str]:
+    """Validate frozen coverage against only the event it governs."""
+    requirements = [
+        row
+        for row in data.get("requirements", [])
+        if isinstance(row, dict) and str(row.get("event_group_id", "")) == event_group_id
+    ]
+    requirement_ids = {str(row.get("requirement_id", "")) for row in requirements}
+    run = dict(data.get("run") or {})
+    run["event_inventory"] = [
+        row
+        for row in run.get("event_inventory", [])
+        if isinstance(row, dict) and str(row.get("event_group_id", "")) == event_group_id
+    ]
+    run["requirement_inventory"] = [
+        value for value in run.get("requirement_inventory", []) if str(value) in requirement_ids
+    ]
+    projected_results = {
+        **data,
+        "run": run,
+        "requirements": requirements,
+    }
+    cases = [
+        row
+        for row in session.get("cases", [])
+        if isinstance(row, dict) and str(row.get("event_group_id", "")) == event_group_id
+    ]
+    case_ids = {str(row.get("case_id", "")) for row in cases}
+    actions = [
+        row
+        for row in session.get("actions", [])
+        if isinstance(row, dict) and str(row.get("case_id", "")) in case_ids
+    ]
+    action_ids = {str(row.get("action_id", "")) for row in actions}
+
+    def applies(row: Any) -> bool:
+        return isinstance(row, dict) and (
+            str(row.get("event_group_id", "")) == event_group_id
+            or str(row.get("case_id", "")) in case_ids
+            or str(row.get("action_id", "")) in action_ids
+        )
+
+    projected_session = {
+        **session,
+        "cases": cases,
+        "actions": actions,
+        "coverage_decisions": [
+            row for row in session.get("coverage_decisions", []) if applies(row)
+        ],
+        "semantic_checks": [row for row in session.get("semantic_checks", []) if applies(row)],
+        "event_closures": [row for row in session.get("event_closures", []) if applies(row)],
+        "business_pushes": [row for row in session.get("business_pushes", []) if applies(row)],
+    }
+    return coverage_errors(projected_session, results=projected_results, final=True)
+
+
 def _variant_text(value: Any) -> str:
     if not isinstance(value, dict) or not value:
         return "default variant"
@@ -580,16 +640,8 @@ def event_feedback(
     unexpected_by_group = _group_rows(data.get("unexpected", []), "event_group_id")
     contract_v2 = isinstance(session, dict) and session.get("operator_contract_version") == 2
     closed_stream_errors: list[str] = []
-    frozen_coverage_errors: list[str] = []
-    if contract_v2:
-        if status((session.get("stream_contract") or {}).get("status")) == "CLOSED":
-            closed_stream_errors = stream_errors(session, final=True)
-        if any(
-            status(row.get("status")) == "FROZEN"
-            for row in session.get("coverage_decisions", [])
-            if isinstance(row, dict)
-        ):
-            frozen_coverage_errors = coverage_errors(session, results=data, final=True)
+    if contract_v2 and status((session.get("stream_contract") or {}).get("status")) == "CLOSED":
+        closed_stream_errors = stream_errors(session, final=True)
 
     output: list[dict[str, Any]] = []
     for inventory in data.get("run", {}).get("event_inventory", []):
@@ -619,6 +671,11 @@ def event_feedback(
         coverage_info = coverage_summary(session, group_id) if contract_v2 else None
         semantic_info = semantic_summary(session, group_id) if contract_v2 else None
         stream_info = stream_summary(session, group_id) if contract_v2 else None
+        frozen_coverage_errors = (
+            _event_coverage_errors(session, data, group_id)
+            if contract_v2 and status((coverage_info or {}).get("status")) == "FROZEN"
+            else []
+        )
         if isinstance(stream_info, dict) and closed_stream_errors:
             stream_info["validation_errors"] = list(closed_stream_errors)
         if isinstance(coverage_info, dict) and frozen_coverage_errors:
@@ -692,14 +749,18 @@ def event_feedback(
         chronology_status = "NOT_TESTED"
         coverage_status = "NOT_TESTED"
         if contract_v2:
-            chronology_status = (
-                "FAIL"
-                if anomaly_flags or closed_stream_errors
-                else _contract_component_status(
-                    (stream_info or {}).get("review_status"),
+            stream_review_status = status((stream_info or {}).get("review_status"))
+            if anomaly_flags or closed_stream_errors:
+                chronology_status = "FAIL"
+            elif stream_review_status in {"CLOSED", "CERTIFIED_PREFIX"}:
+                chronology_status = "PASS"
+            elif stream_review_status == "STALE_PREFIX":
+                chronology_status = "BLOCKED"
+            else:
+                chronology_status = _contract_component_status(
+                    stream_review_status,
                     passing_state="CLOSED",
                 )
-            )
             coverage_status = (
                 "FAIL"
                 if status((coverage_info or {}).get("status")) == "FROZEN"

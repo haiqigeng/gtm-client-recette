@@ -1,4 +1,4 @@
 interface:
   display_name: "GTM Client Recette"
   short_description: "Run expert semantic GTM Preview recette"
-  default_prompt: "Use $gtm-client-recette to run plan-ordered client-side GTM Preview recette in the existing approved browser, sample material behavior classes, reconcile the complete dataLayer stream, judge technical delivery separately from page and business truth, and return per-event layer verdicts plus a final validated workbook."
+  default_prompt: "Use $gtm-client-recette to run plan-ordered client-side GTM Preview recette in the existing approved browser, prepare each event's material scenarios just in time, certify its reviewed dataLayer-stream prefix, judge technical delivery separately from page and business truth, and return immediate per-event layer verdicts plus a final validated workbook."
