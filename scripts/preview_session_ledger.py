@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from evidence_integrity import build_integrity_record
 from execution_contract import (
     AUTHORIZATION_SCOPES,
     CASE_EXECUTION_STATUSES,
@@ -21,6 +22,7 @@ from execution_contract import (
     SESSION_SCHEMA_VERSION,
     validate_session,
 )
+from gated_flow_contract import FLOW_KINDS
 from layer_contract import (
     CANONICAL_LAYERS,
     CONDITIONAL_PREDICATES,
@@ -34,6 +36,7 @@ from layer_contract import (
     tag_scope_decision,
 )
 from runtime_state_contract import INTERRUPTION_REASONS, normalize_runtime_check
+from scenario_coverage import SAMPLE_ROLES
 from state_io import atomic_write_json, load_json_object, recover_file_pair
 
 ROLES = {
@@ -117,6 +120,19 @@ def parser() -> argparse.ArgumentParser:
     init.add_argument("ledger", type=Path)
     init.add_argument("--profile-path", required=True)
     init.add_argument("--approved-origin", action="append", required=True)
+    init.add_argument(
+        "--operator-contract-version",
+        choices=(1, 2),
+        type=int,
+        default=2,
+        help="Current guided recette defaults to 2; select 1 only for old automation.",
+    )
+    init.add_argument(
+        "--run-id",
+        help="Exact normalized run.run_id; required for operator-contract-v2 sessions.",
+    )
+    init.add_argument("--browser-instance-id")
+    init.add_argument("--browser-context-id")
 
     register = subparsers.add_parser("register-surface")
     register.add_argument("ledger", type=Path)
@@ -170,6 +186,13 @@ def parser() -> argparse.ArgumentParser:
     register_case.add_argument("--action", required=True)
     register_case.add_argument("--variant", action="append", default=[])
     register_case.add_argument(
+        "--dimension-value",
+        action="append",
+        default=[],
+        metavar="DIMENSION_ID=JSON_VALUE",
+        help="Bind this case to each material coverage dimension; repeat as needed.",
+    )
+    register_case.add_argument(
         "--discovered-from",
         choices=tuple(sorted(DISCOVERY_SOURCES)),
         required=True,
@@ -181,6 +204,17 @@ def parser() -> argparse.ArgumentParser:
     )
     register_case.add_argument("--reason")
     register_case.add_argument("--authorization-id", action="append", default=[])
+    register_case.add_argument("--coverage-decision-id")
+    register_case.add_argument("--scenario-class-id")
+    register_case.add_argument("--sample-role", choices=tuple(sorted(SAMPLE_ROLES)))
+    register_case.add_argument("--selection-rationale")
+    register_case.add_argument("--population-member-id")
+    register_case.add_argument("--acquisition-context", type=Path)
+    register_case.add_argument(
+        "--gated-flow-kind",
+        choices=tuple(sorted(FLOW_KINDS)),
+        default="NONE",
+    )
     register_case.add_argument(
         "--include-layer",
         action="append",
@@ -252,8 +286,11 @@ def parser() -> argparse.ArgumentParser:
     push = subparsers.add_parser("record-push")
     push.add_argument("ledger", type=Path)
     push.add_argument("--push-id", required=True)
-    push.add_argument("--action-id", required=True)
+    push.add_argument("--action-id")
+    push.add_argument("--segment-id")
     push.add_argument("--event-index", type=int, required=True)
+    push.add_argument("--preview-event-index", type=int)
+    push.add_argument("--datalayer-call-index", type=int)
     push.add_argument("--event-name", required=True)
     push.add_argument(
         "--classification",
@@ -295,6 +332,31 @@ def parser() -> argparse.ArgumentParser:
     import_cases.add_argument("manifest", type=Path)
     import_cases.add_argument("--results", type=Path, required=True)
 
+    import_coverage = subparsers.add_parser("import-coverage")
+    import_coverage.add_argument("ledger", type=Path)
+    import_coverage.add_argument("coverage", type=Path)
+
+    import_stream = subparsers.add_parser("import-stream")
+    import_stream.add_argument("ledger", type=Path)
+    import_stream.add_argument("stream", type=Path)
+
+    import_semantic = subparsers.add_parser("import-semantic")
+    import_semantic.add_argument("ledger", type=Path)
+    import_semantic.add_argument("semantic", type=Path)
+
+    import_handoffs = subparsers.add_parser("import-protected-handoffs")
+    import_handoffs.add_argument("ledger", type=Path)
+    import_handoffs.add_argument("handoffs", type=Path)
+
+    import_flows = subparsers.add_parser("import-gated-flows")
+    import_flows.add_argument("ledger", type=Path)
+    import_flows.add_argument("flows", type=Path)
+
+    verify_evidence = subparsers.add_parser("verify-evidence")
+    verify_evidence.add_argument("ledger", type=Path)
+    verify_evidence.add_argument("--results", type=Path, required=True)
+    verify_evidence.add_argument("--base-dir", type=Path, required=True)
+
     layer = subparsers.add_parser("record-layer")
     layer.add_argument("ledger", type=Path)
     layer.add_argument("--action-id", required=True)
@@ -323,6 +385,11 @@ def parser() -> argparse.ArgumentParser:
     import_tag_results.add_argument("ledger", type=Path)
     import_tag_results.add_argument("tag_results", type=Path)
     import_tag_results.add_argument("--action-id", required=True)
+    import_tag_results.add_argument(
+        "--results",
+        type=Path,
+        help="Normalized results used to validate the staged import; required for v2.",
+    )
 
     scaffold_tags = subparsers.add_parser("scaffold-tag-results")
     scaffold_tags.add_argument("ledger", type=Path)
@@ -499,6 +566,33 @@ def register_case(ledger: dict[str, Any], args: argparse.Namespace) -> None:
         raise SystemExit(f"Unknown event_group_id: {args.event_group_id}")
     if args.scope_status == "OUT_OF_SCOPE" and not str(args.reason or "").strip():
         raise SystemExit("OUT_OF_SCOPE cases require --reason.")
+    contract_v2 = ledger.get("operator_contract_version") == 2
+    v2_fields = {
+        "coverage_decision_id": getattr(args, "coverage_decision_id", None),
+        "scenario_class_id": getattr(args, "scenario_class_id", None),
+        "sample_role": getattr(args, "sample_role", None),
+        "selection_rationale": getattr(args, "selection_rationale", None),
+        "population_member_id": getattr(args, "population_member_id", None),
+    }
+    if contract_v2:
+        missing_v2 = [field for field, value in v2_fields.items() if not str(value or "").strip()]
+        if missing_v2:
+            raise SystemExit("Operator-contract-v2 cases require " + ", ".join(missing_v2) + ".")
+        dimension_values = parse_variant(getattr(args, "dimension_value", []))
+        if not dimension_values:
+            raise SystemExit("Operator-contract-v2 cases require --dimension-value bindings.")
+        acquisition_path = getattr(args, "acquisition_context", None)
+        if isinstance(acquisition_path, dict):
+            acquisition_context = deepcopy(acquisition_path)
+        elif isinstance(acquisition_path, Path):
+            try:
+                acquisition_context = load_json_object(acquisition_path)
+            except (OSError, ValueError) as exc:
+                raise SystemExit(f"Cannot read acquisition context: {exc}") from exc
+        else:
+            raise SystemExit("Operator-contract-v2 cases require --acquisition-context JSON.")
+    else:
+        acquisition_context = None
     unknown_authorizations = sorted(
         value
         for value in args.authorization_id
@@ -534,41 +628,48 @@ def register_case(ledger: dict[str, Any], args: argparse.Namespace) -> None:
             else set()
         )
     )
-    ledger.setdefault("cases", []).append(
-        {
-            "case_id": args.case_id,
-            "event_group_id": args.event_group_id,
-            "requirement_ids": [str(row.get("requirement_id")) for row in group_requirements],
-            "url": args.url,
-            "element": args.element,
-            "placement": args.placement,
-            "action": args.action,
-            "material_variant": parse_variant(args.variant),
-            "discovered_from": args.discovered_from,
-            "scope_status": args.scope_status,
-            "execution_status": (
-                "NOT_TESTED" if args.scope_status == "OUT_OF_SCOPE" else "PENDING"
-            ),
-            "reason": str(args.reason or "").strip() or None,
-            "authorization_ids": list(dict.fromkeys(args.authorization_id)),
-            "tag_scope": normalize_tag_scope(results.get("run", {}).get("tag_scope")),
-            "declared_tag_contracts": declared_tag_contracts(group_requirements),
-            "source_expectations": [dict(row.get("expectation", {})) for row in group_requirements],
-            "tag_inventory_status": "PENDING",
-            "inventory_revision": 1,
-            "applicability_history": [],
-            "tag_inventory_reason": None,
-            "tag_inventory_evidence_ids": [],
-            "tag_inventory": [],
-            "conditional_activations": activated_conditions,
-            "applicability_status": "DRAFT",
-            "layer_applicability": applicability,
-            "applicable_layers": layers,
-            "container_ids": container_ids,
-            "registered_at": now(),
-            "final_action_id": None,
-        }
-    )
+    case_record = {
+        "case_id": args.case_id,
+        "event_group_id": args.event_group_id,
+        "requirement_ids": [str(row.get("requirement_id")) for row in group_requirements],
+        "url": args.url,
+        "element": args.element,
+        "placement": args.placement,
+        "action": args.action,
+        "material_variant": parse_variant(args.variant),
+        "discovered_from": args.discovered_from,
+        "scope_status": args.scope_status,
+        "execution_status": ("NOT_TESTED" if args.scope_status == "OUT_OF_SCOPE" else "PENDING"),
+        "reason": str(args.reason or "").strip() or None,
+        "authorization_ids": list(dict.fromkeys(args.authorization_id)),
+        "tag_scope": normalize_tag_scope(results.get("run", {}).get("tag_scope")),
+        "declared_tag_contracts": declared_tag_contracts(group_requirements),
+        "source_expectations": [dict(row.get("expectation", {})) for row in group_requirements],
+        "tag_inventory_status": "PENDING",
+        "inventory_revision": 1,
+        "applicability_history": [],
+        "tag_inventory_reason": None,
+        "tag_inventory_evidence_ids": [],
+        "tag_inventory": [],
+        "conditional_activations": activated_conditions,
+        "applicability_status": "DRAFT",
+        "layer_applicability": applicability,
+        "applicable_layers": layers,
+        "container_ids": container_ids,
+        "registered_at": now(),
+        "final_action_id": None,
+    }
+    if contract_v2:
+        case_record.update(
+            {
+                **v2_fields,
+                "sample_role": str(v2_fields["sample_role"]).strip().upper(),
+                "dimension_values": dimension_values,
+                "acquisition_context": acquisition_context,
+                "gated_flow_kind": getattr(args, "gated_flow_kind", "NONE"),
+            }
+        )
+    ledger.setdefault("cases", []).append(case_record)
 
 
 def register_tag(ledger: dict[str, Any], args: argparse.Namespace) -> None:
@@ -701,26 +802,7 @@ def revise_tag_inventory(ledger: dict[str, Any], args: argparse.Namespace) -> No
         }
     )
     event_group_id = str(case.get("event_group_id", ""))
-    closures = [row for row in ledger.get("event_closures", []) if isinstance(row, dict)]
-    closure_index = next(
-        (
-            index
-            for index, row in enumerate(closures)
-            if str(row.get("event_group_id", "")) == event_group_id
-        ),
-        None,
-    )
-    if closure_index is not None:
-        invalidated = deepcopy(closures[closure_index:])
-        ledger["event_closures"] = deepcopy(closures[:closure_index])
-        ledger.setdefault("closure_history", []).append(
-            {
-                "reopened_event_group_id": event_group_id,
-                "reopened_at": now(),
-                "reason": reason,
-                "invalidated_closures": invalidated,
-            }
-        )
+    _invalidate_closures_from(ledger, event_group_id, reason)
     ledger["operator_state"] = {
         "status": "ACTIVE",
         "current_event_group_id": event_group_id,
@@ -782,24 +864,97 @@ def complete_tag_inventory(ledger: dict[str, Any], args: argparse.Namespace) -> 
     )
 
 
+def _tag_batch_matrix_errors(
+    ledger: dict[str, Any],
+    action: dict[str, Any],
+    rows: list[dict[str, Any]],
+) -> list[str]:
+    """Require the exact frozen in-scope tag x canonical tag-layer matrix."""
+    case = find_unique(ledger.get("cases", []), "case_id", str(action.get("case_id", "")))
+    inventory_ids = {
+        str(row.get("tag_id", "")).strip()
+        for row in case.get("tag_inventory", [])
+        if isinstance(row, dict)
+        and row.get("scope_status") == "IN_SCOPE"
+        and str(row.get("tag_id", "")).strip()
+    }
+    expected = {(tag_id, layer) for tag_id in inventory_ids for layer in TAG_RESULT_LAYERS}
+    actual = [
+        (str(row.get("tag_id", "")).strip(), str(row.get("layer", "")).strip()) for row in rows
+    ]
+    errors: list[str] = []
+    duplicates = sorted({key for key in actual if actual.count(key) > 1})
+    if duplicates:
+        errors.append(
+            "duplicate tag/layer rows: "
+            + ", ".join(f"{tag_id}:{layer}" for tag_id, layer in duplicates)
+        )
+    actual_keys = set(actual)
+    missing = sorted(expected - actual_keys)
+    extra = sorted(actual_keys - expected)
+    if missing:
+        errors.append(
+            "missing tag/layer rows: " + ", ".join(f"{tag_id}:{layer}" for tag_id, layer in missing)
+        )
+    if extra:
+        errors.append(
+            "unknown or out-of-scope tag/layer rows: "
+            + ", ".join(f"{tag_id}:{layer}" for tag_id, layer in extra)
+        )
+    return errors
+
+
 def import_tag_results(ledger: dict[str, Any], args: argparse.Namespace) -> None:
-    """Import one row per in-scope tag and tag-related evidence layer."""
+    """Atomically replace one complete, validated tag x layer batch on an open action."""
     action = find_unique(ledger.get("actions", []), "action_id", args.action_id)
     if action.get("state") != "OPEN":
         raise SystemExit("Tag results can be imported only for an open action.")
-    value = json.loads(args.tag_results.read_text(encoding="utf-8"))
-    if isinstance(value, dict):
-        value = value.get("tag_layer_results")
-    if not isinstance(value, list) or any(not isinstance(row, dict) for row in value):
-        raise SystemExit("Tag results must be an array of objects.")
-    if action.get("tag_layer_results"):
-        raise SystemExit("Tag results are already recorded for this action.")
-    for index, row in enumerate(value, start=1):
+    value = _read_json(args.tag_results, "tag results JSON")
+    contract_v2 = ledger.get("operator_contract_version") == 2
+    if contract_v2:
+        _require_artifact_run_id(ledger, value, "Tag results")
+        if value.get("action_id") != args.action_id:
+            raise SystemExit("Tag results action_id differs from the requested open action.")
+        if value.get("inventory_revision") != action.get("inventory_revision", 1):
+            raise SystemExit("Tag results inventory_revision differs from the open action.")
+    elif isinstance(value, dict) and value.get("action_id") not in (None, args.action_id):
+        raise SystemExit("Tag results action_id differs from the requested open action.")
+
+    rows_value = value.get("tag_layer_results") if isinstance(value, dict) else value
+    rows = _object_array(rows_value, "tag_layer_results")
+    recorded_at = now()
+    for index, row in enumerate(rows, start=1):
         if row.get("layer") not in TAG_RESULT_LAYERS:
             raise SystemExit(f"Tag result row {index} has an unsupported layer.")
+        supplied_action_id = str(row.get("action_id", "")).strip()
+        if contract_v2 and supplied_action_id != args.action_id:
+            raise SystemExit(f"Tag result row {index} has the wrong action_id.")
+        if supplied_action_id not in ("", args.action_id):
+            raise SystemExit(f"Tag result row {index} has the wrong action_id.")
         row["action_id"] = args.action_id
-        row.setdefault("recorded_at", now())
-    action["tag_layer_results"] = value
+        row.setdefault("recorded_at", recorded_at)
+
+    matrix_errors = _tag_batch_matrix_errors(ledger, action, rows)
+    if matrix_errors:
+        raise SystemExit(
+            "Tag result batch is incomplete or inconsistent:\n" + "\n".join(matrix_errors)
+        )
+
+    results_path = getattr(args, "results", None)
+    if contract_v2 and not isinstance(results_path, Path):
+        raise SystemExit("Operator-contract-v2 tag imports require --results.")
+    results = load_results(results_path) if isinstance(results_path, Path) else None
+    if contract_v2:
+        _require_results_run_id(ledger, results, "Tag results")
+
+    staged = deepcopy(ledger)
+    staged_action = find_unique(staged.get("actions", []), "action_id", args.action_id)
+    staged_action["tag_layer_results"] = rows
+    errors = validate_session(staged, results=results, final=False)
+    if errors:
+        raise SystemExit("Tag result batch failed staged session validation:\n" + "\n".join(errors))
+    ledger.clear()
+    ledger.update(staged)
 
 
 def _comparison_template(
@@ -915,15 +1070,15 @@ def scaffold_tag_results(ledger: dict[str, Any], args: argparse.Namespace) -> No
                     "blocker_id": None,
                 }
             )
-    save(
-        args.output,
-        {
-            "schema_version": SESSION_SCHEMA_VERSION,
-            "action_id": args.action_id,
-            "inventory_revision": case.get("inventory_revision", 1),
-            "tag_layer_results": output,
-        },
-    )
+    artifact = {
+        "schema_version": SESSION_SCHEMA_VERSION,
+        "action_id": args.action_id,
+        "inventory_revision": case.get("inventory_revision", 1),
+        "tag_layer_results": output,
+    }
+    if ledger.get("operator_contract_version") == 2:
+        artifact["run_id"] = _session_run_id(ledger)
+    save(args.output, artifact)
     print(f"Created {args.output.resolve()}")
 
 
@@ -942,6 +1097,20 @@ def begin_action(ledger: dict[str, Any], args: argparse.Namespace) -> None:
             "Complete the concerned-tag inventory and freeze the applicability card "
             "before beginning the action."
         )
+    if ledger.get("operator_contract_version") == 2:
+        decision = next(
+            (
+                row
+                for row in ledger.get("coverage_decisions", [])
+                if isinstance(row, dict)
+                and row.get("coverage_decision_id") == case.get("coverage_decision_id")
+            ),
+            None,
+        )
+        if not isinstance(decision, dict) or decision.get("status") != "FROZEN":
+            raise SystemExit(
+                "Freeze the event scenario-coverage decision before beginning an action."
+            )
     if args.quiet_window_ms <= 0 or args.timeout_ms <= 0:
         raise SystemExit("Quiet window and timeout must be positive.")
     readiness = runtime_check_by_id(ledger, args.readiness_check_id)
@@ -955,9 +1124,20 @@ def begin_action(ledger: dict[str, Any], args: argparse.Namespace) -> None:
         raise SystemExit("The readiness check has already been consumed.")
     if readiness.get("connection_epoch") != ledger.get("connection_epoch", 1):
         raise SystemExit("The readiness check belongs to a stale Preview connection epoch.")
-    if not all(
-        readiness.get(field_name) is True
-        for field_name in (
+    invalid_page_capture = (
+        ledger.get("operator_contract_version") == 2
+        and isinstance(readiness.get("page_health"), dict)
+        and readiness["page_health"].get("status") == "FAIL"
+    )
+    readiness_fields = (
+        (
+            "preview_connected",
+            "lifecycle_observed",
+            "stream_quiet",
+            "network_capture_active",
+        )
+        if invalid_page_capture
+        else (
             "preview_connected",
             "target_interactive",
             "target_uncovered",
@@ -965,7 +1145,8 @@ def begin_action(ledger: dict[str, Any], args: argparse.Namespace) -> None:
             "stream_quiet",
             "network_capture_active",
         )
-    ):
+    )
+    if not all(readiness.get(field_name) is True for field_name in readiness_fields):
         raise SystemExit("The readiness check is not fully ready for a business action.")
     previous = sorted(
         [row for row in ledger.get("actions", []) if row.get("case_id") == args.case_id],
@@ -1063,6 +1244,13 @@ def begin_action(ledger: dict[str, Any], args: argparse.Namespace) -> None:
         "tag_layer_results": [],
         "state": "OPEN",
     }
+    if ledger.get("operator_contract_version") == 2:
+        action.update(
+            {
+                "datalayer_call_index_before": readiness.get("datalayer_call_cursor"),
+                "page_health_before": deepcopy(readiness.get("page_health")),
+            }
+        )
     readiness["consumed"] = True
     readiness["consumed_by_action_id"] = args.action_id
     ledger.setdefault("actions", []).append(action)
@@ -1071,9 +1259,13 @@ def begin_action(ledger: dict[str, Any], args: argparse.Namespace) -> None:
 def record_push(ledger: dict[str, Any], args: argparse.Namespace) -> None:
     if any(row.get("push_id") == args.push_id for row in ledger.get("business_pushes", [])):
         raise SystemExit(f"Duplicate push_id: {args.push_id}")
-    action = find_unique(ledger.get("actions", []), "action_id", args.action_id)
-    if action.get("state") != "OPEN":
-        raise SystemExit("Business pushes can be recorded only for an open action.")
+    contract_v2 = ledger.get("operator_contract_version") == 2
+    action_id = str(getattr(args, "action_id", None) or "").strip()
+    action = find_unique(ledger.get("actions", []), "action_id", action_id) if action_id else None
+    if action is None and not contract_v2:
+        raise SystemExit("Legacy business pushes require --action-id.")
+    if action is not None and action.get("state") != "OPEN":
+        raise SystemExit("Action-bound business pushes require an open action.")
     if args.classification not in PUSH_CLASSIFICATIONS:
         raise SystemExit(f"Invalid push classification: {args.classification}")
     if not isinstance(args.event_index, int) or isinstance(args.event_index, bool):
@@ -1086,15 +1278,29 @@ def record_push(ledger: dict[str, Any], args: argparse.Namespace) -> None:
             raise SystemExit("captured_at must be ISO 8601 with timezone.") from exc
         if parsed_capture.tzinfo is None:
             raise SystemExit("captured_at must be ISO 8601 with timezone.")
-    if args.event_index <= action.get("last_event_before", -1):
+    if action is not None and args.event_index <= action.get("last_event_before", -1):
         raise SystemExit("Business push event_index must follow last_event_before.")
     connection_epoch = args.connection_epoch
     if connection_epoch is None:
-        connection_epoch = action.get("connection_epoch", ledger.get("connection_epoch", 1))
+        connection_epoch = (
+            action.get("connection_epoch", ledger.get("connection_epoch", 1))
+            if action is not None
+            else ledger.get("connection_epoch", 1)
+        )
     if connection_epoch < 1:
         raise SystemExit("connection_epoch must be a positive integer.")
-    if connection_epoch != action.get("connection_epoch", 1):
+    if action is not None and connection_epoch != action.get("connection_epoch", 1):
         raise SystemExit("connection_epoch must match the open action connection epoch.")
+    segment_id = str(getattr(args, "segment_id", None) or "").strip()
+    preview_event_index = getattr(args, "preview_event_index", None)
+    datalayer_call_index = getattr(args, "datalayer_call_index", None)
+    if contract_v2:
+        if not segment_id:
+            raise SystemExit("Operator-contract-v2 pushes require --segment-id.")
+        if preview_event_index is None:
+            preview_event_index = args.event_index
+        if datalayer_call_index is None and preview_event_index is None:
+            raise SystemExit("Operator-contract-v2 pushes require a Preview or dataLayer index.")
     if any(
         isinstance(row, dict)
         and row.get("stream_id", "tag_assistant") == args.stream_id
@@ -1107,27 +1313,39 @@ def record_push(ledger: dict[str, Any], args: argparse.Namespace) -> None:
             "--connection-epoch after a Preview reconnect."
         )
     group_id = args.event_group_id
-    if group_id is None:
+    if group_id is None and action is not None:
         group_id = action.get("event_group_id")
-    ledger.setdefault("business_pushes", []).append(
-        {
-            "push_id": args.push_id,
-            "stream_id": args.stream_id,
-            "connection_epoch": connection_epoch,
-            "action_id": args.action_id,
-            "case_id": action.get("case_id"),
-            "event_group_id": group_id,
-            "event_name": args.event_name,
-            "event_index": args.event_index,
-            "captured_at": captured_at or now(),
-            "url": args.url or action.get("url"),
-            "page_state": args.page_state,
-            "classification": args.classification,
-            "classification_reason": args.classification_reason,
-            "evidence_id": args.evidence_id,
-            "container_id": args.container_id,
-        }
-    )
+    if contract_v2 and not str(group_id or "").strip():
+        raise SystemExit(
+            "Operator-contract-v2 pushes require --event-group-id so anomalies affect "
+            "an explicit event verdict."
+        )
+    push_record = {
+        "push_id": args.push_id,
+        "stream_id": args.stream_id,
+        "connection_epoch": connection_epoch,
+        "action_id": action_id or None,
+        "case_id": action.get("case_id") if action is not None else None,
+        "event_group_id": group_id,
+        "event_name": args.event_name,
+        "event_index": args.event_index,
+        "captured_at": captured_at or now(),
+        "url": args.url or (action.get("url") if action is not None else None),
+        "page_state": args.page_state,
+        "classification": args.classification,
+        "classification_reason": args.classification_reason,
+        "evidence_id": args.evidence_id,
+        "container_id": args.container_id,
+    }
+    if contract_v2:
+        push_record.update(
+            {
+                "segment_id": segment_id,
+                "preview_event_index": preview_event_index,
+                "datalayer_call_index": datalayer_call_index,
+            }
+        )
+    ledger.setdefault("business_pushes", []).append(push_record)
 
 
 def import_pushes(ledger: dict[str, Any], args: argparse.Namespace) -> None:
@@ -1137,7 +1355,6 @@ def import_pushes(ledger: dict[str, Any], args: argparse.Namespace) -> None:
         raise SystemExit("Push import must be a JSON array or an object with a pushes array.")
     required = {
         "push_id",
-        "action_id",
         "event_index",
         "event_name",
         "classification",
@@ -1146,6 +1363,8 @@ def import_pushes(ledger: dict[str, Any], args: argparse.Namespace) -> None:
         "evidence_id",
         "container_id",
     }
+    if ledger.get("operator_contract_version") != 2:
+        required.add("action_id")
     for index, row in enumerate(pushes, start=1):
         missing = sorted(key for key in required if row.get(key) in (None, ""))
         if missing:
@@ -1154,8 +1373,11 @@ def import_pushes(ledger: dict[str, Any], args: argparse.Namespace) -> None:
             ledger,
             argparse.Namespace(
                 push_id=row["push_id"],
-                action_id=row["action_id"],
+                action_id=row.get("action_id"),
+                segment_id=row.get("segment_id"),
                 event_index=row["event_index"],
+                preview_event_index=row.get("preview_event_index"),
+                datalayer_call_index=row.get("datalayer_call_index"),
                 event_name=row["event_name"],
                 classification=row["classification"],
                 classification_reason=row["classification_reason"],
@@ -1169,6 +1391,199 @@ def import_pushes(ledger: dict[str, Any], args: argparse.Namespace) -> None:
                 captured_at=row.get("captured_at"),
             ),
         )
+
+
+def _require_contract_v2(ledger: dict[str, Any], operation: str) -> None:
+    if ledger.get("operator_contract_version") != 2:
+        raise SystemExit(f"{operation} requires operator_contract_version=2.")
+
+
+def _read_json(path: Path, label: str) -> Any:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"Cannot read {label}: {exc}") from exc
+
+
+def _session_run_id(ledger: dict[str, Any]) -> str:
+    run_id = str(ledger.get("run_id", "")).strip()
+    if not run_id:
+        raise SystemExit(
+            "Operator-contract-v2 session is not bound to a normalized run_id; recreate it."
+        )
+    return run_id
+
+
+def _require_artifact_run_id(
+    ledger: dict[str, Any],
+    value: Any,
+    label: str,
+) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise SystemExit(f"{label} import must be an object containing run_id.")
+    expected = _session_run_id(ledger)
+    actual = str(value.get("run_id", "")).strip()
+    if not actual:
+        raise SystemExit(f"{label} import requires run_id={expected}.")
+    if actual != expected:
+        raise SystemExit(
+            f"{label} run_id '{actual}' differs from session run_id '{expected}'; "
+            "previous-run artifacts cannot be imported."
+        )
+    return value
+
+
+def _require_results_run_id(
+    ledger: dict[str, Any],
+    results: dict[str, Any] | None,
+    label: str,
+) -> None:
+    if not isinstance(results, dict) or not isinstance(results.get("run"), dict):
+        raise SystemExit(f"{label} requires normalized results with run.run_id.")
+    expected = _session_run_id(ledger)
+    actual = str(results["run"].get("run_id", "")).strip()
+    if actual != expected:
+        raise SystemExit(
+            f"{label} normalized run_id '{actual or 'missing'}' differs from "
+            f"session run_id '{expected}'."
+        )
+
+
+def _object_array(value: Any, label: str) -> list[dict[str, Any]]:
+    if not isinstance(value, list) or any(not isinstance(row, dict) for row in value):
+        raise SystemExit(f"{label} must be an array of objects.")
+    return deepcopy(value)
+
+
+def _invalidate_closures_from(
+    ledger: dict[str, Any],
+    event_group_id: str,
+    reason: str,
+) -> None:
+    closures = [row for row in ledger.get("event_closures", []) if isinstance(row, dict)]
+    closure_index = next(
+        (
+            index
+            for index, row in enumerate(closures)
+            if str(row.get("event_group_id", "")) == event_group_id
+        ),
+        None,
+    )
+    if closure_index is None:
+        return
+    invalidated = deepcopy(closures[closure_index:])
+    ledger["event_closures"] = deepcopy(closures[:closure_index])
+    ledger.setdefault("closure_history", []).append(
+        {
+            "reopened_event_group_id": event_group_id,
+            "reopened_at": now(),
+            "reason": reason,
+            "invalidated_closures": invalidated,
+        }
+    )
+    ledger["operator_state"] = {
+        "status": "ACTIVE",
+        "current_event_group_id": event_group_id,
+    }
+
+
+def import_coverage(ledger: dict[str, Any], args: argparse.Namespace) -> None:
+    """Replace the explainable scenario-coverage ledger and reopen stale closures."""
+    _require_contract_v2(ledger, "Scenario coverage")
+    value = _require_artifact_run_id(
+        ledger,
+        _read_json(args.coverage, "coverage JSON"),
+        "Scenario coverage",
+    )
+    decisions_value = value.get("coverage_decisions")
+    decisions = _object_array(decisions_value, "coverage_decisions")
+    prior = {
+        str(row.get("event_group_id", "")): row
+        for row in ledger.get("coverage_decisions", [])
+        if isinstance(row, dict)
+    }
+    ledger["coverage_decisions"] = decisions
+    closed_groups = {
+        str(row.get("event_group_id", ""))
+        for row in ledger.get("event_closures", [])
+        if isinstance(row, dict)
+    }
+    changed = [
+        str(row.get("event_group_id", ""))
+        for row in decisions
+        if str(row.get("event_group_id", "")) in closed_groups
+        and prior.get(str(row.get("event_group_id", ""))) != row
+    ]
+    if changed:
+        closure_order = [
+            str(row.get("event_group_id", ""))
+            for row in ledger.get("event_closures", [])
+            if isinstance(row, dict)
+        ]
+        first_changed = min(changed, key=closure_order.index)
+        _invalidate_closures_from(
+            ledger,
+            first_changed,
+            "Scenario coverage changed after event closure; affected events require retest.",
+        )
+
+
+def import_stream(ledger: dict[str, Any], args: argparse.Namespace) -> None:
+    _require_contract_v2(ledger, "Continuous stream import")
+    value = _require_artifact_run_id(
+        ledger,
+        _read_json(args.stream, "stream JSON"),
+        "Continuous stream",
+    )
+    if not isinstance(value.get("stream_contract"), dict):
+        raise SystemExit("Stream import requires stream_contract and stream_segments.")
+    ledger["stream_contract"] = deepcopy(value["stream_contract"])
+    ledger["stream_segments"] = _object_array(value.get("stream_segments"), "stream_segments")
+
+
+def import_semantic(ledger: dict[str, Any], args: argparse.Namespace) -> None:
+    _require_contract_v2(ledger, "Semantic evidence import")
+    value = _require_artifact_run_id(
+        ledger,
+        _read_json(args.semantic, "semantic JSON"),
+        "Semantic evidence",
+    )
+    ledger["journey_states"] = _object_array(value.get("journey_states"), "journey_states")
+    ledger["semantic_checks"] = _object_array(value.get("semantic_checks"), "semantic_checks")
+
+
+def import_protected_handoffs(ledger: dict[str, Any], args: argparse.Namespace) -> None:
+    _require_contract_v2(ledger, "Protected handoff import")
+    value = _require_artifact_run_id(
+        ledger,
+        _read_json(args.handoffs, "protected handoff JSON"),
+        "Protected handoff",
+    )
+    rows = value.get("protected_handoffs")
+    ledger["protected_handoffs"] = _object_array(rows, "protected_handoffs")
+
+
+def import_gated_flows(ledger: dict[str, Any], args: argparse.Namespace) -> None:
+    _require_contract_v2(ledger, "Gated-flow import")
+    value = _require_artifact_run_id(
+        ledger,
+        _read_json(args.flows, "gated-flow JSON"),
+        "Gated flow",
+    )
+    rows = value.get("gated_flows")
+    ledger["gated_flows"] = _object_array(rows, "gated_flows")
+
+
+def verify_evidence(ledger: dict[str, Any], args: argparse.Namespace) -> None:
+    _require_contract_v2(ledger, "Evidence verification")
+    if not args.base_dir.is_dir():
+        raise SystemExit(f"Evidence base directory does not exist: {args.base_dir}")
+    try:
+        ledger["evidence_integrity"] = build_integrity_record(
+            load_results(args.results), args.base_dir
+        )
+    except (OSError, ValueError) as exc:
+        raise SystemExit(f"Cannot verify evidence: {exc}") from exc
 
 
 def import_cases(ledger: dict[str, Any], args: argparse.Namespace) -> None:
@@ -1233,6 +1648,13 @@ def import_cases(ledger: dict[str, Any], args: argparse.Namespace) -> None:
                 include_layer=[],
                 exclude_layer=[],
                 activate_condition=[],
+                coverage_decision_id=row.get("coverage_decision_id"),
+                scenario_class_id=row.get("scenario_class_id"),
+                sample_role=row.get("sample_role"),
+                selection_rationale=row.get("selection_rationale"),
+                population_member_id=row.get("population_member_id"),
+                acquisition_context=row.get("acquisition_context"),
+                gated_flow_kind=row.get("gated_flow_kind", "NONE"),
             ),
         )
 
@@ -1410,6 +1832,14 @@ def settle_action(ledger: dict[str, Any], args: argparse.Namespace) -> None:
         raise SystemExit("An unsettled stream cannot use a quiet settlement reason.")
     if not interrupted and not preview_connected_after:
         raise SystemExit("A disconnected Preview session requires an interrupted_action capture.")
+    if (
+        ledger.get("operator_contract_version") == 2
+        and args.interaction_outcome == "failed"
+        and args.settlement_reason != "interaction_failed"
+    ):
+        raise SystemExit(
+            "A failed website interaction requires settlement_reason=interaction_failed."
+        )
     recorded_pushes = sum(
         row.get("action_id") == args.action_id
         for row in ledger.get("business_pushes", [])
@@ -1425,12 +1855,17 @@ def settle_action(ledger: dict[str, Any], args: argparse.Namespace) -> None:
     first_event_after = settlement.get("first_event_after")
     settled_final_event = settlement.get("preview_event_cursor")
     network_request_cursor_after = settlement.get("network_request_cursor")
+    datalayer_call_index_after = settlement.get("datalayer_call_cursor")
     if first_event_after is not None and first_event_after <= action.get("last_event_before", -1):
         raise SystemExit("first_event_after must follow last_event_before.")
     if settled_final_event < action.get("last_event_before", -1):
         raise SystemExit("settled_final_event cannot precede last_event_before.")
     if network_request_cursor_after < action.get("network_request_cursor_before", -1):
         raise SystemExit("Network request cursor cannot move backwards within an action.")
+    if ledger.get("operator_contract_version") == 2 and datalayer_call_index_after < action.get(
+        "datalayer_call_index_before", -1
+    ):
+        raise SystemExit("dataLayer cursor cannot move backwards within an action.")
     action.update(
         {
             "settlement_check_id": settlement.get("check_id"),
@@ -1449,9 +1884,19 @@ def settle_action(ledger: dict[str, Any], args: argparse.Namespace) -> None:
             "state": "SETTLED",
         }
     )
+    if ledger.get("operator_contract_version") == 2:
+        action.update(
+            {
+                "datalayer_call_index_after": datalayer_call_index_after,
+                "page_health_after": deepcopy(settlement.get("page_health")),
+            }
+        )
     settlement["consumed"] = True
     settlement["consumed_by_action_id"] = args.action_id
-    if args.interaction_outcome == "completed" and preview_connected_after and stream_settled:
+    accepted_outcomes = (
+        {"completed", "failed"} if ledger.get("operator_contract_version") == 2 else {"completed"}
+    )
+    if args.interaction_outcome in accepted_outcomes and preview_connected_after and stream_settled:
         case = find_unique(
             ledger.get("cases", []),
             "case_id",
@@ -1468,30 +1913,73 @@ def settle_action(ledger: dict[str, Any], args: argparse.Namespace) -> None:
 
 def init_command(args: argparse.Namespace) -> None:
     timestamp = now()
+    contract_version = int(getattr(args, "operator_contract_version", 2))
+    run_id = str(getattr(args, "run_id", "") or "").strip()
+    browser_instance_id = str(getattr(args, "browser_instance_id", "") or "").strip()
+    browser_context_id = str(getattr(args, "browser_context_id", "") or "").strip()
+    if contract_version == 2 and not run_id:
+        raise SystemExit(
+            "Operator-contract-v2 init requires --run-id copied from normalized run.run_id."
+        )
+    if contract_version == 2 and (not browser_instance_id or not browser_context_id):
+        raise SystemExit(
+            "Operator-contract-v2 init requires --browser-instance-id and "
+            "--browser-context-id for the already approved browser session."
+        )
+    ledger = {
+        "schema_version": SESSION_SCHEMA_VERSION,
+        "operator_contract_version": contract_version,
+        "created_at": timestamp,
+        "updated_at": timestamp,
+        "profile_path": args.profile_path,
+        "connection_epoch": 1,
+        "approved_origins": sorted({origin(item) for item in args.approved_origin}),
+        "surfaces": {},
+        "runtime_checks": [],
+        "event_closures": [],
+        "closure_history": [],
+        "operator_state": {
+            "status": "ACTIVE",
+            "current_event_group_id": None,
+        },
+        "authorizations": [],
+        "cases": [],
+        "actions": [],
+        "business_pushes": [],
+        "checkpoints": [],
+    }
+    if run_id:
+        ledger["run_id"] = run_id
+    if contract_version == 2:
+        ledger.update(
+            {
+                "browser_binding": {
+                    "browser_instance_id": browser_instance_id,
+                    "browser_context_id": browser_context_id,
+                    "profile_path": args.profile_path,
+                    "approved_existing_session": True,
+                    "registered_at": timestamp,
+                },
+                "coverage_decisions": [],
+                "stream_contract": {
+                    "status": "OPEN",
+                    "started_at": timestamp,
+                    "start_preview_event_index": 0,
+                    "start_datalayer_call_index": 0,
+                    "reviewed_through_preview_event_index": 0,
+                    "reviewed_through_datalayer_call_index": 0,
+                },
+                "stream_segments": [],
+                "journey_states": [],
+                "semantic_checks": [],
+                "protected_handoffs": [],
+                "gated_flows": [],
+                "evidence_integrity": {"version": 2, "status": "PENDING"},
+            }
+        )
     save(
         args.ledger,
-        {
-            "schema_version": SESSION_SCHEMA_VERSION,
-            "operator_contract_version": 1,
-            "created_at": timestamp,
-            "updated_at": timestamp,
-            "profile_path": args.profile_path,
-            "connection_epoch": 1,
-            "approved_origins": sorted({origin(item) for item in args.approved_origin}),
-            "surfaces": {},
-            "runtime_checks": [],
-            "event_closures": [],
-            "closure_history": [],
-            "operator_state": {
-                "status": "ACTIVE",
-                "current_event_group_id": None,
-            },
-            "authorizations": [],
-            "cases": [],
-            "actions": [],
-            "business_pushes": [],
-            "checkpoints": [],
-        },
+        ledger,
     )
 
 
@@ -1609,6 +2097,12 @@ MUTATING_COMMANDS = {
     "record-push": record_push,
     "import-pushes": import_pushes,
     "import-cases": import_cases,
+    "import-coverage": import_coverage,
+    "import-stream": import_stream,
+    "import-semantic": import_semantic,
+    "import-protected-handoffs": import_protected_handoffs,
+    "import-gated-flows": import_gated_flows,
+    "verify-evidence": verify_evidence,
     "record-layer": record_layer,
     "import-layers": import_layers,
     "import-tag-results": import_tag_results,

@@ -6,6 +6,11 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import urlparse
 
+from page_context_contract import (
+    browser_runtime_errors,
+    page_health_errors,
+    page_health_passes,
+)
 from value_semantics import parse_iso_timestamp
 
 RUNTIME_CHECK_PHASES = {"before_action", "resume", "after_action", "interrupted_action"}
@@ -120,6 +125,7 @@ def runtime_snapshot_errors(
     errors: list[str] = []
     if phase not in RUNTIME_CHECK_PHASES:
         return [f"unsupported runtime-check phase: {phase}"]
+    contract_v2 = ledger.get("operator_contract_version") == 2
     for field_name in (
         "check_id",
         "captured_at",
@@ -167,7 +173,10 @@ def runtime_snapshot_errors(
     for field_name in BOOLEAN_FIELDS:
         if not isinstance(snapshot.get(field_name), bool):
             errors.append(f"runtime snapshot {field_name} must be boolean")
-    for field_name in ("preview_event_cursor", "network_request_cursor"):
+    cursor_fields = ["preview_event_cursor", "network_request_cursor"]
+    if contract_v2:
+        cursor_fields.append("datalayer_call_cursor")
+    for field_name in cursor_fields:
         value = snapshot.get(field_name)
         if not isinstance(value, int) or isinstance(value, bool) or value < 0:
             errors.append(f"runtime snapshot {field_name} must be a non-negative integer")
@@ -293,24 +302,71 @@ def runtime_snapshot_errors(
             )
         )
 
+    if contract_v2:
+        expected_container_ids = {row["container_id"] for row in expected_containers}
+        evidence_catalog = {
+            str(row.get("evidence_id", "")).strip(): row
+            for row in results.get("evidence", [])
+            if isinstance(row, dict) and str(row.get("evidence_id", "")).strip()
+        }
+        errors.extend(
+            browser_runtime_errors(
+                snapshot,
+                ledger=ledger,
+                expected_container_ids=expected_container_ids,
+                evidence_catalog=evidence_catalog,
+            )
+        )
+        errors.extend(
+            f"runtime snapshot {message}"
+            for message in page_health_errors(snapshot.get("page_health"), phase=phase)
+        )
+
     expected_overlay_active = snapshot.get("expected_overlay_active", False)
     if not isinstance(expected_overlay_active, bool):
         errors.append("runtime snapshot expected_overlay_active must be boolean")
     if phase == "before_action":
-        for field_name in READINESS_TRUE_FIELDS:
+        page_is_valid = not contract_v2 or page_health_passes(
+            snapshot.get("page_health"), phase=phase
+        )
+        required_fields = (
+            READINESS_TRUE_FIELDS
+            if page_is_valid
+            else (
+                "preview_connected",
+                "lifecycle_observed",
+                "stream_quiet",
+                "network_capture_active",
+            )
+        )
+        for field_name in required_fields:
             if snapshot.get(field_name) is not True:
                 errors.append(f"runtime readiness requires {field_name}=true")
+        if not page_is_valid and any(
+            snapshot.get(field_name) is True
+            for field_name in ("target_interactive", "target_uncovered")
+        ):
+            errors.append("invalid-page readiness cannot claim an interactive and uncovered target")
     elif phase == "resume":
-        for field_name in (
+        page_is_valid = not contract_v2 or page_health_passes(
+            snapshot.get("page_health"), phase=phase
+        )
+        required_fields = [
             "preview_connected",
-            "target_interactive",
             "lifecycle_observed",
             "stream_quiet",
             "network_capture_active",
-        ):
+        ]
+        if page_is_valid:
+            required_fields.append("target_interactive")
+        for field_name in required_fields:
             if snapshot.get(field_name) is not True:
                 errors.append(f"runtime readiness requires {field_name}=true")
-        if snapshot.get("target_uncovered") is not True and expected_overlay_active is not True:
+        if (
+            page_is_valid
+            and snapshot.get("target_uncovered") is not True
+            and expected_overlay_active is not True
+        ):
             errors.append(
                 "resume readiness requires target_uncovered=true or an expected active overlay"
             )
@@ -422,6 +478,19 @@ def normalize_runtime_check(
         "evidence_ids": list(snapshot["evidence_ids"]),
         "consumed": False,
     }
+    if ledger.get("operator_contract_version") == 2:
+        normalized.update(
+            {
+                "browser_instance_id": str(snapshot["browser_instance_id"]).strip(),
+                "tab_id": str(snapshot["tab_id"]).strip(),
+                "preview_session_id": str(snapshot["preview_session_id"]).strip(),
+                "loaded_client_container_ids": sorted(
+                    {str(value).strip() for value in snapshot["loaded_client_container_ids"]}
+                ),
+                "datalayer_call_cursor": snapshot["datalayer_call_cursor"],
+                "page_health": dict(snapshot["page_health"]),
+            }
+        )
     if phase in {"after_action", "interrupted_action"}:
         normalized["first_event_after"] = snapshot.get("first_event_after")
         normalized["observed_business_push_count"] = snapshot["observed_business_push_count"]
@@ -480,6 +549,8 @@ def validate_runtime_evidence(
         errors.append(f"{label}: direct action_boundary evidence is required")
     if check.get("network_capture_active") is True and "browser_network_capture" not in kinds:
         errors.append(f"{label}: direct browser_network_capture evidence is required")
+    if "page_health" in check and "page_health" not in kinds:
+        errors.append(f"{label}: direct page_health evidence is required")
     if check.get("page_match_mode") == "same_origin_spa":
         route_evidence_id = str(check.get("route_transition_evidence_id", "")).strip()
         route_evidence = evidence.get(route_evidence_id)

@@ -24,6 +24,10 @@
 
   const state = {
     version: 3,
+    runId:
+      typeof window.__gtmRecetteRunId === "string" && window.__gtmRecetteRunId.trim()
+        ? window.__gtmRecetteRunId.trim()
+        : null,
     installedAt: new Date().toISOString(),
     currentActionId: null,
     nextCallIndex: 1,
@@ -31,9 +35,11 @@
     layers: {},
     records: [],
     integrity: [],
+    disposed: false,
   };
   const installedLayers = new WeakMap();
   const watchedLayers = new Map();
+  const layerBindings = new Map();
 
   function errorText(error) {
     try {
@@ -406,6 +412,11 @@
       wrapper: recettePush,
       originalPush,
     });
+    layerBindings.set(layerName, {
+      layer,
+      wrapper: recettePush,
+      originalPush,
+    });
     state.layers[layerName] = {
       installed: true,
       installedAt: new Date().toISOString(),
@@ -481,7 +492,9 @@
       recordIntegrity(layerName, "property_watch_failed", errorText(error));
       return install(layerName);
     }
-    watchedLayers.set(layerName, true);
+    watchedLayers.set(layerName, {
+      originalDescriptor: descriptor || null,
+    });
     const attached = wrapLayer(layerName, current);
     if (state.layers[layerName]) {
       state.layers[layerName].watchedProperty = true;
@@ -526,10 +539,93 @@
     return result;
   }
 
+  function uninstall(layerName = "dataLayer") {
+    const binding = layerBindings.get(layerName);
+    let current;
+    try {
+      current = window[layerName];
+    } catch (error) {
+      recordIntegrity(layerName, "uninstall_unreadable", errorText(error));
+      return false;
+    }
+    if (binding && current === binding.layer) {
+      let currentPush;
+      try {
+        currentPush = current.push;
+      } catch {
+        currentPush = null;
+      }
+      if (currentPush === binding.wrapper) {
+        try {
+          current.push = binding.originalPush;
+        } catch (error) {
+          recordIntegrity(layerName, "uninstall_push_failed", errorText(error));
+          return false;
+        }
+      } else if (pushChainContains(currentPush, binding.wrapper)) {
+        recordIntegrity(
+          layerName,
+          "uninstall_nested_wrapper",
+          "A later wrapper contains the recorder; automatic removal would alter site code."
+        );
+        return false;
+      }
+    }
+    const watched = watchedLayers.get(layerName);
+    if (watched) {
+      try {
+        const original = watched.originalDescriptor;
+        if (original) {
+          Object.defineProperty(window, layerName, {
+            ...original,
+            value: current,
+          });
+        } else {
+          Object.defineProperty(window, layerName, {
+            configurable: true,
+            enumerable: true,
+            writable: true,
+            value: current,
+          });
+        }
+      } catch (error) {
+        recordIntegrity(layerName, "uninstall_property_failed", errorText(error));
+        return false;
+      }
+    }
+    layerBindings.delete(layerName);
+    watchedLayers.delete(layerName);
+    delete state.layers[layerName];
+    return true;
+  }
+
   const api = {
     version: 3,
     install,
     watch,
+    uninstall,
+    beginRun(runId, options = {}) {
+      const normalized = String(runId || "").trim();
+      if (!normalized) {
+        throw new TypeError("runId must be a non-empty string");
+      }
+      const changingRun = state.runId !== null && state.runId !== normalized;
+      if (changingRun && state.records.length > 0 && options.reset !== true) {
+        throw new Error(
+          "Recorder contains another run. Export it or call beginRun(runId, {reset: true})."
+        );
+      }
+      if (changingRun && options.reset === true) {
+        state.records = [];
+        state.integrity = [];
+        state.nextCallIndex = 1;
+        state.acknowledgedThrough = 0;
+        state.currentActionId = null;
+        state.installedAt = new Date().toISOString();
+      }
+      state.runId = normalized;
+      return state.runId;
+    },
     markAction(actionId) {
       state.currentActionId = actionId === null ? null : String(actionId);
       return state.currentActionId;
@@ -541,6 +637,8 @@
     snapshot() {
       return {
         version: state.version,
+        runId: state.runId,
+        disposed: state.disposed,
         installedAt: state.installedAt,
         currentActionId: state.currentActionId,
         nextCallIndex: state.nextCallIndex,
@@ -581,6 +679,22 @@
         remaining: state.records.length,
         nextCallIndex: state.nextCallIndex,
       };
+    },
+    dispose() {
+      if (state.disposed) {
+        return {disposed: true, alreadyDisposed: true, failures: []};
+      }
+      const names = new Set([...layerBindings.keys(), ...watchedLayers.keys()]);
+      const failures = [...names].filter((layerName) => !uninstall(layerName));
+      if (failures.length > 0) {
+        return {disposed: false, failures};
+      }
+      state.records = [];
+      state.integrity = [];
+      state.currentActionId = null;
+      state.runId = null;
+      state.disposed = true;
+      return {disposed: true, alreadyDisposed: false, failures: []};
     },
   };
 

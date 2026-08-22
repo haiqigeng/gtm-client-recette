@@ -353,6 +353,64 @@ def main() -> int:
             "Open-shadow-root interaction discovery is incomplete.",
             shadow,
         )
+
+        run_context = browser.new_context()
+        run_context.add_init_script(
+            script='window.__gtmRecetteRunId = "RUN-A";\n' + RECORDER.read_text(encoding="utf-8")
+        )
+        run_page = run_context.new_page()
+        run_page.goto("data:text/html,<title>recorder lifecycle</title>")
+        lifecycle = run_page.evaluate(
+            """() => {
+              const journal = window.__gtmRecetteJournal;
+              const initialRunId = journal.snapshot().runId;
+              window.dataLayer.push({event: "run_a"});
+              let residueRefused = false;
+              try {
+                journal.beginRun("RUN-B");
+              } catch (error) {
+                residueRefused = String(error.message).includes("another run");
+              }
+              journal.beginRun("RUN-B", {reset: true});
+              const reset = journal.snapshot();
+              window.dataLayer.push({event: "run_b"});
+              const beforeDisposeLength = window.dataLayer.length;
+              const disposed = journal.dispose();
+              const deleteResult = delete window.__gtmRecetteJournal;
+              const pushResult = window.dataLayer.push({event: "after_dispose"});
+              return {
+                initialRunId,
+                residueRefused,
+                resetRunId: reset.runId,
+                resetRecordCount: reset.records.length,
+                resetNextCallIndex: reset.nextCallIndex,
+                disposed,
+                globalRetained: window.__gtmRecetteJournal === journal,
+                deleteRefused: deleteResult === false,
+                disposedState: journal.snapshot().disposed,
+                pushStillWorks: pushResult === beforeDisposeLength + 1
+              };
+            }"""
+        )
+        require(
+            lifecycle["initialRunId"] == "RUN-A"
+            and lifecycle["residueRefused"] is True
+            and lifecycle["resetRunId"] == "RUN-B"
+            and lifecycle["resetRecordCount"] == 0
+            and lifecycle["resetNextCallIndex"] == 1,
+            "Recorder run binding did not reject or reset previous-run residue safely.",
+            lifecycle,
+        )
+        require(
+            lifecycle["disposed"]["disposed"] is True
+            and lifecycle["globalRetained"] is True
+            and lifecycle["deleteRefused"] is True
+            and lifecycle["disposedState"] is True
+            and lifecycle["pushStillWorks"] is True,
+            "Recorder disposal did not restore the page or protect the control API.",
+            lifecycle,
+        )
+        run_context.close()
         browser.close()
 
     print("Browser helper checks passed.")

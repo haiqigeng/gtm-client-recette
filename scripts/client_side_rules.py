@@ -13,6 +13,8 @@ from typing import Any
 from urllib.parse import parse_qsl, urlsplit
 
 from acceptance_contract import expects_absence
+from safe_regex import finditer as safe_finditer
+from safe_regex import fullmatch as safe_fullmatch
 from value_semantics import is_json_number, strict_equal
 
 MISSING = object()
@@ -59,6 +61,18 @@ GOOGLE_USER_DATA_HASH_RE = re.compile(
 )
 
 SENSITIVE_KEY_CATEGORIES = {
+    "password": "sensitive_query_parameter",
+    "passwd": "sensitive_query_parameter",
+    "passcode": "sensitive_query_parameter",
+    "token": "sensitive_query_parameter",
+    "access_token": "sensitive_query_parameter",
+    "auth_token": "sensitive_query_parameter",
+    "authorization": "sensitive_query_parameter",
+    "cookie": "sensitive_query_parameter",
+    "session_id": "sensitive_query_parameter",
+    "card_number": "sensitive_query_parameter",
+    "cvv": "sensitive_query_parameter",
+    "otp": "sensitive_query_parameter",
     "email": "email",
     "email_address": "email",
     "user_email": "email",
@@ -85,6 +99,18 @@ SENSITIVE_KEY_CATEGORIES = {
     "ip_address": "ip_address",
 }
 QUERY_KEY_CATEGORIES = {
+    "password": "sensitive_query_parameter",
+    "passwd": "sensitive_query_parameter",
+    "passcode": "sensitive_query_parameter",
+    "token": "sensitive_query_parameter",
+    "access_token": "sensitive_query_parameter",
+    "auth_token": "sensitive_query_parameter",
+    "authorization": "sensitive_query_parameter",
+    "cookie": "sensitive_query_parameter",
+    "session_id": "sensitive_query_parameter",
+    "card_number": "sensitive_query_parameter",
+    "cvv": "sensitive_query_parameter",
+    "otp": "sensitive_query_parameter",
     "email": "email",
     "email_address": "email",
     "email_hash": "email",
@@ -345,8 +371,8 @@ def _condition(payload: Any, condition: dict[str, Any]) -> bool | None:
         if not isinstance(value, str) or not isinstance(pattern, str):
             return False
         try:
-            return re.fullmatch(pattern, value) is not None
-        except re.error:
+            return safe_fullmatch(pattern, value)
+        except ValueError:
             return None
     return None
 
@@ -541,9 +567,9 @@ def evaluate_business_rule(
             passed = (
                 isinstance(actual, str)
                 and isinstance(pattern, str)
-                and re.fullmatch(pattern, actual) is not None
+                and safe_fullmatch(pattern, actual)
             )
-        except re.error:
+        except ValueError:
             result["reason"] = "Invalid regular expression."
             return result
 
@@ -888,8 +914,10 @@ def scan_sensitive_value(
                 if not isinstance(pattern, str):
                     continue
                 try:
-                    matches = list(re.finditer(pattern, item))
-                except re.error:
+                    matches = safe_finditer(pattern, item, label="custom sensitive pattern")
+                except ValueError:
+                    # Policy validation reports malformed or unsafe patterns. The scanner
+                    # remains deterministic so one bad policy row cannot abort validation.
                     continue
                 for match in matches:
                     add(

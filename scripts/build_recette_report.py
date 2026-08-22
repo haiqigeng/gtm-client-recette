@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import io
 import json
 import sys
 from collections import Counter
@@ -12,6 +13,7 @@ from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.cell import Cell
@@ -20,7 +22,7 @@ from openpyxl.utils import get_column_letter
 
 from acceptance_contract import status_of, worst_status
 from client_side_rules import evaluate_report_business_rules
-from event_feedback import event_feedback
+from event_feedback import event_feedback, final_conclusion
 from execution_contract import (
     business_push_rows,
     case_action_rows,
@@ -33,7 +35,7 @@ from recette_schema import (
     dumps_structured,
     validate,
 )
-from state_io import recover_file_pair
+from state_io import atomic_write_bytes, recover_file_pair
 
 STATUS_FILLS = {
     "PASS": "C6EFCE",
@@ -92,7 +94,37 @@ REQUIRED_SHEETS = [
     "Evidence Catalogue",
     "Run Context",
 ]
-OUTPUT_CONTRACT_VERSION = 2
+V2_SHEETS = [
+    "Coverage Decisions",
+    "Scenario Classes",
+    "Semantic Checks",
+    "Journey State",
+    "Stream Segments",
+    "Protected Handoffs",
+    "Gated Flows",
+    "Final Conclusion",
+]
+
+
+def required_sheets(session: dict[str, Any] | None) -> list[str]:
+    """Return the exact workbook contract for legacy or operator-v2 runs."""
+    if isinstance(session, dict) and session.get("operator_contract_version") == 2:
+        return [*REQUIRED_SHEETS[:-1], *V2_SHEETS, REQUIRED_SHEETS[-1]]
+    return list(REQUIRED_SHEETS)
+
+
+LEGACY_OUTPUT_CONTRACT_VERSION = 2
+OUTPUT_CONTRACT_VERSION = 3
+
+
+def output_contract_version(session: dict[str, Any] | None) -> int:
+    """Keep legacy workbook columns stable; operator-v2 uses the expanded contract."""
+    return (
+        OUTPUT_CONTRACT_VERSION
+        if isinstance(session, dict) and session.get("operator_contract_version") == 2
+        else LEGACY_OUTPUT_CONTRACT_VERSION
+    )
+
 
 DEFECT_HEADERS = [
     "output_contract_version",
@@ -238,6 +270,13 @@ CASE_HEADERS = [
     "action",
     "material_variant",
     "discovered_from",
+    "coverage_decision_id",
+    "scenario_class_id",
+    "sample_role",
+    "selection_rationale",
+    "population_member_id",
+    "acquisition_context",
+    "gated_flow_kind",
     "tag_scope",
     "tag_inventory_status",
     "tag_inventory",
@@ -257,6 +296,8 @@ CASE_HEADERS = [
     "settled_final_event",
     "network_request_cursor_before",
     "network_request_cursor_after",
+    "datalayer_call_index_before",
+    "datalayer_call_index_after",
     "interaction_outcome",
     "completion_signal",
     "stream_settled",
@@ -265,6 +306,18 @@ CASE_HEADERS = [
     "layer_results",
     "tag_layer_results",
 ]
+V2_CASE_ONLY_HEADERS = {
+    "coverage_decision_id",
+    "scenario_class_id",
+    "sample_role",
+    "selection_rationale",
+    "population_member_id",
+    "acquisition_context",
+    "gated_flow_kind",
+    "datalayer_call_index_before",
+    "datalayer_call_index_after",
+}
+LEGACY_CASE_HEADERS = [header for header in CASE_HEADERS if header not in V2_CASE_ONLY_HEADERS]
 
 LAYER_VERDICT_HEADERS = [
     "plan_order",
@@ -339,6 +392,9 @@ PUSH_HEADERS = [
     "stream_id",
     "connection_epoch",
     "event_index",
+    "preview_event_index",
+    "datalayer_call_index",
+    "segment_id",
     "captured_at",
     "push_id",
     "action_id",
@@ -352,6 +408,25 @@ PUSH_HEADERS = [
     "container_id",
     "evidence_id",
 ]
+V2_PUSH_ONLY_HEADERS = {"preview_event_index", "datalayer_call_index", "segment_id"}
+LEGACY_PUSH_HEADERS = [header for header in PUSH_HEADERS if header not in V2_PUSH_ONLY_HEADERS]
+
+
+def case_headers(session: dict[str, Any] | None) -> list[str]:
+    return (
+        CASE_HEADERS
+        if isinstance(session, dict) and session.get("operator_contract_version") == 2
+        else LEGACY_CASE_HEADERS
+    )
+
+
+def push_headers(session: dict[str, Any] | None) -> list[str]:
+    return (
+        PUSH_HEADERS
+        if isinstance(session, dict) and session.get("operator_contract_version") == 2
+        else LEGACY_PUSH_HEADERS
+    )
+
 
 TAG_HEADERS = [
     "plan_order",
@@ -1179,7 +1254,7 @@ def defect_rows(
             )
     for row in output:
         group_feedback = feedback.get(str(row.get("event_group_id", "")), {})
-        row["output_contract_version"] = OUTPUT_CONTRACT_VERSION
+        row["output_contract_version"] = output_contract_version(session)
         row["primary_outcome"] = group_feedback.get("primary_outcome")
         row["anomaly_flags"] = group_feedback.get("anomaly_flags")
     return sorted(
@@ -1882,7 +1957,7 @@ def add_client_summary(
     ws["A1"].font = Font(size=18, bold=True, color="1F4E78")
     summary_rows = [
         ("Overall status", overall),
-        ("Output contract", OUTPUT_CONTRACT_VERSION),
+        ("Output contract", output_contract_version(session)),
         ("Acceptance scope", run.get("acceptance_scope")),
         ("Client", run.get("client")),
         ("Environment", run.get("environment")),
@@ -1978,6 +2053,144 @@ def _generic_rows(rows: list[dict[str, Any]], headers: list[str]) -> list[dict[s
     return [{header: row.get(header) for header in headers} for row in rows]
 
 
+COVERAGE_HEADERS = [
+    "coverage_decision_id",
+    "event_group_id",
+    "revision",
+    "status",
+    "population_scope",
+    "population_complete",
+    "discovery_sources",
+    "dimensions",
+    "limitations",
+    "recorded_at",
+    "frozen_at",
+]
+SCENARIO_HEADERS = [
+    "event_group_id",
+    "coverage_decision_id",
+    "scenario_class_id",
+    "name",
+    "selection_mode",
+    "population_source",
+    "population_estimate",
+    "selection_method",
+    "required_sample_roles",
+    "dimension_values",
+    "behavior_signature",
+    "case_ids",
+    "limitations",
+]
+SEMANTIC_HEADERS = [
+    "check_id",
+    "event_group_id",
+    "case_id",
+    "action_id",
+    "requirement_id",
+    "kind",
+    "subject",
+    "authority",
+    "comparison",
+    "anchor_state",
+    "anchor_value",
+    "observed_value",
+    "status",
+    "reason",
+    "evidence_ids",
+]
+JOURNEY_STATE_HEADERS = [
+    "state_id",
+    "event_group_id",
+    "case_id",
+    "action_id",
+    "phase",
+    "values",
+    "summary",
+    "captured_at",
+    "evidence_ids",
+]
+STREAM_HEADERS = [
+    "segment_id",
+    "kind",
+    "status",
+    "connection_epoch",
+    "action_id",
+    "previous_segment_id",
+    "start_preview_event_index",
+    "end_preview_event_index",
+    "start_datalayer_call_index",
+    "end_datalayer_call_index",
+    "observed_push_ids",
+    "started_at",
+    "ended_at",
+    "evidence_ids",
+]
+HANDOFF_HEADERS = [
+    "handoff_id",
+    "gate_type",
+    "status",
+    "event_group_id",
+    "case_id",
+    "action_id",
+    "reason",
+    "requested_at",
+    "resumed_at",
+    "before_binding",
+    "after_binding",
+    "evidence_ids",
+]
+GATED_FLOW_HEADERS = [
+    "flow_id",
+    "kind",
+    "status",
+    "event_group_id",
+    "case_id",
+    "action_id",
+    "states",
+    "consent_outcome",
+    "captcha_outcome",
+    "synthetic_data_used",
+    "safe_environment_confirmed",
+    "handoff_id",
+    "reason",
+    "evidence_ids",
+]
+CONCLUSION_HEADERS = [
+    "plan_order",
+    "event_group_id",
+    "event_name",
+    "status",
+    "status_label",
+    "technical_status",
+    "semantic_status",
+    "stream_status",
+    "coverage_status",
+    "layers_inspected",
+    "why",
+]
+
+
+def scenario_class_rows(session: dict[str, Any]) -> list[dict[str, Any]]:
+    output: list[dict[str, Any]] = []
+    for decision in session.get("coverage_decisions", []):
+        if not isinstance(decision, dict):
+            continue
+        for scenario in decision.get("scenario_classes", []):
+            if isinstance(scenario, dict):
+                output.append(
+                    {
+                        "event_group_id": decision.get("event_group_id"),
+                        "coverage_decision_id": decision.get("coverage_decision_id"),
+                        **scenario,
+                    }
+                )
+    return output
+
+
+def conclusion_rows(data: dict[str, Any], session: dict[str, Any]) -> list[dict[str, Any]]:
+    return list(final_conclusion(data, session).get("events", []))
+
+
 def build_workbook(
     data: dict[str, Any],
     output: Path,
@@ -1991,6 +2204,8 @@ def build_workbook(
         if execution_errors:
             raise ReportValidationError("\n".join(execution_errors))
     wb = Workbook()
+    selected_case_headers = case_headers(session)
+    selected_push_headers = push_headers(session)
     add_client_summary(wb, data, warnings, session)
     add_table_sheet(wb, "Defect Register", DEFECT_HEADERS, defect_rows(data, session))
     add_table_sheet(wb, "Requirement Matrix", REQUIREMENT_HEADERS, requirement_rows(data))
@@ -1998,8 +2213,8 @@ def build_workbook(
     add_table_sheet(
         wb,
         "Interaction Cases",
-        CASE_HEADERS,
-        _generic_rows(case_action_rows(session or {}), CASE_HEADERS),
+        selected_case_headers,
+        _generic_rows(case_action_rows(session or {}), selected_case_headers),
     )
     add_table_sheet(
         wb,
@@ -2011,8 +2226,8 @@ def build_workbook(
     add_table_sheet(
         wb,
         "Observed Push Stream",
-        PUSH_HEADERS,
-        _generic_rows(business_push_rows(session or {}), PUSH_HEADERS),
+        selected_push_headers,
+        _generic_rows(business_push_rows(session or {}), selected_push_headers),
     )
     add_table_sheet(wb, "Tag Evidence", TAG_HEADERS, tag_rows(data, session))
     add_table_sheet(
@@ -2076,6 +2291,73 @@ def build_workbook(
         EVIDENCE_HEADERS,
         _generic_rows(as_rows(data.get("evidence"), "evidence"), EVIDENCE_HEADERS),
     )
+    if isinstance(session, dict) and session.get("operator_contract_version") == 2:
+        add_table_sheet(
+            wb,
+            "Coverage Decisions",
+            COVERAGE_HEADERS,
+            _generic_rows(
+                [row for row in session.get("coverage_decisions", []) if isinstance(row, dict)],
+                COVERAGE_HEADERS,
+            ),
+        )
+        add_table_sheet(
+            wb,
+            "Scenario Classes",
+            SCENARIO_HEADERS,
+            _generic_rows(scenario_class_rows(session), SCENARIO_HEADERS),
+        )
+        add_table_sheet(
+            wb,
+            "Semantic Checks",
+            SEMANTIC_HEADERS,
+            _generic_rows(
+                [row for row in session.get("semantic_checks", []) if isinstance(row, dict)],
+                SEMANTIC_HEADERS,
+            ),
+        )
+        add_table_sheet(
+            wb,
+            "Journey State",
+            JOURNEY_STATE_HEADERS,
+            _generic_rows(
+                [row for row in session.get("journey_states", []) if isinstance(row, dict)],
+                JOURNEY_STATE_HEADERS,
+            ),
+        )
+        add_table_sheet(
+            wb,
+            "Stream Segments",
+            STREAM_HEADERS,
+            _generic_rows(
+                [row for row in session.get("stream_segments", []) if isinstance(row, dict)],
+                STREAM_HEADERS,
+            ),
+        )
+        add_table_sheet(
+            wb,
+            "Protected Handoffs",
+            HANDOFF_HEADERS,
+            _generic_rows(
+                [row for row in session.get("protected_handoffs", []) if isinstance(row, dict)],
+                HANDOFF_HEADERS,
+            ),
+        )
+        add_table_sheet(
+            wb,
+            "Gated Flows",
+            GATED_FLOW_HEADERS,
+            _generic_rows(
+                [row for row in session.get("gated_flows", []) if isinstance(row, dict)],
+                GATED_FLOW_HEADERS,
+            ),
+        )
+        add_table_sheet(
+            wb,
+            "Final Conclusion",
+            CONCLUSION_HEADERS,
+            _generic_rows(conclusion_rows(data, session), CONCLUSION_HEADERS),
+        )
     add_run_context(wb, data.get("run", {}))
 
     evidence_ws = wb["Evidence Catalogue"]
@@ -2103,12 +2385,25 @@ def validate_workbook(
 ) -> None:
     workbook = load_workbook(path, read_only=False, data_only=False)
     try:
-        missing = [title for title in REQUIRED_SHEETS if title not in workbook.sheetnames]
+        selected_case_headers = case_headers(session)
+        selected_push_headers = push_headers(session)
+        case_rows_for_validation = _generic_rows(
+            case_action_rows(session or {}), selected_case_headers
+        )
+        push_rows_for_validation = _generic_rows(
+            business_push_rows(session or {}), selected_push_headers
+        )
+        layer_rows_for_validation = layer_verdict_rows(data, session)
+        evidence_rows_for_validation = _generic_rows(
+            as_rows(data.get("evidence"), "evidence"), EVIDENCE_HEADERS
+        )
+        expected_sheets = required_sheets(session)
+        missing = [title for title in expected_sheets if title not in workbook.sheetnames]
         if missing:
             raise ReportValidationError(
                 "Generated workbook is missing sheets: " + ", ".join(missing)
             )
-        if workbook.sheetnames != REQUIRED_SHEETS:
+        if workbook.sheetnames != expected_sheets:
             raise ReportValidationError("Generated workbook sheets are not in the required order.")
         expected_rows = {
             "Defect Register": table_sheet_row_count(DEFECT_HEADERS, defect_rows(data, session)),
@@ -2117,16 +2412,16 @@ def validate_workbook(
             ),
             "Journey Coverage": table_sheet_row_count(JOURNEY_HEADERS, journey_rows(data)),
             "Interaction Cases": table_sheet_row_count(
-                CASE_HEADERS,
-                _generic_rows(case_action_rows(session or {}), CASE_HEADERS),
+                selected_case_headers,
+                case_rows_for_validation,
             ),
             "Layer Verdicts": table_sheet_row_count(
-                LAYER_VERDICT_HEADERS, layer_verdict_rows(data, session)
+                LAYER_VERDICT_HEADERS, layer_rows_for_validation
             ),
             "Event Evidence": table_sheet_row_count(EVENT_HEADERS, event_rows(data)),
             "Observed Push Stream": table_sheet_row_count(
-                PUSH_HEADERS,
-                _generic_rows(business_push_rows(session or {}), PUSH_HEADERS),
+                selected_push_headers,
+                push_rows_for_validation,
             ),
             "Tag Evidence": table_sheet_row_count(TAG_HEADERS, tag_rows(data, session)),
             "Destination Evidence": table_sheet_row_count(
@@ -2155,11 +2450,137 @@ def validate_workbook(
             ),
             "Evidence Catalogue": table_sheet_row_count(
                 EVIDENCE_HEADERS,
-                _generic_rows(as_rows(data.get("evidence"), "evidence"), EVIDENCE_HEADERS),
+                evidence_rows_for_validation,
             ),
         }
+        expected_headers = {
+            "Defect Register": DEFECT_HEADERS,
+            "Requirement Matrix": REQUIREMENT_HEADERS,
+            "Journey Coverage": JOURNEY_HEADERS,
+            "Interaction Cases": selected_case_headers,
+            "Layer Verdicts": LAYER_VERDICT_HEADERS,
+            "Event Evidence": EVENT_HEADERS,
+            "Observed Push Stream": selected_push_headers,
+            "Tag Evidence": TAG_HEADERS,
+            "Destination Evidence": DESTINATION_HEADERS,
+            "Trigger & Sequence": TRIGGER_SEQUENCE_HEADERS,
+            "Consent": CONSENT_HEADERS,
+            "Business Rules": BUSINESS_RULE_HEADERS,
+            "Sensitive Data": SENSITIVE_DATA_HEADERS,
+            "Client Checks": CLIENT_CHECK_HEADERS,
+            "Regression": REGRESSION_HEADERS,
+            "Container Context": CONTAINER_HEADERS,
+            "Unexpected Events-Tags": UNEXPECTED_HEADERS,
+            "Blockers": BLOCKER_HEADERS,
+            "Evidence Catalogue": EVIDENCE_HEADERS,
+        }
+        conclusion_rows_for_validation: list[dict[str, Any]] = []
+        if isinstance(session, dict) and session.get("operator_contract_version") == 2:
+            conclusion_rows_for_validation = _generic_rows(
+                conclusion_rows(data, session), CONCLUSION_HEADERS
+            )
+            expected_rows.update(
+                {
+                    "Coverage Decisions": table_sheet_row_count(
+                        COVERAGE_HEADERS,
+                        _generic_rows(
+                            [
+                                row
+                                for row in session.get("coverage_decisions", [])
+                                if isinstance(row, dict)
+                            ],
+                            COVERAGE_HEADERS,
+                        ),
+                    ),
+                    "Scenario Classes": table_sheet_row_count(
+                        SCENARIO_HEADERS,
+                        _generic_rows(scenario_class_rows(session), SCENARIO_HEADERS),
+                    ),
+                    "Semantic Checks": table_sheet_row_count(
+                        SEMANTIC_HEADERS,
+                        _generic_rows(
+                            [
+                                row
+                                for row in session.get("semantic_checks", [])
+                                if isinstance(row, dict)
+                            ],
+                            SEMANTIC_HEADERS,
+                        ),
+                    ),
+                    "Journey State": table_sheet_row_count(
+                        JOURNEY_STATE_HEADERS,
+                        _generic_rows(
+                            [
+                                row
+                                for row in session.get("journey_states", [])
+                                if isinstance(row, dict)
+                            ],
+                            JOURNEY_STATE_HEADERS,
+                        ),
+                    ),
+                    "Stream Segments": table_sheet_row_count(
+                        STREAM_HEADERS,
+                        _generic_rows(
+                            [
+                                row
+                                for row in session.get("stream_segments", [])
+                                if isinstance(row, dict)
+                            ],
+                            STREAM_HEADERS,
+                        ),
+                    ),
+                    "Protected Handoffs": table_sheet_row_count(
+                        HANDOFF_HEADERS,
+                        _generic_rows(
+                            [
+                                row
+                                for row in session.get("protected_handoffs", [])
+                                if isinstance(row, dict)
+                            ],
+                            HANDOFF_HEADERS,
+                        ),
+                    ),
+                    "Gated Flows": table_sheet_row_count(
+                        GATED_FLOW_HEADERS,
+                        _generic_rows(
+                            [
+                                row
+                                for row in session.get("gated_flows", [])
+                                if isinstance(row, dict)
+                            ],
+                            GATED_FLOW_HEADERS,
+                        ),
+                    ),
+                    "Final Conclusion": table_sheet_row_count(
+                        CONCLUSION_HEADERS,
+                        conclusion_rows_for_validation,
+                    ),
+                }
+            )
+            expected_headers.update(
+                {
+                    "Coverage Decisions": COVERAGE_HEADERS,
+                    "Scenario Classes": SCENARIO_HEADERS,
+                    "Semantic Checks": SEMANTIC_HEADERS,
+                    "Journey State": JOURNEY_STATE_HEADERS,
+                    "Stream Segments": STREAM_HEADERS,
+                    "Protected Handoffs": HANDOFF_HEADERS,
+                    "Gated Flows": GATED_FLOW_HEADERS,
+                    "Final Conclusion": CONCLUSION_HEADERS,
+                }
+            )
         for title, count in expected_rows.items():
             sheet = workbook[title]
+            actual_headers = [
+                sheet.cell(row=1, column=index).value
+                for index in range(1, len(expected_headers[title]) + 1)
+            ]
+            if actual_headers != expected_headers[title] or sheet.max_column != len(
+                expected_headers[title]
+            ):
+                raise ReportValidationError(
+                    f"Generated workbook sheet '{title}' has an invalid column contract."
+                )
             if sheet.max_row != count:
                 raise ReportValidationError(
                     f"Generated workbook sheet '{title}' has {sheet.max_row} rows; expected {count}."
@@ -2174,6 +2595,79 @@ def validate_workbook(
                         raise ReportValidationError(
                             f"Generated workbook sheet '{title}' contains an oversized cell."
                         )
+
+        def assert_projection(
+            title: str,
+            headers: list[str],
+            rows: list[dict[str, Any]],
+            keys: tuple[str, ...],
+        ) -> None:
+            sheet = workbook[title]
+            positions = {header: headers.index(header) + 1 for header in keys}
+            excel_row = 2
+            for logical_row in rows:
+                for key, column in positions.items():
+                    if sheet.cell(row=excel_row, column=column).value != serialize(
+                        logical_row.get(key)
+                    ):
+                        raise ReportValidationError(
+                            f"Generated workbook sheet '{title}' changed decision field '{key}'."
+                        )
+                excel_row += expanded_row_count(logical_row.get(header) for header in headers)
+
+        assert_projection(
+            "Interaction Cases",
+            selected_case_headers,
+            case_rows_for_validation,
+            ("event_group_id", "case_id", "execution_status"),
+        )
+        assert_projection(
+            "Layer Verdicts",
+            LAYER_VERDICT_HEADERS,
+            layer_rows_for_validation,
+            ("event_group_id", "case_id", "layer", "status"),
+        )
+        assert_projection(
+            "Evidence Catalogue",
+            EVIDENCE_HEADERS,
+            evidence_rows_for_validation,
+            ("evidence_id", "kind", "path_or_url"),
+        )
+        if conclusion_rows_for_validation:
+            assert_projection(
+                "Final Conclusion",
+                CONCLUSION_HEADERS,
+                conclusion_rows_for_validation,
+                (
+                    "event_group_id",
+                    "status",
+                    "technical_status",
+                    "semantic_status",
+                    "stream_status",
+                    "coverage_status",
+                    "why",
+                ),
+            )
+
+        evidence_sheet = workbook["Evidence Catalogue"]
+        path_column = EVIDENCE_HEADERS.index("path_or_url") + 1
+        excel_row = 2
+        for logical_row in evidence_rows_for_validation:
+            target = str(logical_row.get("path_or_url") or "").strip()
+            hyperlink = evidence_sheet.cell(row=excel_row, column=path_column).hyperlink
+            should_link = bool(
+                target
+                and (
+                    target.startswith(("https://", "http://"))
+                    or Path(target).is_absolute()
+                    or Path(target).exists()
+                )
+            )
+            if should_link and (hyperlink is None or hyperlink.target != target):
+                raise ReportValidationError(
+                    "Generated workbook evidence hyperlink does not match its catalog path."
+                )
+            excel_row += expanded_row_count(logical_row.get(header) for header in EVIDENCE_HEADERS)
     finally:
         workbook.close()
 
@@ -2194,17 +2688,21 @@ def _csv_safe_text(value: Any) -> str:
 
 
 def write_defects_csv(path: Path, rows_to_write: list[dict[str, Any]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8-sig", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=DEFECT_HEADERS, extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(
-            {header: _csv_safe_text(row.get(header)) for header in DEFECT_HEADERS}
-            for row in rows_to_write
-        )
+    handle = io.StringIO(newline="")
+    writer = csv.DictWriter(handle, fieldnames=DEFECT_HEADERS, extrasaction="ignore")
+    writer.writeheader()
+    writer.writerows(
+        {header: _csv_safe_text(row.get(header)) for header in DEFECT_HEADERS}
+        for row in rows_to_write
+    )
+    atomic_write_bytes(path, ("\ufeff" + handle.getvalue()).encode("utf-8"))
 
 
-def write_defects_markdown(path: Path, rows_to_write: list[dict[str, Any]]) -> None:
+def write_defects_markdown(
+    path: Path,
+    rows_to_write: list[dict[str, Any]],
+    session: dict[str, Any] | None = None,
+) -> None:
     columns = [
         "plan_order",
         "event_name",
@@ -2218,7 +2716,7 @@ def write_defects_markdown(path: Path, rows_to_write: list[dict[str, Any]]) -> N
     lines = [
         "# GTM recette defects",
         "",
-        f"Output contract: {OUTPUT_CONTRACT_VERSION}",
+        f"Output contract: {output_contract_version(session)}",
         "",
         "| " + " | ".join(columns) + " |",
         "| " + " | ".join("---" for _ in columns) + " |",
@@ -2226,8 +2724,7 @@ def write_defects_markdown(path: Path, rows_to_write: list[dict[str, Any]]) -> N
     for row in rows_to_write:
         values = [_sidecar_text(row.get(column)).replace("|", "\\|") for column in columns]
         lines.append("| " + " | ".join(values) + " |")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    atomic_write_bytes(path, ("\n".join(lines) + "\n").encode("utf-8"))
 
 
 def write_stakeholder_summary(
@@ -2240,7 +2737,7 @@ def write_stakeholder_summary(
     lines = [
         f"# {data.get('run', {}).get('report_title', 'GTM Client Recette')}",
         "",
-        f"Output contract: {OUTPUT_CONTRACT_VERSION}",
+        f"Output contract: {output_contract_version(session)}",
         "",
         f"Scope: {_sidecar_text(data.get('run', {}).get('acceptance_scope'))}",
         "",
@@ -2265,8 +2762,7 @@ def write_stakeholder_summary(
             f"{_sidecar_text(row.get('reason'))} Retest: {_sidecar_text(row.get('retest'))}"
             for row in non_pass
         )
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    atomic_write_bytes(path, ("\n".join(lines) + "\n").encode("utf-8"))
 
 
 def main() -> int:
@@ -2317,12 +2813,17 @@ def main() -> int:
             raise ReportValidationError("Workbook and sidecar outputs must use distinct paths.")
         if any(path in outputs for path in inputs if path is not None):
             raise ReportValidationError("An output path cannot overwrite an input ledger.")
-        build_workbook(data, output, warnings, session)
+        temporary = output.with_name(f".{output.stem}.{uuid4().hex}.validated.xlsx")
+        try:
+            build_workbook(data, temporary, warnings, session)
+            atomic_write_bytes(output, temporary.read_bytes())
+        finally:
+            temporary.unlink(missing_ok=True)
         defects = defect_rows(data, session)
         if args.defects_csv:
             write_defects_csv(args.defects_csv, defects)
         if args.defects_md:
-            write_defects_markdown(args.defects_md, defects)
+            write_defects_markdown(args.defects_md, defects, session)
         if args.stakeholder_summary:
             write_stakeholder_summary(args.stakeholder_summary, data, session)
     except (OSError, json.JSONDecodeError, ReportValidationError) as exc:

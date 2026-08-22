@@ -372,9 +372,6 @@ def layer_applicability(
         for row in rows
         if isinstance(row.get("expectation"), dict)
     }
-    expectations = [
-        row.get("expectation", {}) for row in rows if isinstance(row.get("expectation"), dict)
-    ]
     has_data_layer = "data_layer_push" in mechanisms
     in_scope_tags = [tag for tag in inventories if tag.get("scope_status") == "IN_SCOPE"]
     declared_tag_expectations = [
@@ -398,11 +395,44 @@ def layer_applicability(
         "concerned_tag_inventory": "Every event must expose its complete in-scope and excluded tag inventory.",
         "sensitive_data_scan": "Every captured payload/runtime/request chain is scanned for sensitive data.",
     }
+    # A planned dataLayer event always requires live tag discovery even when the
+    # plan omitted tag columns. Explicit tag contracts activate the same chain
+    # for non-dataLayer sources.
+    has_concerned_tag_contract = has_data_layer or bool(in_scope_tags or declared_tag_expectations)
+    has_destination_contract = any(
+        isinstance(row.get("expectation"), dict)
+        and any(
+            has_value(row["expectation"].get(field))
+            for field in (
+                "destination_id",
+                "destination_event_name",
+                "expected_endpoint_pattern",
+                "expected_request_behavior",
+            )
+        )
+        for row in rows
+    )
     if has_data_layer:
         mandatory.update(
             {
                 "raw_api_call",
                 "resolved_data_layer",
+            }
+        )
+        reasons.update(
+            {
+                "raw_api_call": "A planned dataLayer event requires its exact live API Call payload.",
+                "resolved_data_layer": "A planned dataLayer event requires the resolved event-state comparison.",
+            }
+        )
+    elif mechanisms:
+        mandatory.add("source_signal_when_no_data_layer_push")
+        reasons["source_signal_when_no_data_layer_push"] = (
+            "The accepted source mechanism is not a custom dataLayer.push."
+        )
+    if has_concerned_tag_contract:
+        mandatory.update(
+            {
                 "gtm_variable",
                 "tag_configuration",
                 "tag_firing",
@@ -411,30 +441,18 @@ def layer_applicability(
         )
         reasons.update(
             {
-                "raw_api_call": "A planned dataLayer event requires its exact live API Call payload.",
-                "resolved_data_layer": "A planned dataLayer event requires the resolved event-state comparison.",
                 "gtm_variable": "Variables consumed by in-scope tags must be resolved or positively shown unused.",
                 "tag_configuration": "Every in-scope tag requires configuration evidence.",
                 "tag_firing": "Every in-scope tag requires firing/non-firing and count evidence.",
                 "tag_parameter": "Every in-scope tag requires exact runtime parameter evidence.",
             }
         )
-        if not all_local_only:
-            mandatory.add("destination_request_when_applicable")
-            reasons["destination_request_when_applicable"] = (
-                "Browser-sending in-scope tags require a matching browser request; local-only "
-                "classification requires positive configuration proof."
-            )
-    elif mechanisms:
-        mandatory.add("source_signal_when_no_data_layer_push")
-        reasons["source_signal_when_no_data_layer_push"] = (
-            "The accepted source mechanism is not a custom dataLayer.push."
+    if (has_concerned_tag_contract and not all_local_only) or has_destination_contract:
+        mandatory.add("destination_request_when_applicable")
+        reasons["destination_request_when_applicable"] = (
+            "Browser-sending in-scope tags require a matching browser request; local-only "
+            "classification requires positive configuration proof."
         )
-        if any(is_browser_sending_tag(row) for row in expectations):
-            mandatory.add("destination_request_when_applicable")
-            reasons["destination_request_when_applicable"] = (
-                "The accepted non-dataLayer source declares a browser-side destination send."
-            )
 
     known = _known_conditional_layers(
         rows,

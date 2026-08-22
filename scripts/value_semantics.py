@@ -38,6 +38,15 @@ def strict_equal(left: Any, right: Any) -> bool:
     return type(left) is type(right) and left == right
 
 
+def field_state_for(value: Any) -> str:
+    """Return the explicit field state used across raw, resolved, and semantic checks."""
+    if value is None:
+        return "null"
+    if value == "":
+        return "empty"
+    return "value"
+
+
 def parse_iso_timestamp(value: Any) -> datetime | None:
     """Parse one timezone-qualified ISO timestamp, returning ``None`` when invalid."""
     if not isinstance(value, str) or not value.strip():

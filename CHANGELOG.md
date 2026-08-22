@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+## [v3.1.0](https://github.com/haiqigeng/gtm-client-recette/releases/tag/v3.1.0) (2026-08-22)
+
+- Add operator-contract v2 with explainable scenario classes, behavior-signature
+  sampling, adaptive expansion, and coverage-revision closure binding.
+- Add gapless initial/action/inter-action/final stream accounting and exhaustive
+  classification of every dataLayer call argument, including unplanned events
+  between tracking-plan interactions.
+- Separate technical delivery from page, journey, and business-semantic truth;
+  dead URLs and internally coherent empty tracking can no longer pass overall.
+- Bind runs to the existing browser, tab, Preview session, and actually loaded
+  client container; add same-session protected CAPTCHA/authentication handoffs
+  and explicit acquisition/referrer simulation records.
+- Add journey-state anchors, gated-flow records, evidence-integrity hashes,
+  per-case event feedback, plan-ordered final conclusions, and eight expert
+  operator-v2 workbook sheets while preserving legacy operator-v1 readability.
+- Bind normalized results, ledgers, recorder snapshots, and imported sidecars
+  to one run ID; require explicit case-dimension and adaptive-trigger reviews;
+  reconcile Preview reconnects without allowing cross-epoch dataLayer gaps.
+- Hash and recheck every local evidence artifact, redact request URLs and bodies
+  before ordinary persistence, constrain configurable regular expressions, and
+  reject path aliases or partial sidecar imports transactionally.
+- Consolidate 23 overlapping references into eight progressive guides, remove
+  run residue from the installed package, and retain strict legacy regression
+  coverage without forcing mass-product release machinery into the skill.
+- Close the final audit gaps around direct v2 run identity validation, protected
+  same-tab/Preview continuity, invalid CLOSED or FROZEN structural evidence, and
+  retention of acquisition evidence in full validation paths.
+
 ## [v3.0.0](https://github.com/haiqigeng/gtm-client-recette/releases/tag/v3.0.0) (2026-08-18)
 
 - Rename the skill, package, repository, archive root, and invocation identity

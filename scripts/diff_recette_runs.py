@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any
 
 from acceptance_contract import VALID_STATUSES, status_of
+from path_safety import ensure_distinct_output
+from state_io import atomic_write_bytes
 
 
 def parse_args() -> argparse.Namespace:
@@ -104,8 +106,8 @@ def main() -> int:
     }
     rendered = json.dumps(output, ensure_ascii=False, indent=2) + "\n"
     if args.output:
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(rendered, encoding="utf-8")
+        ensure_distinct_output(args.output, args.baseline, args.current)
+        atomic_write_bytes(args.output, rendered.encode("utf-8"))
         print(f"Created {args.output.resolve()}")
     else:
         print(rendered, end="")

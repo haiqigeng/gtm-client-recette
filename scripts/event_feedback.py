@@ -11,6 +11,9 @@ from typing import Any
 from acceptance_contract import expects_absence, worst_status
 from execution_contract import case_action_rows
 from layer_contract import TAG_RESULT_LAYERS
+from scenario_coverage import coverage_errors, coverage_summary
+from semantic_contract import semantic_summary
+from stream_contract import stream_errors, stream_summary
 
 VERDICT_TO_LAYER = {
     "event_occurrence": "event_occurrence",
@@ -51,9 +54,42 @@ ANOMALY_FLAGS = {
     "unplanned_relevant": "UNPLANNED_EVENT_OBSERVED",
 }
 
+HUMAN_STATUSES = {
+    "PASS": "OK",
+    "FAIL": "KO",
+    "BLOCKED": "BLOCKED",
+    "REVIEW": "REVIEW",
+    "NOT_TESTED": "NOT_TESTED",
+}
+TECHNICAL_DELIVERY_LAYERS = {
+    "raw_api_call",
+    "resolved_data_layer",
+    "concerned_tag_inventory",
+    "gtm_variable",
+    "tag_configuration",
+    "tag_firing",
+    "tag_parameter",
+    "destination_request_when_applicable",
+    "consent_when_applicable",
+    "source_signal_when_no_data_layer_push",
+    "trigger_logic_when_applicable",
+    "tag_sequence_when_applicable",
+    "container_context_when_applicable",
+}
+
 
 def status(value: Any) -> str:
     return str(value or "").strip().upper()
+
+
+def _contract_component_status(value: Any, *, passing_state: str) -> str:
+    """Map a workflow state to a verdict without allowing unfinished work to pass."""
+    normalized = status(value)
+    if normalized == passing_state:
+        return "PASS"
+    if normalized in {"FAIL", "BLOCKED", "REVIEW"}:
+        return normalized
+    return "BLOCKED"
 
 
 def _variant_text(value: Any) -> str:
@@ -300,6 +336,111 @@ def _case_counts(cases: Iterable[dict[str, Any]]) -> dict[str, int]:
     }
 
 
+def _case_feedback_rows(
+    session: dict[str, Any] | None,
+    group_id: str,
+) -> list[dict[str, Any]]:
+    """Return one concise, fully layered feedback object per tested case."""
+    if not isinstance(session, dict):
+        return []
+    actions = [row for row in session.get("actions", []) if isinstance(row, dict)]
+    semantic_checks = [row for row in session.get("semantic_checks", []) if isinstance(row, dict)]
+    output: list[dict[str, Any]] = []
+    for case in session.get("cases", []):
+        if not isinstance(case, dict) or str(case.get("event_group_id", "")) != group_id:
+            continue
+        case_actions = sorted(
+            [row for row in actions if row.get("case_id") == case.get("case_id")],
+            key=lambda row: row.get("attempt_number", 0),
+        )
+        action = next(
+            (row for row in case_actions if row.get("action_id") == case.get("final_action_id")),
+            case_actions[-1] if case_actions else {},
+        )
+        layers = [row for row in action.get("layer_results", []) if isinstance(row, dict)]
+        technical_status = worst_status(
+            row.get("status")
+            for row in layers
+            if row.get("layer") in TECHNICAL_DELIVERY_LAYERS
+            if status(row.get("status")) != "NOT_APPLICABLE"
+        )
+        checks = [
+            row
+            for row in semantic_checks
+            if row.get("case_id") == case.get("case_id")
+            and (not action.get("action_id") or row.get("action_id") == action.get("action_id"))
+        ]
+        semantic_status = (
+            worst_status(row.get("status") for row in checks)
+            if session.get("operator_contract_version") == 2
+            else "NOT_TESTED"
+        )
+        execution_status = case.get("execution_status")
+        execution_component = {
+            "EXECUTED": "PASS",
+            "BLOCKED": "BLOCKED",
+            "PENDING": "BLOCKED",
+            "NOT_TESTED": "NOT_TESTED",
+        }.get(str(execution_status), "REVIEW")
+        overall_components = [technical_status, execution_component]
+        if session.get("operator_contract_version") == 2:
+            overall_components.append(semantic_status)
+        overall_status = worst_status(overall_components)
+        reasons = [
+            str(case.get("reason") or "").strip(),
+            *[
+                str(row.get("reason") or "").strip()
+                for row in layers
+                if status(row.get("status")) not in {"PASS", "NOT_APPLICABLE"}
+            ],
+            *[
+                str(row.get("reason") or "").strip()
+                for row in checks
+                if status(row.get("status")) not in {"PASS", "NOT_APPLICABLE"}
+            ],
+        ]
+        output.append(
+            {
+                "case_id": case.get("case_id"),
+                "action_id": action.get("action_id"),
+                "url": case.get("url"),
+                "interaction": f"{case.get('action')} {case.get('element')}",
+                "placement": case.get("placement"),
+                "material_variant": case.get("material_variant"),
+                "scenario_class_id": case.get("scenario_class_id"),
+                "sample_role": case.get("sample_role"),
+                "selection_rationale": case.get("selection_rationale"),
+                "acquisition_context": case.get("acquisition_context"),
+                "gated_flow_kind": case.get("gated_flow_kind"),
+                "execution_status": execution_status,
+                "technical_status": technical_status,
+                "semantic_status": semantic_status,
+                "status": overall_status,
+                "status_label": HUMAN_STATUSES.get(overall_status, overall_status),
+                "reason": " | ".join(item for item in dict.fromkeys(reasons) if item),
+                "layers": [
+                    {
+                        "layer": row.get("layer"),
+                        "status": status(row.get("status")),
+                        "reason": str(row.get("reason") or "").strip(),
+                        "evidence_ids": list(row.get("evidence_ids", [])),
+                    }
+                    for row in layers
+                ],
+                "semantic_checks": [
+                    {
+                        "kind": row.get("kind"),
+                        "subject": row.get("subject"),
+                        "status": status(row.get("status")),
+                        "reason": row.get("reason"),
+                    }
+                    for row in checks
+                ],
+            }
+        )
+    return output
+
+
 def _anomaly_flags(
     requirements: list[dict[str, Any]],
     unexpected: list[dict[str, Any]],
@@ -375,6 +516,10 @@ def _primary_outcome(
         return "DATALAYER_EVENT_ABSENT"
 
     failure_order = (
+        ("page_and_journey", "PAGE_OR_JOURNEY_INVALID"),
+        ("business_semantics", "BUSINESS_STATE_INVALID"),
+        ("continuous_stream", "INTERACTION_STREAM_INVALID"),
+        ("scenario_coverage", "SCENARIO_COVERAGE_INVALID"),
         ("event_occurrence", "EVENT_OCCURRENCE_INVALID"),
         ("action_boundary", "ACTION_WINDOW_INVALID"),
         ("source_signal_when_no_data_layer_push", "SOURCE_SIGNAL_INVALID"),
@@ -433,6 +578,18 @@ def event_feedback(
         else {}
     )
     unexpected_by_group = _group_rows(data.get("unexpected", []), "event_group_id")
+    contract_v2 = isinstance(session, dict) and session.get("operator_contract_version") == 2
+    closed_stream_errors: list[str] = []
+    frozen_coverage_errors: list[str] = []
+    if contract_v2:
+        if status((session.get("stream_contract") or {}).get("status")) == "CLOSED":
+            closed_stream_errors = stream_errors(session, final=True)
+        if any(
+            status(row.get("status")) == "FROZEN"
+            for row in session.get("coverage_decisions", [])
+            if isinstance(row, dict)
+        ):
+            frozen_coverage_errors = coverage_errors(session, results=data, final=True)
 
     output: list[dict[str, Any]] = []
     for inventory in data.get("run", {}).get("event_inventory", []):
@@ -459,6 +616,14 @@ def event_feedback(
         )
         layer_feedback = _layer_feedback_rows(cases)
         tag_feedback = _tag_feedback_rows(session, group_id)
+        coverage_info = coverage_summary(session, group_id) if contract_v2 else None
+        semantic_info = semantic_summary(session, group_id) if contract_v2 else None
+        stream_info = stream_summary(session, group_id) if contract_v2 else None
+        if isinstance(stream_info, dict) and closed_stream_errors:
+            stream_info["validation_errors"] = list(closed_stream_errors)
+        if isinstance(coverage_info, dict) and frozen_coverage_errors:
+            coverage_info["validation_errors"] = list(frozen_coverage_errors)
+        case_feedback = _case_feedback_rows(session, group_id)
         mapped_unexpected = unexpected_by_group.get(group_id, [])
         for unexpected in mapped_unexpected:
             unexpected_status = status(unexpected.get("status"))
@@ -487,7 +652,7 @@ def event_feedback(
         session_statuses = [
             row.get("status") for row in layer_feedback if row.get("status") != "NOT_APPLICABLE"
         ]
-        normalized_status = worst_status(
+        evidence_status = worst_status(
             [
                 requirement.get("verdict", {}).get("overall")
                 for requirement in requirements
@@ -497,6 +662,74 @@ def event_feedback(
             + session_statuses
             + layer_statuses.get("case_execution", [])
         )
+        counts = _case_counts(unique_cases.values())
+        anomaly_flags = _anomaly_flags(
+            requirements,
+            mapped_unexpected,
+            session,
+            group_id,
+        )
+        semantic_checks = semantic_info.get("checks", []) if semantic_info else []
+        semantic_status = status(semantic_info.get("status")) if semantic_info else "NOT_TESTED"
+        page_and_journey_status = (
+            worst_status(
+                row.get("status")
+                for row in semantic_checks
+                if row.get("kind") in {"PAGE_ACTION_VALIDITY", "JOURNEY_CONTINUITY"}
+            )
+            if contract_v2
+            else "NOT_TESTED"
+        )
+        business_semantic_status = (
+            worst_status(
+                row.get("status")
+                for row in semantic_checks
+                if row.get("kind") in {"POSITIVE_ANCHOR", "BUSINESS_STATE", "PLATFORM_SEMANTICS"}
+            )
+            if contract_v2
+            else "NOT_TESTED"
+        )
+        chronology_status = "NOT_TESTED"
+        coverage_status = "NOT_TESTED"
+        if contract_v2:
+            chronology_status = (
+                "FAIL"
+                if anomaly_flags or closed_stream_errors
+                else _contract_component_status(
+                    (stream_info or {}).get("review_status"),
+                    passing_state="CLOSED",
+                )
+            )
+            coverage_status = (
+                "FAIL"
+                if status((coverage_info or {}).get("status")) == "FROZEN"
+                and frozen_coverage_errors
+                else _contract_component_status(
+                    (coverage_info or {}).get("status"),
+                    passing_state="FROZEN",
+                )
+            )
+
+        normalized_components = [evidence_status]
+        if contract_v2:
+            normalized_components.extend([semantic_status, chronology_status, coverage_status])
+        normalized_status = worst_status(normalized_components)
+        if contract_v2 and isinstance(semantic_info, dict):
+            for check in semantic_info.get("checks", []):
+                if status(check.get("status")) not in {"PASS", "NOT_APPLICABLE"}:
+                    reason = str(check.get("reason") or "").strip()
+                    if reason:
+                        reasons.append(reason)
+        if contract_v2 and chronology_status != "PASS":
+            reasons.append(
+                "Continuous interaction-stream review is "
+                f"{chronology_status.lower()} ({(stream_info or {}).get('review_status') or 'missing'})."
+            )
+        if contract_v2 and coverage_status != "PASS":
+            reasons.append(
+                "Scenario coverage is "
+                f"{coverage_status.lower()} ({(coverage_info or {}).get('status') or 'missing'})."
+            )
         if normalized_status == "NOT_TESTED" and any(
             case.get("execution_status") == "PENDING" for case in unique_cases.values()
         ):
@@ -522,12 +755,15 @@ def event_feedback(
         }
         for layer, values in layer_statuses.items():
             verified_layers.setdefault(layer, worst_status(values))
-        counts = _case_counts(unique_cases.values())
-        anomaly_flags = _anomaly_flags(
-            requirements,
-            mapped_unexpected,
-            session,
-            group_id,
+        if contract_v2:
+            verified_layers["page_and_journey"] = page_and_journey_status
+            verified_layers["business_semantics"] = business_semantic_status
+            verified_layers["continuous_stream"] = chronology_status
+            verified_layers["scenario_coverage"] = coverage_status
+        technical_status = worst_status(
+            layer_status
+            for layer, layer_status in verified_layers.items()
+            if layer in TECHNICAL_DELIVERY_LAYERS and status(layer_status) != "NOT_APPLICABLE"
         )
         output.append(
             {
@@ -535,6 +771,16 @@ def event_feedback(
                 "event_group_id": group_id,
                 "event_name": inventory.get("event_name"),
                 "status": normalized_status,
+                "status_label": HUMAN_STATUSES.get(normalized_status, normalized_status),
+                "technical_status": technical_status,
+                "semantic_status": semantic_status,
+                "component_statuses": {
+                    "technical_delivery": technical_status,
+                    "page_and_journey": page_and_journey_status,
+                    "business_semantics": business_semantic_status,
+                    "continuous_stream": chronology_status,
+                    "scenario_coverage": coverage_status,
+                },
                 "primary_outcome": _primary_outcome(
                     normalized_status,
                     requirements,
@@ -549,6 +795,10 @@ def event_feedback(
                 "verified_layers": verified_layers,
                 "layer_feedback": layer_feedback,
                 "tag_feedback": tag_feedback,
+                "case_feedback": case_feedback,
+                "coverage": coverage_info,
+                "semantic": semantic_info,
+                "stream": stream_info,
                 "reason": " | ".join(dict.fromkeys(reasons)),
                 "retest": " ".join(_retest_instruction(case) for case in retest_cases),
                 "evidence_ids": sorted(evidence_ids),
@@ -567,3 +817,42 @@ def feedback_for_event(
         if row.get("event_group_id") == event_group_id:
             return row
     raise ValueError(f"Unknown event_group_id: {event_group_id}")
+
+
+def final_conclusion(
+    data: dict[str, Any],
+    session: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return the concise end-of-run event/layer/status/why conclusion."""
+    events = event_feedback(data, session)
+    overall = worst_status(row.get("status") for row in events)
+    return {
+        "status": overall,
+        "status_label": HUMAN_STATUSES.get(overall, overall),
+        "event_counts": {
+            state: sum(status(row.get("status")) == state for row in events)
+            for state in ("PASS", "FAIL", "BLOCKED", "REVIEW", "NOT_TESTED")
+        },
+        "events": [
+            {
+                "plan_order": row.get("plan_order"),
+                "event_group_id": row.get("event_group_id"),
+                "event_name": row.get("event_name"),
+                "status": row.get("status"),
+                "status_label": row.get("status_label"),
+                "technical_status": row.get("technical_status"),
+                "semantic_status": row.get("semantic_status"),
+                "stream_status": row.get("component_statuses", {}).get("continuous_stream"),
+                "coverage_status": row.get("component_statuses", {}).get("scenario_coverage"),
+                "layers_inspected": [
+                    {
+                        "layer": layer,
+                        "status": layer_status,
+                    }
+                    for layer, layer_status in row.get("verified_layers", {}).items()
+                ],
+                "why": row.get("reason") or row.get("primary_outcome"),
+            }
+            for row in events
+        ],
+    }

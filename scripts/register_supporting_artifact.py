@@ -10,6 +10,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from path_safety import ensure_distinct_output, ensure_distinct_paths
+from state_io import atomic_write_json, load_json_object
 from supporting_artifacts import (
     ARTIFACT_CONTRACT_VERSION,
     SUPPORTING_ARTIFACT_TYPES,
@@ -19,20 +21,7 @@ from supporting_artifacts import (
 
 
 def load_object(path: Path) -> dict[str, Any]:
-    value = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(value, dict):
-        raise ValueError(f"{path} must contain a JSON object.")
-    return value
-
-
-def save_atomic(path: Path, value: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.tmp")
-    temporary.write_text(
-        json.dumps(value, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    temporary.replace(path)
+    return load_json_object(path)
 
 
 def parse_args() -> argparse.Namespace:
@@ -60,6 +49,9 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     try:
+        destination = args.output or args.ledger
+        ensure_distinct_paths(args.ledger, args.artifact)
+        ensure_distinct_output(destination, args.artifact, label="artifact ledger output")
         data = load_object(args.ledger)
         raw = args.artifact.read_bytes()
         run = data.get("run")
@@ -92,8 +84,7 @@ def main() -> int:
         errors = validate_supporting_artifacts(artifacts)
         if errors:
             raise ValueError("\n".join(errors))
-        destination = args.output or args.ledger
-        save_atomic(destination, data)
+        atomic_write_json(destination, data)
     except (OSError, json.JSONDecodeError, ValueError) as exc:
         raise SystemExit(str(exc)) from exc
     print(

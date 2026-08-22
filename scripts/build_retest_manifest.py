@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import Any
 
 from event_feedback import event_feedback
-from state_io import recover_file_pair
+from path_safety import ensure_distinct_output
+from state_io import atomic_write_json, recover_file_pair
 
 RETEST_STATUSES = {"FAIL", "BLOCKED", "REVIEW"}
 
@@ -57,6 +58,16 @@ def build_manifest(data: dict[str, Any], session: dict[str, Any]) -> dict[str, A
                 "retest_reason": feedback[group_id].get("reason"),
                 "execution_status": "PENDING",
                 "authorization_ids": [],
+                "coverage_decision_id": source_case.get("coverage_decision_id"),
+                "scenario_class_id": source_case.get("scenario_class_id"),
+                "sample_role": source_case.get("sample_role"),
+                "selection_rationale": (
+                    "Fresh retest selected from a prior non-PASS case; no prior verdict "
+                    "or evidence is inherited."
+                ),
+                "population_member_id": source_case.get("population_member_id"),
+                "acquisition_context": source_case.get("acquisition_context"),
+                "gated_flow_kind": source_case.get("gated_flow_kind", "NONE"),
             }
         )
     groups_with_cases = {str(row["event_group_id"]) for row in cases}
@@ -131,11 +142,8 @@ def main() -> int:
     try:
         recover_file_pair(args.results, args.session)
         manifest = build_manifest(load_object(args.results), load_object(args.session))
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(
-            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
+        ensure_distinct_output(args.output, args.results, args.session)
+        atomic_write_json(args.output, manifest)
     except (OSError, json.JSONDecodeError, ValueError) as exc:
         raise SystemExit(str(exc)) from exc
     print(

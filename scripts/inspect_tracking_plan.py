@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
-import json
 import re
 from pathlib import Path
 from typing import Any
@@ -14,6 +13,9 @@ from typing import Any
 from openpyxl import load_workbook
 from openpyxl.cell.cell import MergedCell
 from openpyxl.utils import get_column_letter
+
+from path_safety import ensure_distinct_output, ensure_distinct_paths
+from state_io import atomic_write_json
 
 
 def parse_args() -> argparse.Namespace:
@@ -206,9 +208,14 @@ def inspect_xlsx(
 def inspect_delimited(path: Path, max_rows: int) -> dict[str, Any]:
     delimiter = "\t" if path.suffix.lower() == ".tsv" else ","
     rows = []
+    truncated = False
+    max_column = 0
     with path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.reader(handle, delimiter=delimiter)
         for row_number, row in enumerate(reader, start=1):
+            populated_columns = [
+                column_number for column_number, value in enumerate(row, start=1) if value != ""
+            ]
             cells = [
                 {
                     "cell": f"{get_column_letter(column_number)}{row_number}",
@@ -221,20 +228,21 @@ def inspect_delimited(path: Path, max_rows: int) -> dict[str, Any]:
             ]
             if not cells:
                 continue
-            rows.append({"row": row_number, "cells": cells})
             if max_rows and len(rows) >= max_rows:
+                truncated = True
                 break
-    max_column = max((len(row["cells"]) for row in rows), default=0)
+            rows.append({"row": row_number, "cells": cells})
+            max_column = max(max_column, max(populated_columns))
     return {
         "source": str(path.resolve()),
         "format": path.suffix.lower().lstrip("."),
         "sheets": [
             {
                 "sheet": path.stem,
-                "max_row": len(rows),
+                "max_row": max((row["row"] for row in rows), default=0),
                 "max_column": max_column,
                 "populated_rows": rows,
-                "truncated": bool(max_rows and len(rows) >= max_rows),
+                "truncated": truncated,
             }
         ],
     }
@@ -245,18 +253,21 @@ def main() -> int:
     if args.max_rows < 0:
         raise SystemExit("--max-rows must be zero or positive")
     suffix = args.input.suffix.lower()
+    assets_dir = args.assets_dir or args.output.with_name(f"{args.output.stem}-assets")
+    try:
+        ensure_distinct_output(args.output, args.input, label="tracking-plan inspection output")
+        ensure_distinct_paths(args.input, args.output, assets_dir)
+        if assets_dir.exists() and not assets_dir.is_dir():
+            raise ValueError("tracking-plan assets path must be a directory")
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
     if suffix == ".xlsx":
-        assets_dir = args.assets_dir or args.output.with_name(f"{args.output.stem}-assets")
         result = inspect_xlsx(args.input, args.max_rows, assets_dir)
     elif suffix in {".csv", ".tsv"}:
         result = inspect_delimited(args.input, args.max_rows)
     else:
         raise SystemExit("Unsupported input format; use .xlsx, .csv, or .tsv")
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(
-        json.dumps(result, ensure_ascii=False, indent=2, default=str) + "\n",
-        encoding="utf-8",
-    )
+    atomic_write_json(args.output, result)
     print(f"Created {args.output.resolve()}")
     return 0
 

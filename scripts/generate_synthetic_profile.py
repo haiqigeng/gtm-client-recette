@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-from datetime import UTC, datetime
 
 PROFILES = {
     "fr-FR": {
@@ -62,7 +61,7 @@ def main() -> int:
             "username": f"recette-test-{suffix:04d}",
             "date_of_birth": "1990-01-01",
             "company": "Example Test Organisation",
-            "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
+            "profile_version": 1,
             "password_instruction": "Generate in the protected browser field; never record it.",
         }
     )

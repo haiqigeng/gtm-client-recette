@@ -18,9 +18,14 @@ INCLUDED = (
     "agents",
     "references",
     "scripts",
-    "tests",
 )
-EXCLUDED_NAMES = {"__pycache__", "check_release.py"}
+EXCLUDED_NAMES = {
+    "__pycache__",
+    ".ruff_cache",
+    "build_skill_package.py",
+    "check_release.py",
+    "verify_release_artifact.py",
+}
 MANIFEST_NAME = "RELEASE-MANIFEST.json"
 
 
