@@ -19,7 +19,8 @@ rows stop intake before browser work. Malformed predicates become event-local co
 failures with source coordinates, so a later unsupported rule cannot block the first
 valid event. Do not silently reinterpret a rule or invent missing tag scope. A
 source-only/state-only claim remains source-oriented. For ordinary GA4 claims, the same
-destination-applicable plan predicate is automatically checked at call-time source,
+destination-applicable plan predicate is automatically checked at the exact API Call or
+proven call-time source,
 Tag Assistant accumulated Data Layer state, resolved Variables, effective tag mapping,
 runtime payload, and decoded browser request without additional browser actions. The
 comparison is per field, not a variable-count heuristic: object/settings or automatic
@@ -38,9 +39,10 @@ workflow. Operational rows remain distinct inside them.
 
 1. `reality`: page/API status, soft 404, route/context, visible state, before/after change,
    independent action/form/purchase/business outcome.
-2. `source`: call-time source occurrence, value/state/type and chronology, including
-   state-only and unplanned messages. Authority is a document-start recorder call or a
-   fully expanded Tag Assistant API Call, never the accumulated Data Layer tab.
+2. `source`: exact-message occurrence, value/state/type and chronology, including
+   state-only and unplanned messages. The normal authority is a fully expanded Tag
+   Assistant API Call; a proven document-start recorder is conditional stronger
+   evidence. The accumulated Data Layer tab is never source authority.
 3. `gtm`: current Preview/container identity, matching event, resolved state, concerned
    Data Layer tab, Variables tab, tag inventory/configuration/effective mapping/controls
    and firing count.
@@ -63,12 +65,14 @@ claims that depend on it.
 - Attribute observations by browser target, frame/document, route, action, Preview epoch,
   event, tag, logical hit and transport attempt. Never assign an unbound row merely
   because an action is currently open.
+- Reject capture timestamps that predate the action instead of trusting a newly supplied
+  action ID. Keep between-action unbound deltas in the continuous anomaly stream.
 - For a proved navigation/reload, the before page may belong to the old document while
   occurrence evidence belongs to the explicitly rebound new document. Mixed post-action
   documents or an unbound transition remain `BLOCKED`.
 - Merge retries/redirects for one logical hit but keep duplicate logical hits separate.
-- A settled complete empty source window proves a required event missing (`FAIL`); a late,
-  partial or truncated recorder window is `BLOCKED`.
+- A settled complete exact source window proves a required event missing (`FAIL`); an
+  incomplete API Call/event list or late, partial, or truncated recorder is `BLOCKED`.
 - Missing runtime/request data under complete applicable capture is `FAIL`; incomplete
   parameter/body capture is `BLOCKED`.
 - A dead/soft-404 page, failed form, unconfirmed purchase, or populated cart represented
@@ -93,8 +97,9 @@ confidence or coverage.
 
 ## Immediate pulse and canonical feedback
 
-`commit` emits a compact pulse with action outcome, observed source/network activity,
-notable anomalies and what still awaits Preview or scenario closure. It is deliberately
+`commit` emits a compact pulse with action outcome, every currently applicable
+operational row/status, notable anomalies, and what still awaits Preview or scenario
+closure. It is deliberately
 provisional and cannot contain a certified pass.
 
 When an event closes, render two levels from the same canonical result:
@@ -130,5 +135,8 @@ Deliver:
   limitations and telemetry;
 - concise CSV/sidecar views where generated.
 
-Outputs must be formula-safe and privacy-safe. `report` may rebuild them only from a
-frozen canonical run; `reopen` records explicit authorization before any revision.
+Outputs must be formula-safe and privacy-safe. Privacy findings are action-scoped; a
+network finding applies to an event only when it belongs to that event's concerned
+logical send. An unrelated background request remains redacted evidence but cannot create
+a false event failure. `report` may rebuild only from a frozen canonical run; `reopen`
+records explicit authorization before any revision.

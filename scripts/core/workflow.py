@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
+
+from value_semantics import parse_iso_timestamp
 
 from .capture import (
     capture_bundle_value,
@@ -66,9 +69,12 @@ def _inject_action(bundle: dict[str, Any], action_id: str, phase: str) -> dict[s
         value["health"].setdefault("phase", phase)
     if isinstance(value.get("binding"), dict):
         value["binding"].setdefault("action_id", action_id)
-    for adapter in ("datalayer", "source", "network", "lifecycle"):
-        if isinstance(value.get(adapter), dict):
-            value[adapter].setdefault("action_id", action_id)
+    if phase == "after":
+        # An empty after-delta still proves absence only when its window belongs to
+        # the action. Do not rewrite individual occurrence rows or before-deltas.
+        for adapter in ("datalayer", "source", "network", "lifecycle"):
+            if isinstance(value.get(adapter), dict):
+                value[adapter].setdefault("action_id", action_id)
     if isinstance(value.get("page"), dict):
         states = value["page"].get("states")
         if not isinstance(states, list):
@@ -79,6 +85,110 @@ def _inject_action(bundle: dict[str, Any], action_id: str, phase: str) -> dict[s
                 state.setdefault("action_id", action_id)
                 state.setdefault("phase", phase)
     return value
+
+
+def _validate_phase_adapters(bundle: dict[str, Any], *, phase: str, allowed: set[str]) -> None:
+    unexpected = sorted(set(bundle) - allowed)
+    if unexpected:
+        raise StateError(
+            f"{phase} bundle contains adapters that belong to another workflow phase: "
+            + ", ".join(unexpected)
+        )
+
+
+def _latest_binding_summary(records: list[dict[str, Any]]) -> dict[str, Any] | None:
+    return next(
+        (
+            record.get("data", {}).get("summary")
+            for record in reversed(records)
+            if record.get("kind") == "CAPTURE_BINDING"
+            and isinstance(record.get("data", {}).get("summary"), dict)
+        ),
+        None,
+    )
+
+
+def _same_binding(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    keys = (
+        "browser_context_id",
+        "tab_id",
+        "document_id",
+        "preview_session_id",
+        "preview_epoch",
+        "origin",
+        "workspace_version",
+        "natural_container_ids",
+        "active_container_ids",
+        "override_container_ids",
+    )
+    return all(str(left.get(key) or "") == str(right.get(key) or "") for key in keys)
+
+
+def _after_observation_times(bundle: dict[str, Any]) -> list[tuple[str, Any]]:
+    output: list[tuple[str, Any]] = []
+    health = bundle.get("health")
+    if isinstance(health, dict):
+        output.append(("health", health.get("observed_at", health.get("timestamp"))))
+    page = bundle.get("page")
+    if isinstance(page, dict):
+        states = page.get("states") if isinstance(page.get("states"), list) else [page]
+        output.extend(
+            (f"page[{index}]", row.get("timestamp", row.get("observed_at")))
+            for index, row in enumerate(states)
+            if isinstance(row, dict)
+        )
+    datalayer = bundle.get("datalayer")
+    if isinstance(datalayer, dict):
+        output.extend(
+            (f"datalayer[{index}]", row.get("timestamp"))
+            for index, row in enumerate(datalayer.get("records", []))
+            if isinstance(row, dict) and row.get("timestamp") is not None
+        )
+    source = bundle.get("source")
+    if isinstance(source, dict):
+        output.extend(
+            (f"source[{index}]", row.get("timestamp", row.get("observed_at")))
+            for index, row in enumerate(source.get("signals", []))
+            if isinstance(row, dict) and row.get("timestamp", row.get("observed_at")) is not None
+        )
+    network = bundle.get("network")
+    if isinstance(network, dict):
+        output.extend(
+            (f"network[{index}]", row.get("timestamp"))
+            for index, row in enumerate(network.get("requests", []))
+            if isinstance(row, dict) and row.get("timestamp") is not None
+        )
+    lifecycle = bundle.get("lifecycle")
+    if isinstance(lifecycle, dict):
+        for group in ("events", "errors", "consent_transitions"):
+            output.extend(
+                (f"lifecycle.{group}[{index}]", row.get("timestamp", row.get("observed_at")))
+                for index, row in enumerate(lifecycle.get(group, []))
+                if isinstance(row, dict)
+                and row.get("timestamp", row.get("observed_at")) is not None
+            )
+    return output
+
+
+def _validate_after_freshness(bundle: dict[str, Any], action: dict[str, Any]) -> None:
+    began = parse_iso_timestamp(action.get("began_at"))
+    if began is None:
+        raise StateError("The action has no valid begin timestamp.")
+    earliest = began - timedelta(seconds=2)
+    observations = _after_observation_times(bundle)
+    required_labels = {"health", "page[0]"}
+    observed_labels = {label for label, value in observations if value is not None}
+    missing = sorted(required_labels - observed_labels)
+    if missing:
+        raise StateError("After-state evidence needs current timestamps for: " + ", ".join(missing))
+    for label, value in observations:
+        parsed = parse_iso_timestamp(value)
+        if parsed is None:
+            raise StateError(f"After-state evidence has an invalid timestamp at {label}.")
+        if parsed < earliest:
+            raise StateError(
+                f"After-state evidence at {label} predates the action and cannot be rebound to it."
+            )
 
 
 def _event_slice(plan: dict[str, Any], event_ids: list[str]) -> list[dict[str, Any]]:
@@ -108,6 +218,7 @@ def begin_action(
     label: str | None = None,
     replay_safety: str = "SAFE_IDEMPOTENT",
     fresh_context_required: bool = False,
+    retest_reason: str | None = None,
 ) -> dict[str, Any]:
     plan = load_plan(run_dir)
     records, _ = read_stream(run_dir)
@@ -115,6 +226,7 @@ def begin_action(
     if not normalized_ids:
         raise StateError("begin requires at least one event_id.")
     _event_slice(plan, normalized_ids)
+    prior_actions = action_windows(records)
     open_actions = [
         action["action_id"] for action in action_windows(records) if action["status"] == "OPEN"
     ]
@@ -122,13 +234,31 @@ def begin_action(
         raise StateError(
             "Commit the current action before beginning another: " + ", ".join(open_actions)
         )
+    repeated = [
+        action
+        for action in prior_actions
+        if action.get("status") == "COMMITTED"
+        and str(action.get("scenario_id") or "ordinary") == str(scenario_id or "ordinary")
+        and set(map(str, action.get("event_ids", []))) & set(normalized_ids)
+    ]
+    if repeated and not str(retest_reason or "").strip():
+        raise StateError(
+            "This event/scenario already has a committed action. Supply one explicit "
+            "retest reason or use a distinct material scenario; do not create a clean repeat."
+        )
     replay = replay_safety.upper()
     if replay not in {"SAFE_IDEMPOTENT", "SAFE_ONCE", "CONSEQUENTIAL", "PROTECTED"}:
         raise StateError("Unsupported replay-safety class.")
     action_id = f"A-{uuid4().hex[:12].upper()}"
     prepared = _inject_action(bundle, action_id, "before")
-    required = {"health", "page"}
-    if _first_action(records):
+    first = _first_action(records)
+    begin_adapters = {"page", "datalayer", "source", "network", "lifecycle"}
+    if first or str(retest_reason or "").strip():
+        begin_adapters.update({"capability", "binding", "health"})
+    _validate_phase_adapters(prepared, phase="begin", allowed=begin_adapters)
+    required = {"page"}
+    if first:
+        required.add("health")
         required.update({"capability", "binding"})
         if replay in {"CONSEQUENTIAL", "PROTECTED"}:
             datalayer = prepared.get("datalayer", {})
@@ -145,9 +275,17 @@ def begin_action(
             ) or (isinstance(direct, dict) and direct.get("complete") is True)
             if not source_self_test:
                 raise StateError(
-                    "The first consequential/protected action requires a complete "
-                    "document-start source self-test."
+                    "The first consequential/protected action requires one complete cheap "
+                    "source self-test."
                 )
+    latest_binding = _latest_binding_summary(records)
+    if (
+        not first
+        and isinstance(prepared.get("binding"), dict)
+        and isinstance(latest_binding, dict)
+        and _same_binding(prepared["binding"], latest_binding)
+    ):
+        raise StateError("The begin bundle repeats the current binding without an identity change.")
     validate_bundle_value(run_dir, prepared, required_adapters=required)
 
     record = append_annotation(
@@ -162,6 +300,7 @@ def begin_action(
             "label": label or "Browser interaction",
             "replay_safety": replay,
             "fresh_context_required": fresh_context_required,
+            "retest_reason": str(retest_reason).strip() if retest_reason else None,
             "began_at": utc_now(),
         },
         idempotency_key=f"action-begin:{action_id}",
@@ -389,7 +528,22 @@ def commit_action(
         resuming = True
     machine_bundle, control = _split_bundle(bundle)
     prepared = _inject_action(machine_bundle, action["action_id"], "after")
+    _validate_phase_adapters(
+        prepared,
+        phase="commit",
+        allowed={"binding", "health", "page", "datalayer", "source", "network", "lifecycle"},
+    )
     validate_bundle_value(run_dir, prepared, required_adapters={"health", "page"})
+    _validate_after_freshness(prepared, action)
+    latest_binding = _latest_binding_summary(records)
+    if (
+        isinstance(prepared.get("binding"), dict)
+        and isinstance(latest_binding, dict)
+        and _same_binding(prepared["binding"], latest_binding)
+    ):
+        raise StateError(
+            "The commit bundle repeats the current binding without a navigation change."
+        )
     control = _normalized_controls(run_dir, control, action["action_id"])
     captures = capture_bundle_value(run_dir, prepared, source_id=f"commit:{action['action_id']}")
     capture_ids = [record["record_id"] for record in captures]
@@ -452,6 +606,20 @@ def commit_action(
                     }
                     for domain, value in event_result.get("domains", {}).items()
                 },
+                "operational_rows": [
+                    {
+                        "scenario_id": row.get("scenario_id"),
+                        "target": row.get("inspection_target"),
+                        "domain": row.get("domain"),
+                        "status": row.get("status"),
+                        "observed": row.get("observed"),
+                        "expected": row.get("expected"),
+                        "reason": row.get("reason"),
+                        "check_next": row.get("check_next"),
+                        "evidence": row.get("evidence", []),
+                    }
+                    for row in event_result.get("inspections", [])
+                ],
             }
         )
     awaiting = []
@@ -525,6 +693,7 @@ def sync_preview(
     machine_bundle, control = _split_bundle(bundle)
     control = _normalized_controls(run_dir, control, None)
     if machine_bundle:
+        _validate_phase_adapters(machine_bundle, phase="sync-preview", allowed={"preview"})
         validate_bundle_value(run_dir, machine_bundle)
         captures = capture_bundle_value(
             run_dir, machine_bundle, source_id=f"sync:{content_digest(machine_bundle)}"

@@ -235,9 +235,16 @@ def telemetry_view(plan: dict[str, Any], records: list[dict[str, Any]]) -> dict[
     preview_events_observed = 0
     network_requests_observed = 0
     preview_deep_read_captures_observed = 0
+    unique_preview: set[tuple[str, str]] = set()
+    unique_network: set[tuple[str, str]] = set()
     for record in records:
         summary = record.get("data", {}).get("summary", {})
         if record.get("kind") == "CAPTURE_PREVIEW" and isinstance(summary, dict):
+            reference = record.get("data", {}).get("evidence_ref", {})
+            identity = (str(reference.get("path") or ""), str(reference.get("sha256") or ""))
+            if identity in unique_preview:
+                continue
+            unique_preview.add(identity)
             preview_events_observed += int(summary.get("event_count") or 0)
             events = summary.get("events", [])
             if isinstance(events, list) and any(
@@ -251,6 +258,11 @@ def telemetry_view(plan: dict[str, Any], records: list[dict[str, Any]]) -> dict[
             ):
                 preview_deep_read_captures_observed += 1
         if record.get("kind") == "CAPTURE_NETWORK" and isinstance(summary, dict):
+            reference = record.get("data", {}).get("evidence_ref", {})
+            identity = (str(reference.get("path") or ""), str(reference.get("sha256") or ""))
+            if identity in unique_network:
+                continue
+            unique_network.add(identity)
             network_requests_observed += int(summary.get("request_count") or 0)
         if record.get("kind") != "CAPTURE_HEALTH":
             continue
@@ -260,7 +272,7 @@ def telemetry_view(plan: dict[str, Any], records: list[dict[str, Any]]) -> dict[
         for key in OPERATION_COUNTERS:
             value = observed.get(key)
             if isinstance(value, int) and not isinstance(value, bool):
-                operations[key] = (operations[key] or 0) + value
+                operations[key] = value if operations[key] is None else max(operations[key], value)
 
     return {
         "first_action_seconds": elapsed(first_action),
@@ -268,8 +280,8 @@ def telemetry_view(plan: dict[str, Any], records: list[dict[str, Any]]) -> dict[
         "actions": kinds["ACTION_BEGIN"],
         "commits": kinds["ACTION_COMMIT"],
         "preview_syncs": kinds["PREVIEW_SYNC"],
-        "preview_captures": kinds["CAPTURE_PREVIEW"],
-        "network_captures": kinds["CAPTURE_NETWORK"],
+        "preview_captures": len(unique_preview),
+        "network_captures": len(unique_network),
         "capability_probes": kinds["CAPTURE_CAPABILITY"],
         "pulses": kinds["ACTION_PULSE"],
         "feedbacks": kinds["EVENT_FEEDBACK_ISSUED"],

@@ -68,7 +68,6 @@ MACHINE_RECORD_KINDS = frozenset(
         "CAPTURE_PREVIEW",
         "CAPTURE_NETWORK",
         "CAPTURE_LIFECYCLE",
-        "CAPTURE_DOM",
     }
 )
 DERIVED_RECORD_KINDS = frozenset(
@@ -91,7 +90,6 @@ CAPTURE_KINDS = {
     "preview": "CAPTURE_PREVIEW",
     "network": "CAPTURE_NETWORK",
     "lifecycle": "CAPTURE_LIFECYCLE",
-    "dom": "CAPTURE_DOM",
 }
 
 MATERIALITY_DEFINITION = (

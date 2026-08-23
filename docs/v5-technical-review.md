@@ -1,14 +1,15 @@
 # v5 Technical Review
 
-Status: final v5.1.0 technical review, 2026-08-23.
+Status: final v5.2.0 technical review, 2026-08-24.
 
 ## Verdict
 
-The implementation is technically fit for this personal expert skill. The added code
-addresses real generalized correctness gaps: supported workbook intake, source authority,
-source/delivery identity, action-local completeness, planned-field projection,
-navigation identity, protocol decoding, coverage freshness, retry safety, and detailed
-feedback. It does not recreate the v3/v4 operating machinery.
+The implementation is technically fit for this personal expert skill. The v5.2 code
+addresses generalized run failures: unresolved scope prose, repeated handshakes/reloads,
+stale action evidence, deferred Trigger Group details, global request-safety
+contamination, contradictory transport state, telemetry overcounting, and delayed layer
+visibility. It preserves the v5.1 intake, plan projection, scenario, anomaly, and business
+truth contracts without recreating v3/v4 operating machinery.
 
 No known run-bound path, client literal, selector, container/destination ID, event count,
 prior evidence, backup, or compatibility branch is present in the release tree.
@@ -28,7 +29,7 @@ The runtime has one authority at each stage:
 There is no alternate ledger, mutable status file, manual PASS setter, browser adapter
 family, background service, database, or migration runtime.
 
-## Necessity review of v5.1 changes
+## Necessity review of v5.2 changes
 
 | Change | Keep? | Reason |
 | --- | --- | --- |
@@ -44,6 +45,15 @@ family, background service, database, or migration runtime.
 | Exact commit idempotency | Yes | Makes safe retry recovery deterministic without a new state system. |
 | Provisional per-layer pulse | Yes | Gives immediate targeted feedback from evidence already captured. |
 | Optional operation counters | Yes | Diagnoses real browser cost without creating work or a gate. |
+| Deterministic plan-scope resolution | Yes | Prevents broad prose from becoming a fake tag/destination and fails unresolved identity before browser work. |
+| One handshake and minimal phase bundles | Yes | Directly removes repeated capability, binding, health, and Preview captures. |
+| API Call as normal source; recorder conditional | Yes | Avoids ordinary install/reload work while keeping stronger call-time evidence available when needed. |
+| Same-scenario retest reason | Yes | Stops automatic clean repeats without limiting distinct material scenarios. |
+| Capture-time freshness enforcement | Yes | Prevents an agent-supplied action ID from laundering old observations. |
+| Exact-row plus technical causal Preview join | Yes | Handles deferred GTM firing without mixing source-state evidence or crossing the next business event. |
+| Concerned-request privacy scope | Yes | Removes unrelated false failures while retaining redaction and in-scope sensitive-data failure. |
+| Full operational rows in the pulse | Yes | Reuses existing judgement and gives immediate targeted layer visibility. |
+| DOM capture adapter | No; removed | It had no judgement consumer and created redundant run evidence. |
 | Firefox/cross-browser framework | No | Outside the personal Chromium use case. |
 | Global tag inventory/deep read | No | Slow and unrelated to current accepted claims. |
 | Generic slow mode | No | Hides bottlenecks and is not needed for deeper scenario coverage. |
@@ -52,11 +62,11 @@ family, background service, database, or migration runtime.
 
 ## Size and complexity
 
-The source tree has 28 Python/JavaScript files under `scripts` and about 11,512 lines,
-versus 16,472 in v3.0 and 21,712 in v3.1. v5.1 is larger than v5.0 by about 1,300 lines
-because the previous release did not implement the required intake and cross-surface
-contracts. The public interface remains nine commands and the installed reference set
-remains four files.
+The source tree has 28 Python/JavaScript files under `scripts` and about 12,004 lines,
+versus 16,472 in v3.0 and 21,712 in v3.1. The v5.2 increase over v5.1 is about 492 lines,
+mostly enforceable freshness/phase/causal rules and seven generalized regression tests.
+The public interface remains nine commands, with one compatible `begin` option, and the
+installed reference set remains four files.
 
 Static analysis reports average cyclomatic complexity in grade B. The main maintainability
 risk is concentrated in the workbook parser/compiler and deterministic judge. Splitting
@@ -65,10 +75,9 @@ work or user-facing complexity, so no architecture-only refactor was added. Futu
 should follow stable boundaries only when another change makes those functions difficult
 to verify.
 
-The dead-code scan reports only known false positives for ZIP/openpyxl attributes.
-Unreachable screenshot/file capture functions, unused status/path helpers, an unused
-future-coverage helper, and an unused report wrapper were removed. Browser screenshots
-are not a runtime evidence adapter in this release.
+The dead-code scan reports no findings at 80% confidence. The unused generic DOM capture
+adapter was removed; the DOM interaction census remains a scenario-discovery helper.
+Browser screenshots are not a runtime evidence adapter.
 
 ## Correctness and safety controls
 
@@ -92,11 +101,12 @@ multi-sheet XLSX is openpyxl parsing. Field projection increases comparisons but
 increase browser interactions because all layers reuse the same action and targeted
 Preview extraction.
 
-The controlled benchmarks show about 2.9 seconds from direct representative workbook
-intake to the first provisional inspected-layer pulse and about 220 ms median for a
-synthetic canonical-feedback path. A live run taking many minutes before inspection
-therefore indicates browser/agent workflow nonconformance, not required deterministic
-setup.
+The controlled checks measured 0.08 seconds for a 100-event/2,000-requirement compile,
+0.61 seconds for a three-event action/feedback cluster, 0.21 seconds for a dependent-
+surface fast-fail, and a 2.515-second median for direct representative multi-sheet
+workbook intake. v5.2 also prevents repeated setup by contract. A live run taking many
+minutes before inspection therefore indicates browser/agent workflow nonconformance,
+not required deterministic setup.
 
 ## Verification gates
 
@@ -112,13 +122,15 @@ The release requires:
 - clean installation manifest verification;
 - repository diff scan for user-bound/run-bound residue.
 
-The tagged v3.0.0, v3.1.0, and v5.0.0 suites were also run from clean archives to make
-the comparison explicit. Historical suites prove their own baselines; the v5.1 stress
-tests prove the corrected contracts.
+The tagged v3.0.0, v3.1.0, v5.0.0, and v5.1.0 suites are rerun from clean archives for
+the release audit. Historical suites prove their own baselines; the v5.2 stress tests
+prove the corrected contracts.
 
-Final local results: Ruff and compilation pass; 88 deterministic tests pass in about
-16 seconds; browser helpers pass; release-tree and skill validation pass; and the
-deterministic v5.1.0 archive/manifest verifies successfully.
+Final local results: Ruff and compilation pass; 95 deterministic tests plus four subtests
+pass in 18.650 seconds; browser helpers pass; vulture reports no findings; Radon reports
+average grade B (8.03); release-tree and skill validation pass. Clean tagged archives
+also pass 189 tests for v3.0.0, 255 for v3.1.0, 76 for v5.0.0, and 88 for v5.1.0. The
+deterministic v5.2.0 archive and clean installed manifest are verified during release.
 
 ## Remaining risks
 
@@ -134,7 +146,7 @@ deterministic v5.1.0 archive/manifest verifies successfully.
 
 ## Deployment recommendation
 
-Release and install v5.1.0, then run a short representative live pilot before a full
+Release and install v5.2.0, then run a short representative live pilot before a full
 funnel. The acceptance signs are: first layer pulse after the first action, no global
 inventory/setup, one existing browser/Preview session, separate API Call and Data Layer
 state evidence, complete per-field tag/request comparisons, and mandatory detailed

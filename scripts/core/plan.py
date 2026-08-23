@@ -797,7 +797,75 @@ def _normalize_scope(scope: dict[str, Any] | None) -> dict[str, Any]:
         item = value.get(key, [])
         if isinstance(item, str):
             item = [item]
-        value[key] = [str(entry) for entry in item if str(entry).strip()]
+        value[key] = [str(entry).strip() for entry in item if str(entry).strip()]
+
+    scope_aliases = {
+        "ga4": "GA4",
+        "googleanalytics": "GA4",
+        "googleanalytics4": "GA4",
+        "googletag": "GA4",
+        "googleads": "Google Ads",
+        "adwords": "Google Ads",
+    }
+
+    def plan_declared(item: str) -> bool:
+        compact = re.sub(r"[^a-z0-9]+", "", item.casefold())
+        return compact in {"plan", "trackingplan", "plandeclared", "allplanned"} or (
+            "plan" in compact
+            and any(token in compact for token in ("all", "every", "specified", "declared"))
+        )
+
+    declared_tag_scope = False
+    normalized_tag_scope: list[str] = []
+    for item in value["tag_scope"]:
+        if plan_declared(item):
+            declared_tag_scope = True
+            continue
+        key = re.sub(r"[^a-z0-9]+", "", item.casefold())
+        canonical = scope_aliases.get(key)
+        if canonical is None:
+            # Preserve concise media/vendor categories such as "Meta Pixel". Reject
+            # sentence-like scope prose because it cannot identify a tag deterministically.
+            words = item.split()
+            if len(words) > 4 or any(mark in item for mark in (";", ".", ":")):
+                raise StateError(
+                    "Tag scope must be a concise vendor category or the plan-declared "
+                    "scope, not free-form prose."
+                )
+            canonical = item
+        if canonical not in normalized_tag_scope:
+            normalized_tag_scope.append(canonical)
+    value["tag_scope"] = normalized_tag_scope
+    value["tag_scope_mode"] = "explicit" if normalized_tag_scope else "plan_declared"
+    value["tag_scope_declared"] = declared_tag_scope
+
+    declared_destinations = False
+    normalized_destinations: list[str] = []
+    for item in value["destination"]:
+        if plan_declared(item):
+            declared_destinations = True
+            continue
+        if any(character.isspace() for character in item):
+            raise StateError(
+                "Destination scope must contain exact destination IDs or the plan-declared "
+                "scope, not free-form prose."
+            )
+        if item not in normalized_destinations:
+            normalized_destinations.append(item)
+    value["destination"] = normalized_destinations
+    value["destination_mode"] = "explicit" if normalized_destinations else "plan_declared"
+    value["destination_scope_declared"] = declared_destinations
+    if not normalized_tag_scope:
+        inferred = []
+        if any(destination.upper().startswith("G-") for destination in normalized_destinations):
+            inferred.append("GA4")
+        if any(destination.upper().startswith("AW-") for destination in normalized_destinations):
+            inferred.append("Google Ads")
+        if inferred:
+            value["tag_scope"] = inferred
+            value["tag_scope_mode"] = "inferred_from_destination"
+    if declared_tag_scope or declared_destinations:
+        value["scope_resolution"] = "Generic plan wording was resolved to plan-declared identities."
     bad_containers = [item for item in value["expected_container"] if not item.startswith("GTM-")]
     bad_destinations = [item for item in value["destination"] if item.startswith("GTM-")]
     if bad_containers:
@@ -818,13 +886,19 @@ def _normalize_tag(value: Any, index: int) -> dict[str, Any]:
     expected = str(row.get("expected") or row.get("expectation") or "fire").casefold()
     if expected not in {"fire", "not_fire", "optional"}:
         expected = "fire"
+    configuration = row.get("configuration", row.get("expected_configuration"))
+    configured_destination = None
+    if isinstance(configuration, dict):
+        configured_destination = configuration.get(
+            "measurement_id", configuration.get("destination")
+        )
     return {
         "tag_id": identity,
         "tag_name": str(row.get("tag_name") or row.get("name") or identity),
         "category": str(row.get("category") or "").strip() or None,
         "expected": expected,
-        "destination": row.get("destination"),
-        "configuration": row.get("configuration", row.get("expected_configuration")),
+        "destination": row.get("destination") or configured_destination,
+        "configuration": configuration,
         "consent_requirements": row.get("consent_requirements", []),
         "browser_send_required": row.get("browser_send_required"),
     }
@@ -997,6 +1071,10 @@ def _event_tags_and_destinations(
         if tag["tag_id"] not in seen_tags and _tag_in_scope(tag, scope):
             tags.append(tag)
             seen_tags.add(tag["tag_id"])
+
+    destination_values.extend(
+        tag.get("destination") for tag in tags if tag.get("destination") not in (None, "")
+    )
 
     destinations: list[str] = []
     for value in [*destination_values, *scope.get("destination", [])]:
@@ -1583,6 +1661,21 @@ def _compile_event(
     )
 
     tags, destinations = _event_tags_and_destinations(raw, requirements, scope)
+    if not source_only and scope.get("tag_scope_declared") is True and not tags:
+        errors.append(
+            "Plan-declared tag scope has no exact event tag identity; normalize the planned "
+            "tag name/category before browser inspection."
+        )
+    if (
+        not source_only
+        and scope.get("browser_send_required") is True
+        and scope.get("destination_scope_declared") is True
+        and not destinations
+    ):
+        errors.append(
+            "Plan-declared destination scope has no exact event destination; normalize the "
+            "planned measurement/conversion destination before browser inspection."
+        )
 
     default_source = {"reference": f"event {event_id}", "plan_order": order}
     builder.add(
@@ -1665,7 +1758,14 @@ def _compile_event(
     )
     builder.add(
         "safety",
-        {"surface": "all", "check": "sensitive_data", "label": "Data safety"},
+        {
+            "surface": "all",
+            "check": "sensitive_data",
+            "event_name": delivery_event_name or source_event_name,
+            "tag_ids": [tag["tag_id"] for tag in tags],
+            "destinations": destinations,
+            "label": "Data safety",
+        },
         {"operator": "present"},
         ["page", "datalayer", "source", "preview", "network"],
         default_source,
@@ -1829,6 +1929,25 @@ def normalize_plan(
     ]
     if not events:
         raise StateError("Tracking plan contains no event groups.")
+    if (
+        normalized_scope.get("certify_tags") is True
+        and normalized_scope.get("tag_scope_declared") is True
+        and not any(event.get("tags") for event in events)
+    ):
+        raise StateError(
+            "The broad plan-declared tag scope resolves to no tag identity. Supply a "
+            "concise accepted vendor category such as GA4/Google Ads, or exact event tags."
+        )
+    if (
+        normalized_scope.get("browser_send_required") is True
+        and normalized_scope.get("destination_scope_declared") is True
+        and not any(event.get("destinations") for event in events)
+    ):
+        raise StateError(
+            "The broad plan-declared destination scope resolves to no exact destination. "
+            "Supply accepted measurement/conversion destinations or omit destination "
+            "certification until they are confirmed."
+        )
     claim_count = sum(event["claim_count"] for event in events)
     requirement_count = sum(len(requirements) for _, requirements in inputs)
     source_details = {"kind": source_kind, "path": str(path), "sha256": digest}

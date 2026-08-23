@@ -9,14 +9,21 @@ first document boundary, establish only what the first useful action needs:
 - reachable page, final URL, status evidence and soft-404 signals;
 - active natural container and expected environment;
 - Preview connection, workspace/container identity and event-list readability;
-- document-start call-time source recorder health;
+- the usable fully expanded Tag Assistant API Call path, or the reason a stronger
+  recorder is needed;
 - browser-network delta capture health.
 
 Run plan compilation and browser attachment concurrently when the control environment
 permits it. The handshake must not inventory every tag, expand future scenarios, render
 reports, or create per-event setup records. After a stable navigation, use a cheap health
-delta. Repeat the full handshake only when target, document, container, Preview epoch,
-recorder, or network identity changes.
+delta. Repeat the full handshake only after a proved identity/capture change and record
+the correction/retest reason. Do not attach capability, binding, and health snapshots to
+every action or Preview synchronization.
+
+Use the current valid page load for Core/page-load evidence when it is attributable and
+complete. If a new load is required, perform one. A second same-scenario load is a retest
+and requires a named defect such as mixed identity, incomplete API Call, or failed
+transport capture; “clean repeat” is not a reason.
 
 A navigation/reload may legitimately replace the document. Preserve the old page only
 as the `before` business/reality state, capture a new binding for the new document, and
@@ -37,9 +44,14 @@ they do not create gates, evidence, or another workflow state.
 
 ## Continuous source capture
 
-Install `scripts/datalayer_recorder.js` before application code whenever the control
-surface supports document-start injection. It records invocation-time snapshots rather
-than later mutable references and preserves:
+Use a fully expanded Tag Assistant **API Call** as the normal exact-message source. It is
+authoritative when the arguments, event index, Preview epoch, and completeness are
+captured. This avoids a recorder-install/reload cycle in ordinary Preview recette.
+
+Install `scripts/datalayer_recorder.js` before application code only when the API Call is
+unavailable/incomplete or the claim specifically needs invocation-time behavior before
+GTM processing. It records invocation-time snapshots rather than later mutable
+references and preserves:
 
 - every queue `push`, including unplanned and state-only messages;
 - named-layer reassignment/replacement;
@@ -48,10 +60,8 @@ than later mutable references and preserves:
 - lifecycle coverage and collector integrity.
 
 Do not infer a raw push by reading the final dataLayer array or the Tag Assistant Data
-Layer panel. If document-start interception is unavailable, a fully expanded Tag
-Assistant event **API Call** argument is the source fallback because it exposes the
-message GTM processed at that event. It is authoritative only when the argument and its
-completeness are captured; a collapsed, partial, or inferred panel remains `BLOCKED`.
+Layer panel. When neither exact source path is complete, dependent source claims remain
+`BLOCKED`; a collapsed, partial, or inferred panel never substitutes.
 The separate **Data Layer** tab is accumulated post-message state and must be captured as
 GTM-state evidence, never relabelled as the API Call. Before the first
 consequential/protected action, require a complete cheap source self-test; do not discover
@@ -63,9 +73,12 @@ at `commit`, including the quiet interval after one action and before the next.
 
 ## Continuous network capture
 
-Collect browser request lifecycle deltas continuously. Preserve request, redirect,
-retry, frame/document/worker, initiator, response/error and completion identity. Decode
-protocol payloads without discarding raw evidence:
+Collect lightweight browser request lifecycle metadata continuously. Deep-decode bodies
+and parameters only for planned/analytics-like sends, failures, and suspicious requests;
+never retain cookies, authorization headers, or an unrelated full-page request dump.
+Preserve request, redirect, retry, frame/document/worker, initiator, response/error and
+completion identity. Decode relevant protocol payloads while retaining safe hashes and
+the fields needed for judgement:
 
 - GA4 query/body/batched hits and item parameters;
 - Google Ads conversion destinations and values;
@@ -77,11 +90,18 @@ that hit while keeping their outcomes. Multiple logical hits are not one retry. 
 request is a `FAIL` only when the applicable action-time request window is complete and
 settled; otherwise it is `BLOCKED`.
 
+Sensitive-data findings are action- and concerned-request-scoped. An unrelated vendor's
+session field must not fail the planned event, while a prohibited field in that event's
+source, runtime, or matching destination request still fails it.
+
 ## Action clusters and Preview micro-batches
 
-`begin` marks a causal boundary and captures before-state plus identity. After the real
-interaction, `commit` captures after-state, source/network/lifecycle deltas and quiet
-settlement, then emits a non-certifying pulse.
+The first `begin` captures capability, binding, health and before-page once. Later
+`begin` bundles contain the before-page plus optional unbound continuous deltas only.
+After the real interaction, `commit` captures current after-health/page,
+source/network/lifecycle deltas and quiet settlement, then emits a non-certifying
+per-layer pulse. `sync-preview` accepts only the Preview micro-batch plus analyst control
+annotations. Evidence timestamped before the action is rejected instead of rebound.
 
 Continue a short natural cluster only when all evidence remains attributable by action,
 document, Preview epoch, event, tag and logical hit. Synchronize Preview immediately on
@@ -90,7 +110,7 @@ correlation, or suspected anomaly.
 
 On one Preview visit:
 
-1. ingest all new event indexes and each expanded API Call needed as source fallback;
+1. ingest all new event indexes and each expanded API Call needed as exact source;
 2. capture the Data Layer tab and Variables tab for current planned fields;
 3. ingest complete fired-tag summaries and relevant expected-not-fired tags, not an
    unlimited container or historical-domain inventory;
@@ -99,6 +119,13 @@ On one Preview visit:
 5. compare those observations with the independently captured browser request;
 6. reuse static configuration only under exact container/workspace/environment identity;
 7. never cache runtime values, occurrence, consent state, page outcome or requests.
+
+Read API Call, accumulated Data Layer state, and Variables on the exact selected Preview
+row. When GTM defers firing to a Trigger Group or another technical lifecycle row, join
+only the bounded following technical rows in the same action and Preview epoch, stopping
+before the next business event. Use that causal window for concerned tag inventory,
+configuration, firing and runtime; never use it to replace the exact API Call, Data Layer,
+or Variables values.
 
 Use at most one immediate retry for a transient panel failure. The five-second budget in
 the controlled fixture is a regression target, not a universal live-site timeout. A

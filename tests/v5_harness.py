@@ -170,17 +170,16 @@ class V5Harness:
         first_bundle_updates: dict[str, Any] | None = None,
         fresh_context_required: bool = False,
         replay_safety: str = "SAFE_IDEMPOTENT",
+        retest_reason: str | None = None,
     ) -> str:
         records, _ = read_stream(self.run)
-        bundle: dict[str, Any] = {
-            "health": self._health("before"),
-            "page": {"states": [self._page("before")]},
-        }
+        bundle: dict[str, Any] = {"page": {"states": [self._page("before")]}}
         if not any(row.get("kind") == "ACTION_BEGIN" for row in records):
             bundle.update(
                 {
                     "capability": self.capability(),
                     "binding": self.binding(),
+                    "health": self._health("before"),
                 }
             )
         bundle.update(first_bundle_updates or {})
@@ -193,6 +192,7 @@ class V5Harness:
             label="Test browser interaction",
             fresh_context_required=fresh_context_required,
             replay_safety=replay_safety,
+            retest_reason=retest_reason,
         )
         self.last_begin_result = result
         return str(result["action"]["data"]["action_id"])

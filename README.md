@@ -4,7 +4,7 @@
 [![CI](https://github.com/haiqigeng/gtm-client-recette/actions/workflows/ci.yml/badge.svg)](https://github.com/haiqigeng/gtm-client-recette/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Repository version: **v5.1.0**.
+Repository version: **v5.2.0**.
 
 GTM Client Recette is a personal expert skill for client-side GTM Preview acceptance
 testing. It follows an existing tracking plan or explicit rules, operates in the user's
@@ -21,8 +21,10 @@ delay the first inspection for many minutes. Version 5 is a zero-based architect
 
 - the unit of work is a typed measurement claim in a material scenario;
 - one staged compiler and one canonical occurrence/evidence model;
-- continuous call-time dataLayer and browser-network deltas, with fully expanded Tag
-  Assistant API Call as a source fallback;
+- fully expanded Tag Assistant API Call as the normal exact-message source, with a
+  document-start recorder only when stronger invocation-time evidence is needed;
+- one persisted browser/Preview handshake, one current Core load at most, current action
+  deltas, and no unnamed clean repeats;
 - one vertical browser action can satisfy several applicable claims;
 - Preview is synchronized in safe micro-batches, with selective deep reads;
 - finite and dependent live values are discovered just in time;
@@ -49,8 +51,9 @@ Evidence confidence and scenario completeness are closure gates. These are not s
 browser stages. A source-only/state-only update does not receive invented delivery
 requirements. When a state-only core block explicitly feeds `page_view`, or for an
 ordinary GA4 event, each destination-applicable planned field is checked independently
-against call-time source, Tag Assistant Data Layer state, Variables, effective tag
-mapping, tag runtime and the decoded browser request from the same action.
+against the exact API Call/proven call-time source, Tag Assistant Data Layer state,
+Variables, effective tag mapping, tag runtime and the decoded browser request from the
+same action.
 
 Operational detail remains visible per target: DataLayer/API Call, accumulated GTM Data
 Layer state, GTM Preview event and Variables, fired/not-fired inventory, named tag
@@ -73,6 +76,10 @@ The full public surface is `init`, `begin`, `commit`, `sync-preview`, `status`, 
 `finish`, `report`, and `reopen`. Use `--help` for exact arguments. There is no arbitrary
 append, provenance override, layer setter or verdict setter.
 
+The first `begin` carries the one capability/binding/health handshake. Later starts are
+lightweight. Repeating an already committed event/scenario requires `--retest-reason`;
+new material language, shipping, payment, product-signature, or other scenarios do not.
+
 ## Tracking-plan intake
 
 JSON, YAML, CSV/TSV, XLSX and the supported GA4 tracking-plan handoff compile through one
@@ -82,6 +89,11 @@ JavaScript examples are excluded. Intake preserves source coordinates, allowed v
 JSON types, tag/destination scope and contiguous merged/fill-down rows, and reports what
 was compiled or ignored. An orphan/ambiguous requirement fails immediately; an
 unsupported later-event rule is localized so the first valid event can start.
+
+Broad “all planned” scope is resolved only through exact event-level tag/destination
+identities. If the plan has none, intake stops immediately and asks for a concise accepted
+vendor category and any destination that must be certified; prose is never matched as a
+runtime identity.
 
 ## Scenario behavior
 
@@ -124,7 +136,7 @@ python -m ruff check --no-cache scripts tests
 python -m ruff format --check scripts tests
 python -m unittest discover -s tests -v
 python -B tests/run_browser_helpers.py
-python -B scripts/check_release.py --tag v5.1.0
+python -B scripts/check_release.py --tag v5.2.0
 ```
 
 The controlled harness covers generalized compiler, evidence-authority, cross-layer,

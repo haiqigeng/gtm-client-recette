@@ -23,10 +23,15 @@ the client tag scope, and a run directory outside this skill. Summarize that bou
 once and proceed only when it is approved. Use ordinary reversible interactions and
 synthetic test data within scope.
 
+Resolve scope before browser work. A phrase such as "all planned client-side tags" means
+the exact event tags/destinations actually declared in the plan; if none exist, `init`
+must fail quickly and request a concise accepted category such as GA4/Google Ads and any
+destination that must be certified. Never use broad prose as a literal runtime identity.
+
 Reuse the user's already-open Chromium target and GTM Preview/Tag Assistant tabs. Do not
 replace a usable signed-in session, open an authentication loop, or create another
-browser as normal recovery. Re-prove live target, document, container, Preview epoch,
-recorder, and network identity after any correction.
+browser as normal recovery. Re-prove only the live identity or capture surface affected
+by a correction. A repeated full handshake needs an explicit correction/retest reason.
 
 Pause at credentials, MFA, CAPTCHA, magic links, external approval, real payment, or
 another protected/consequential gate. Never bypass it. Do not design the plan, change or
@@ -41,17 +46,18 @@ source-only field must not inherit invented event, tag, or request requirements.
 
 Group applicable checks into six diagnostic domains, not six sequential browser stages:
 
-1. **Reality** — reachable/live page, correct scenario, visible state, action outcome,
+1. **Reality** - reachable/live page, correct scenario, visible state, action outcome,
    and independent business anchors.
-2. **Source signal** — exact call-time dataLayer/direct-source values, JSON types and
-   absent/null/empty states, occurrence, order, and all unplanned pushes.
-3. **GTM decision** — active container/Preview identity, matching GTM event, resolved
+2. **Source signal** - the exact fully expanded Tag Assistant API Call or a proven
+   call-time dataLayer/direct-source observation, including JSON types,
+   absent/null/empty states, occurrence, order, and unplanned pushes.
+3. **GTM decision** - active container/Preview identity, matching GTM event, resolved
    variables, relevant tag configuration, consent/trigger controls, and firing count.
-4. **Destination delivery** — runtime payload, logical vendor hit, destination and tag
+4. **Destination delivery** - runtime payload, logical vendor hit, destination and tag
    identity, browser transport, redirects/retries, response outcome, and non-send proof.
-5. **Surrounding behavior** — duplicates, missing/premature/delayed/interjected events,
+5. **Surrounding behavior** - duplicates, missing/premature/delayed/interjected events,
    contaminating state, stale item/cart values, and cross-surface disagreement.
-6. **Data safety** — sensitive values in persisted evidence and reports.
+6. **Data safety** - sensitive values in persisted evidence and reports.
 
 Evidence confidence and scenario completeness are closure gates, not extra layers. Each
 surface proves only itself. Missing source cannot be laundered through Preview; a fired
@@ -68,7 +74,9 @@ continuous surrounding stream. Safety, confidence, and coverage are always repor
 Consent, acquisition, forms, trigger/sequence detail, media, and protected gates activate
 only when relevant. This is an applicability rule, not a serial layer ceremony.
 
-The source authority is document-start capture or a fully expanded Tag Assistant API Call.
+The normal source authority is a fully expanded Tag Assistant API Call. A proven
+call-time/document-start capture is conditional stronger evidence when the API Call is
+unavailable, incomplete, or exact pre-GTM invocation behavior matters.
 The Tag Assistant **Data Layer** tab is post-message
 accumulated state: inspect it separately, but never use it to prove what one push sent.
 For every destination-applicable planned field, compare the plan predicate independently
@@ -91,20 +99,25 @@ interface.
    and ignored rows; code examples are not requirements. An orphan/ambiguous row stops
    intake, while a malformed later event is localized and cannot delay the first valid
    event.
-2. Attach to the existing target and Preview session while compiling. Install continuous
-   source and network capture at the earliest document boundary. Perform one bounded
-   capability/identity handshake; if document-start capture is unavailable, use fully
-   expanded Preview API Call arguments as the source fallback. Fail only dependent claims
-   quickly when a required surface is unavailable.
+2. Attach to the existing target and Preview session while compiling. Start continuous
+   lightweight network/event observation and perform one bounded capability/identity
+   handshake. Use fully expanded Preview API Call arguments as the normal source path;
+   attempt a document-start recorder only when that path is insufficient. Reuse a valid
+   current Core/page load; create at most one initial load when one is actually needed.
+   Never generate a second clean repeat without a named evidence defect and retest reason.
 3. Select the earliest safe, high-information event. Discover only its material scenario
    branches just in time.
-4. Run `begin` with one before-state/identity bundle, perform the real interaction, then
-   `commit` one after-state plus continuous source/network/lifecycle deltas. Emit the
-   immediate pulse; it is provisional and can never certify `PASS`.
+4. The first `begin` carries the single capability/binding/health handshake and page
+   before-state. Later `begin` calls carry only the page before-state plus any unbound
+   continuous deltas between interactions. Perform the real interaction once, then
+   `commit` current after-health/page and source/network/lifecycle deltas. Stale captures
+   cannot be relabelled as current. Emit the immediate per-layer pulse; it is
+   provisional and can never certify `PASS`.
 5. Continue a short natural action cluster only while document, action, tag and logical
    hit identities remain unambiguous. Inspect every intervening source message, including
    messages not named in the plan.
-6. Run `sync-preview` once for all new Preview indexes in the cluster. Capture complete
+6. Run `sync-preview` with Preview evidence only, once for all new indexes in the cluster.
+   Capture complete
    event and concerned-tag summaries; deep-read the Variables, configuration, effective
    mapping and runtime needed by current planned fields, plus suspicious details. Never
    scan unrelated historical domains or the whole container. Synchronize earlier if
@@ -120,6 +133,11 @@ interface.
 Corrections invalidate only dependent proof. Distinguish website defects, plan
 ambiguity, control-tool failures, evidence limitations, and protected gates. Never use
 alternate state files or command routes to manufacture progress.
+
+The same event/scenario may run again only with a concise `--retest-reason`; a distinct
+material scenario remains a distinct action. This prevents automatic clean repeats
+without limiting language, shipping, payment, product-signature, or other scenario
+coverage.
 
 After navigation or reload, retain the old page as the before-state but rebind the new
 document before attributing post-navigation evidence. A proved old-to-new transition is

@@ -10,6 +10,7 @@ from tests.v5_harness import V5Harness, default_event, write_json
 
 from client_side_rules import MISSING
 from core.capture import capture_value, redact_for_persistence
+from core.constants import utc_now
 from core.correlate import build_model
 from core.plan import normalize_plan
 from core.predicates import PredicateError, compile_predicate, evaluate_predicate
@@ -383,7 +384,7 @@ class CompilerAndEvidenceTests(unittest.TestCase):
             "binding": harness.binding(),
             "preview": {"epoch": "E1", "events": [{"event_name": "view_item"}]},
         }
-        with self.assertRaisesRegex(StateError, "index"):
+        with self.assertRaisesRegex(StateError, "workflow phase"):
             begin_action(harness.run, ["E-view_item"], invalid)
         self.assertEqual(read_stream(harness.run)[0], [])
         self.assertEqual(list((harness.run / "evidence").iterdir()), [])
@@ -416,7 +417,7 @@ class CompilerAndEvidenceTests(unittest.TestCase):
                 {
                     "request_id": "R1",
                     "action_id": action,
-                    "timestamp": "2026-08-23T10:00:00Z",
+                    "timestamp": utc_now(),
                     "url": "https://www.google-analytics.com/g/collect?tid=G-TEST123&en=view_item",
                     "outcome": "initiated",
                 }
@@ -451,7 +452,7 @@ class CompilerAndEvidenceTests(unittest.TestCase):
                         {
                             "request_id": "R1",
                             "action_id": action,
-                            "timestamp": f"2026-08-23T10:00:0{index}Z",
+                            "timestamp": utc_now(),
                             "url": f"https://{host}/g/collect?tid=G-TEST123&en=view_item",
                         }
                     ],

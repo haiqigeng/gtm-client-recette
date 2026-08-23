@@ -59,6 +59,10 @@ def parser() -> argparse.ArgumentParser:
         default="SAFE_IDEMPOTENT",
     )
     begin.add_argument("--fresh-context-required", action="store_true")
+    begin.add_argument(
+        "--retest-reason",
+        help="Required when intentionally repeating an already committed event/scenario.",
+    )
 
     commit = commands.add_parser(
         "commit", help="Commit after-state and continuous collector deltas; emit a pulse."
@@ -147,6 +151,7 @@ def main(argv: list[str] | None = None) -> int:
                     label=args.label,
                     replay_safety=args.replay_safety,
                     fresh_context_required=args.fresh_context_required,
+                    retest_reason=args.retest_reason,
                 )
             )
         elif args.command == "commit":
