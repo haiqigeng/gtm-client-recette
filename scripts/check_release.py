@@ -135,6 +135,9 @@ def check_skill(errors: list[str]) -> None:
         "call-time dataLayer",
         "state-only dataLayer",
         "fully expanded Tag Assistant",
+        "normal source authority",
+        "--retest-reason",
+        "Stale captures",
         "every destination-applicable planned field",
         "provisional and can never certify `PASS`",
         "inspect every intervening source message",
@@ -167,6 +170,12 @@ def check_runtime_tree(errors: list[str]) -> None:
     protocols = {path.name for path in (ROOT / "scripts" / "core" / "protocols").glob("*.py")}
     if protocols != REQUIRED_PROTOCOLS:
         errors.append("scripts/core/protocols contains missing or unclassified modules")
+    capture_vocabulary = "\n".join(
+        (ROOT / "scripts" / "core" / name).read_text(encoding="utf-8")
+        for name in ("capture.py", "constants.py")
+    )
+    if "CAPTURE_DOM" in capture_vocabulary:
+        errors.append("unused generic DOM evidence adapter is still present")
     for relative in ("agents/openai.yaml", "LICENSE"):
         if not (ROOT / relative).is_file():
             errors.append(f"missing runtime resource: {relative}")

@@ -659,6 +659,8 @@ def _normalize_binding(value: Any) -> tuple[dict[str, Any], dict[str, Any]]:
             "preview_session_id",
             "preview_epoch",
             "natural_container_ids",
+            "active_container_ids",
+            "override_container_ids",
             "workspace_version",
         )
         if key in value
@@ -702,9 +704,22 @@ def _normalizer(adapter: str, value: Any, run_id: str) -> tuple[Any, dict[str, A
         return _normalize_lifecycle(value)
     if adapter == "health":
         return _normalize_health(value)
-    if adapter == "dom":
-        return _normalize_object(value, "Dom")
     raise StateError(f"Unsupported capture adapter: {adapter}")
+
+
+def _annotate_network_findings(findings: list[dict[str, Any]], safe: Any) -> list[dict[str, Any]]:
+    """Attach stable request identity without retaining any sensitive value."""
+    requests = safe.get("requests", []) if isinstance(safe, dict) else []
+    output = []
+    for finding in findings:
+        row = dict(finding)
+        match = re.match(r"^\$\.requests\[(\d+)\]", str(row.get("path") or ""))
+        if match:
+            index = int(match.group(1))
+            if index < len(requests) and isinstance(requests[index], dict):
+                row["request_id"] = requests[index].get("request_id")
+        output.append(row)
+    return output
 
 
 def capture_value(
@@ -726,6 +741,8 @@ def capture_value(
     reference, findings, safe = _write_json_evidence(
         run_dir, adapter, normalized, quarantine=quarantine
     )
+    if adapter == "network" and safe is not None:
+        findings = _annotate_network_findings(findings, safe)
     safe_digest = reference["sha256"]
     record_data = {
         "adapter": adapter,
@@ -761,7 +778,6 @@ def validate_bundle_value(
         "preview",
         "network",
         "lifecycle",
-        "dom",
     )
     supplied = {str(name) for name in value}
     unexpected = supplied - set(supported)

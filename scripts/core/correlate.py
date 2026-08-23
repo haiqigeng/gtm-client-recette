@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from value_semantics import parse_iso_timestamp
@@ -87,8 +87,22 @@ def _attributed_action(
             {"kind": "unknown_action_attribution", "identity": identity, "action_id": requested_id}
         )
         return None
-    # The collector's active action marker is stronger than wall-clock comparison:
-    # browser/worker clocks can differ and a request may settle after the next action.
+    action = next(row for row in model["actions"] if row.get("action_id") == requested_id)
+    observed = _time(timestamp)
+    began = _time(action.get("began_at"))
+    if observed is not None and began is not None and observed < began - timedelta(seconds=2):
+        model["ambiguous"].append(
+            {
+                "kind": "stale_action_attribution",
+                "identity": identity,
+                "action_id": requested_id,
+                "observed_at": timestamp,
+                "action_began_at": action.get("began_at"),
+            }
+        )
+        return None
+    # A request can settle after commit, so only impossible pre-action timestamps
+    # override an otherwise valid collector action marker.
     return requested_id
 
 
@@ -207,7 +221,9 @@ def _record_collection(
     }
     for finding in data.get("privacy_findings", []):
         if isinstance(finding, dict):
-            model["privacy_findings"].append({**finding, "evidence_ref": evidence_ref})
+            model["privacy_findings"].append(
+                {**finding, "adapter": adapter, "evidence_ref": evidence_ref}
+            )
 
 
 def _ingest_capability(
@@ -528,12 +544,19 @@ def _ingest_lifecycle(
     )
     for source_key, target_key, prefix in groups:
         for position, value in enumerate(payload.get(source_key, []), start=1):
+            identity = f"{prefix}:{evidence_ref}:{position}"
+            attributed = _attributed_action(
+                model,
+                value.get("action_id", action_id),
+                value.get("timestamp", value.get("observed_at")),
+                identity=identity,
+            )
             model[target_key].append(
                 {
                     **value,
-                    "action_id": value.get("action_id", action_id),
+                    "action_id": attributed,
                     "evidence_ref": evidence_ref,
-                    "occurrence_id": f"{prefix}:{evidence_ref}:{position}",
+                    "occurrence_id": identity,
                 }
             )
 
@@ -624,6 +647,8 @@ def _finalize_occurrences(
             model["logical_sends"].append(
                 {
                     **send,
+                    "response_status": request.get("response_status"),
+                    "failure_reason": request.get("failure_reason"),
                     "evidence_ref": request.get("evidence_ref"),
                     "evidence_refs": request.get("evidence_refs", []),
                 }

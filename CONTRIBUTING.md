@@ -1,6 +1,6 @@
 # Contributing
 
-The source version is **v5.1.0**. Use synthetic fixtures only. Never commit
+The source version is **v5.2.0**. Use synthetic fixtures only. Never commit
 client plans, domains, container or destination IDs, browser traces,
 screenshots, reports, credentials, tokens, form data, or run artifacts.
 
@@ -13,8 +13,8 @@ screenshots, reports, credentials, tokens, form data, or run artifacts.
   negative claims without imposing a fixed layer matrix.
 - Keep scenarios just in time. Do not recreate whole-plan cases, domain rows,
   tag inventories or reports before the first useful action.
-- Preserve continuous call-time source and request deltas, strict JSON
-  types/states, declared-only wire coercion, document/action/Preview identity,
+- Preserve exact API Call/conditional call-time source and continuous request deltas,
+  strict JSON types/states, declared-only wire coercion, document/action/Preview identity,
   evidence-source non-substitution and independent business outcome.
 - Keep the Tag Assistant API Call, Data Layer state, Variables, tag inventory,
   effective tag mapping/runtime and browser request as separate authorities. Compare
@@ -39,12 +39,12 @@ python -m ruff check --no-cache scripts tests
 python -m ruff format --check scripts tests
 python -m unittest discover -s tests -v
 python -B tests/run_browser_helpers.py
-python -B scripts/check_release.py --tag v5.1.0
+python -B scripts/check_release.py --tag v5.2.0
 ```
 
 ## Versioning
 
-Use semantic tags and archive names. Store `5.1.0` in `pyproject.toml`, tag it
-as `v5.1.0`, and package it as `gtm-client-recette-v5.1.0.zip`. Increment major
+Use semantic tags and archive names. Store `5.2.0` in `pyproject.toml`, tag it
+as `v5.2.0`, and package it as `gtm-client-recette-v5.2.0.zip`. Increment major
 for incompatible architecture/contracts, minor for compatible capability, and
 patch for compatible corrections.

@@ -1,6 +1,6 @@
 # Security Policy
 
-The current supported release is **v5.1.0**. Only the latest published release
+The current supported release is **v5.2.0**. Only the latest published release
 receives security fixes.
 
 Report vulnerabilities privately through GitHub security advisories. Do not

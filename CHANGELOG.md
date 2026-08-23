@@ -1,5 +1,39 @@
 # Changelog
 
+## [v5.2.0](https://github.com/haiqigeng/gtm-client-recette/releases/tag/v5.2.0) (2026-08-24)
+
+- Resolve broad “all planned” tag/destination wording to exact event-level plan
+  identities instead of treating prose as a runtime tag or destination. Infer GA4/Ads
+  scope only from exact destination IDs and fail intake immediately when a declared
+  scope has no resolvable identity.
+- Make the fully expanded Tag Assistant API Call the normal exact-message source. Keep
+  document-start interception as a conditional stronger path, eliminating the ordinary
+  recorder-install/reload cycle without using the accumulated Data Layer tab as source.
+- Persist one capability/browser/Preview binding and enforce minimal phase bundles:
+  lightweight later starts, current after-state at commit, and Preview-only sync.
+  Repeating a committed event/scenario now requires an explicit retest reason.
+- Reuse an attributable current Core/page load or perform one required load; prevent
+  automatic same-scenario clean repeats that previously doubled page-load work.
+- Reject stale page, health, source, network, and lifecycle timestamps instead of
+  rebinding old observations to the current action. Keep unbound between-interaction
+  deltas available to continuous anomaly analysis.
+- Reconcile exact Preview rows for API Call, accumulated Data Layer and Variables with a
+  same-action technical follow-up window for Trigger Group tag firing, configuration and
+  runtime details, stopping at the next business event.
+- Include every provisional operational row/status in the immediate action pulse, while
+  retaining canonical detailed per-event feedback after targeted Preview sync.
+- Scope privacy failures to the current action and concerned logical request. Unrelated
+  background session/cookie fields remain redacted but no longer fail an event; sensitive
+  values in its own source/runtime/request still fail.
+- Preserve successful response status in logical sends and classify contradictory
+  aborted-plus-success outcomes as `REVIEW` instead of a false transport `FAIL`.
+- Correct cumulative telemetry by taking the latest counter value and deduplicating
+  identical Preview/network evidence. Remove the unused generic DOM capture adapter.
+- Add generalized regressions for scope intake, one-action/retest behavior, stale
+  evidence, delayed Trigger Groups, request-scoped safety, transport conflict, telemetry,
+  concise media scope, and immediate per-layer output. The complete suite is now 95
+  passing tests plus four subtests.
+
 ## [v5.1.0](https://github.com/haiqigeng/gtm-client-recette/releases/tag/v5.1.0) (2026-08-23)
 
 - Compile common multi-sheet tracking workbooks directly when each sheet contains an

@@ -738,11 +738,11 @@ def _source_result(
         return _inspection(
             claim,
             "BLOCKED",
-            "source.call_time_unavailable",
-            "Call-time source evidence is unavailable or incomplete; Preview/snapshot evidence cannot replace it.",
-            observed="No complete attributable call-time source",
+            "source.api_call_unavailable",
+            "Neither complete call-time capture nor a fully expanded Tag Assistant API Call is attributable.",
+            observed="No complete attributable source call",
             evidence=refs,
-            check_next="Document-start source collector or declared direct source",
+            check_next="Fully expanded Tag Assistant API Call or conditional call-time recorder",
             scenario_id=scenario_id,
         )
     result = _evaluate_claim_value(actual, claim)
@@ -768,6 +768,99 @@ def _preview_matches(
         for row in evidence["preview_events"]
         if str(row.get("event_name", row.get("name")) or "") == str(event_name)
     ]
+
+
+_TECHNICAL_PREVIEW_NAMES = {
+    "consentinitialisation",
+    "consentinitialization",
+    "consentupdate",
+    "containerloaded",
+    "domready",
+    "initialisation",
+    "initialization",
+    "message",
+    "set",
+    "triggergroup",
+    "windowloaded",
+}
+
+
+def _technical_preview_name(value: Any) -> bool:
+    compact = "".join(character for character in str(value or "").casefold() if character.isalnum())
+    cmp_lifecycle = (
+        compact.startswith(("didomi", "onetrust", "cookiebot", "cmp")) or "consent" in compact
+    )
+    return compact.startswith("gtm") or compact in _TECHNICAL_PREVIEW_NAMES or cmp_lifecycle
+
+
+def _preview_business_boundary(row: dict[str, Any], event_name: str) -> bool:
+    arguments = (
+        row.get("api_call", {}).get("arguments", [])
+        if isinstance(row.get("api_call"), dict)
+        else []
+    )
+    pushed = [
+        str(argument.get("event"))
+        for argument in arguments
+        if isinstance(argument, dict) and argument.get("event")
+    ]
+    if any(name != event_name and not _technical_preview_name(name) for name in pushed):
+        return True
+    row_name = str(row.get("event_name", row.get("name")) or "")
+    return bool(not pushed and row_name != event_name and not _technical_preview_name(row_name))
+
+
+def _preview_causal_rows(
+    evidence: dict[str, list[dict[str, Any]]], event_name: str | None
+) -> list[dict[str, Any]]:
+    """Join exact source rows to their bounded technical follow-up rows.
+
+    API Call, accumulated Data Layer, and Variables stay tied to the exact message.
+    Tag firing and runtime details may legitimately appear on a following GTM Trigger
+    Group, but never across the next business event.
+    """
+    exact = _preview_matches(evidence, event_name)
+    if event_name is None:
+        return exact
+    all_rows = evidence.get("preview_events", [])
+    output: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for source in exact:
+        source_epoch = str(source.get("epoch") or "")
+        source_action = str(source.get("action_id") or "")
+        try:
+            source_index = int(source.get("index"))
+        except (TypeError, ValueError):
+            source_index = None
+        candidates = sorted(
+            (
+                row
+                for row in all_rows
+                if str(row.get("epoch") or "") == source_epoch
+                and (
+                    not source_action
+                    or not row.get("action_id")
+                    or str(row.get("action_id")) == source_action
+                )
+            ),
+            key=lambda row: (
+                int(row.get("index")) if str(row.get("index") or "").isdigit() else 10**9
+            ),
+        )
+        for row in candidates:
+            try:
+                row_index = int(row.get("index"))
+            except (TypeError, ValueError):
+                continue
+            if source_index is not None and row_index < source_index:
+                continue
+            if row is not source and _preview_business_boundary(row, str(event_name)):
+                break
+            identity = str(row.get("occurrence_id") or f"{source_epoch}:{row_index}")
+            if identity not in seen:
+                seen.add(identity)
+                output.append(row)
+    return output
 
 
 def _preview_complete(rows: list[dict[str, Any]], key: str) -> bool:
@@ -1248,10 +1341,16 @@ def _gtm_result(
     scenario_id: str,
 ) -> dict[str, Any]:
     target = claim.get("target", {})
-    rows = _preview_matches(evidence, target.get("event_name"))
+    exact_rows = _preview_matches(evidence, target.get("event_name"))
     check = target.get("check")
-    if not rows:
+    if not exact_rows:
         return _gtm_missing_result(claim, model, evidence, check, scenario_id)
+
+    rows = (
+        exact_rows
+        if check in {"event_match", "resolved_variable", "data_layer_state"}
+        else _preview_causal_rows(evidence, target.get("event_name"))
+    )
 
     refs = [ref for row in rows for ref in row.get("evidence_refs", [])]
     if check == "event_match":
@@ -1294,7 +1393,8 @@ def _gtm_result(
                     check_next="Concerned in-scope tag configurations",
                     scenario_id=scenario_id,
                 )
-        cached, cached_refs, conflict = _cached_tag_configuration(model, rows, tag_id)
+        cache_tag_id = tag_id or (tag_ids[0] if len(tag_ids) == 1 else "")
+        cached, cached_refs, conflict = _cached_tag_configuration(model, rows, cache_tag_id)
         return _gtm_configuration_result(
             claim,
             rows,
@@ -1369,7 +1469,7 @@ def _runtime_parameter_result(
     scenario_id: str,
 ) -> dict[str, Any]:
     target = claim.get("target", {})
-    rows = _preview_matches(evidence, target.get("event_name"))
+    rows = _preview_causal_rows(evidence, target.get("event_name"))
     tag_id = str(target.get("tag_id") or "")
     details, fired_count, _, tag_ids = _find_concerned_tags(rows, target)
     display_tag = tag_id or ", ".join(tag_ids) or "runtime-discovered in-scope tag"
@@ -1493,14 +1593,48 @@ def _transport_failure_result(
     ]
     if not failed:
         return None
+
+    def successful_status(send: dict[str, Any]) -> bool:
+        try:
+            status = int(send.get("response_status"))
+        except (TypeError, ValueError):
+            return False
+        return 200 <= status < 400
+
+    contradictory = [send for send in failed if successful_status(send)]
+    hard_failed = [send for send in failed if send not in contradictory]
+    if not hard_failed:
+        return _inspection(
+            claim,
+            "REVIEW",
+            "delivery.transport_conflicting_outcome",
+            "The browser reported a failed/aborted outcome but also a successful response status.",
+            observed=[
+                {
+                    "request_id": send.get("request_id"),
+                    "outcome": send.get("outcome"),
+                    "response_status": send.get("response_status"),
+                }
+                for send in contradictory
+            ],
+            expected="One coherent browser transport outcome",
+            evidence=refs,
+            check_next="Browser request lifecycle and response status",
+            scenario_id=scenario_id,
+        )
     return _inspection(
         claim,
         "FAIL",
         "delivery.transport_failed",
         "A matching logical send was attempted but its browser transport failed.",
         observed=[
-            {"request_id": send.get("request_id"), "outcome": send.get("outcome")}
-            for send in failed
+            {
+                "request_id": send.get("request_id"),
+                "outcome": send.get("outcome"),
+                "response_status": send.get("response_status"),
+                "failure_reason": send.get("failure_reason"),
+            }
+            for send in hard_failed
         ],
         expected="Initiated/settled browser transport",
         evidence=refs,
@@ -2382,9 +2516,44 @@ def _behavior_result(
 
 
 def _safety_result(
-    claim: dict[str, Any], model: dict[str, Any], scenario_id: str
+    claim: dict[str, Any],
+    model: dict[str, Any],
+    evidence: dict[str, list[dict[str, Any]]],
+    scenario_id: str,
 ) -> dict[str, Any]:
-    findings = model.get("privacy_findings", [])
+    action_refs: set[str] = set()
+    for rows in evidence.values():
+        for row in rows:
+            references = row.get("evidence_refs")
+            if not isinstance(references, list):
+                references = []
+            for reference in [row.get("evidence_ref"), *references]:
+                if reference:
+                    action_refs.add(str(reference))
+    event_name = claim.get("target", {}).get("event_name")
+    planned_tags = {str(value) for value in claim.get("target", {}).get("tag_ids", []) if value}
+    planned_destinations = {
+        str(value) for value in claim.get("target", {}).get("destinations", []) if value
+    }
+    request_ids = {
+        str(send.get("request_id"))
+        for send in evidence.get("logical_sends", [])
+        if send.get("request_id")
+        and (
+            (event_name and str(send.get("event_name") or "") == str(event_name))
+            or planned_tags.intersection(str(value) for value in send.get("tag_ids", []))
+            or str(send.get("destination") or "") in planned_destinations
+        )
+    }
+    findings = [
+        item
+        for item in model.get("privacy_findings", [])
+        if str(item.get("evidence_ref") or "") in action_refs
+        and (
+            item.get("adapter") != "network"
+            or (item.get("request_id") is not None and str(item.get("request_id")) in request_ids)
+        )
+    ]
     confirmed = [
         item
         for item in findings
@@ -2424,7 +2593,7 @@ def _consent_context(
         for tag in event.get("tags", [])
         if tag.get("consent_requirements")
     }
-    preview_rows = _preview_matches(evidence, event.get("event_name"))
+    preview_rows = _preview_causal_rows(evidence, event.get("event_name"))
     transitions = [
         row
         for row in evidence["consent_transitions"]
@@ -2688,7 +2857,7 @@ def _evaluate_claim(
     if archetype == "sequence":
         return _behavior_result(claim, evidence, model, event, scenario_id)
     if archetype == "safety":
-        return _safety_result(claim, model, scenario_id)
+        return _safety_result(claim, model, evidence, scenario_id)
     return _inspection(
         claim,
         "BLOCKED",
