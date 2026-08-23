@@ -13,7 +13,7 @@ from .capture import (
     verify_evidence_references,
 )
 from .constants import utc_now
-from .correlate import action_windows, build_model, source_event_names
+from .correlate import action_evidence, action_windows, build_model, source_event_names
 from .coverage import event_by_id, validate_coverage_annotation
 from .judge import judge_event, judge_run
 from .state import (
@@ -63,8 +63,12 @@ def _inject_action(bundle: dict[str, Any], action_id: str, phase: str) -> dict[s
     value = json.loads(json.dumps(bundle))
     if isinstance(value.get("health"), dict):
         value["health"].setdefault("action_id", action_id)
+        value["health"].setdefault("phase", phase)
     if isinstance(value.get("binding"), dict):
         value["binding"].setdefault("action_id", action_id)
+    for adapter in ("datalayer", "source", "network", "lifecycle"):
+        if isinstance(value.get(adapter), dict):
+            value[adapter].setdefault("action_id", action_id)
     if isinstance(value.get("page"), dict):
         states = value["page"].get("states")
         if not isinstance(states, list):
@@ -197,7 +201,7 @@ def add_coverage_review(run_dir: Path | str, value: dict[str, Any]) -> dict[str,
     )
 
 
-def add_semantic_finding(run_dir: Path | str, value: dict[str, Any]) -> dict[str, Any]:
+def _normalized_semantic_finding(run_dir: Path | str, value: dict[str, Any]) -> dict[str, Any]:
     plan = load_plan(run_dir)
     event_id = str(value.get("event_id") or "")
     event_by_id(plan, event_id)
@@ -214,13 +218,113 @@ def add_semantic_finding(run_dir: Path | str, value: dict[str, Any]) -> dict[str
     unknown = [str(reference) for reference in references if str(reference) not in known]
     if unknown:
         raise StateError("Semantic finding references unknown evidence: " + ", ".join(unknown))
-    normalized = {**value, "event_id": event_id, "status": status}
+    return {**value, "event_id": event_id, "status": status}
+
+
+def add_semantic_finding(run_dir: Path | str, value: dict[str, Any]) -> dict[str, Any]:
+    normalized = _normalized_semantic_finding(run_dir, value)
     return append_annotation(
         run_dir,
         "SEMANTIC_FINDING",
         normalized,
         idempotency_key=f"semantic:{content_digest(normalized)}",
     )
+
+
+def _normalized_acquisition_context(
+    run_dir: Path | str, value: dict[str, Any], action_id: str | None
+) -> dict[str, Any]:
+    normalized = dict(value)
+    normalized.setdefault("action_id", action_id)
+    method = str(normalized.get("method") or "").upper()
+    if method not in {"NATURAL", "CONTROLLED_NAVIGATION", "NOT_APPLICABLE"}:
+        raise StateError(
+            "Acquisition method must be NATURAL, CONTROLLED_NAVIGATION, or NOT_APPLICABLE."
+        )
+    if not isinstance(normalized.get("fresh"), bool):
+        raise StateError("Acquisition context needs an explicit boolean fresh state.")
+    if method != "NOT_APPLICABLE":
+        references = normalized.get("evidence_refs", [])
+        known = stream_record_by_id(read_stream(run_dir)[0])
+        if not isinstance(references, list) or not references:
+            raise StateError("Applicable acquisition context needs machine evidence references.")
+        unknown = [str(reference) for reference in references if str(reference) not in known]
+        if unknown:
+            raise StateError(
+                "Acquisition context references unknown evidence: " + ", ".join(unknown)
+            )
+    normalized["method"] = method
+    return normalized
+
+
+def _normalized_handoff(run_dir: Path | str, value: dict[str, Any]) -> dict[str, Any]:
+    gate = str(value.get("gate") or "").upper()
+    allowed = {
+        "CAPTCHA",
+        "CREDENTIALS",
+        "MFA",
+        "EMAIL_VERIFICATION",
+        "SMS_VERIFICATION",
+        "MAGIC_LINK",
+        "PAYMENT",
+        "EXTERNAL_APPROVAL",
+    }
+    if gate not in allowed:
+        raise StateError("Protected handoff has an unsupported gate kind.")
+    status = str(value.get("status") or "PENDING").upper()
+    if status not in {"PENDING", "RESUMED", "ABANDONED"}:
+        raise StateError("Handoff status must be PENDING, RESUMED, or ABANDONED.")
+    records, _ = read_stream(run_dir)
+    handoff_id = str(
+        value.get("handoff_id")
+        or f"H-{content_digest({'gate': gate, 'binding': value.get('binding')})[:10].upper()}"
+    )
+    binding = value.get("binding")
+    if not isinstance(binding, dict) or not all(
+        binding.get(key) for key in ("browser_context_id", "tab_id", "document_id", "action_id")
+    ):
+        raise StateError("Protected handoff must bind browser context, tab, document, and action.")
+    if status == "RESUMED":
+        prior = next(
+            (
+                record.get("data", {})
+                for record in reversed(records)
+                if record.get("kind") == "PROTECTED_HANDOFF"
+                and record.get("data", {}).get("handoff_id") == handoff_id
+                and record.get("data", {}).get("status") == "PENDING"
+            ),
+            None,
+        )
+        if prior is None or prior.get("binding") != binding:
+            raise StateError(
+                "Protected handoff did not resume the exact browser/tab/document/action lineage."
+            )
+    return {**value, "handoff_id": handoff_id, "gate": gate, "status": status}
+
+
+def _normalized_controls(
+    run_dir: Path | str, control: dict[str, Any], action_id: str | None
+) -> dict[str, Any]:
+    """Validate every analyst control before any part of a bundle is persisted."""
+    plan = load_plan(run_dir)
+    records, _ = read_stream(run_dir)
+    coverage = _coverage_rows(control.get("coverage"))
+    for row in coverage:
+        errors = validate_coverage_annotation(plan, records, row)
+        if errors:
+            raise StateError("Coverage review is invalid: " + " | ".join(errors))
+    semantic = [
+        _normalized_semantic_finding(run_dir, row)
+        for row in _coverage_rows(control.get("semantic_findings"))
+    ]
+    normalized: dict[str, Any] = {**control, "coverage": coverage, "semantic_findings": semantic}
+    if isinstance(control.get("handoff"), dict):
+        normalized["handoff"] = _normalized_handoff(run_dir, control["handoff"])
+    if isinstance(control.get("acquisition_context"), dict):
+        normalized["acquisition_context"] = _normalized_acquisition_context(
+            run_dir, control["acquisition_context"], action_id
+        )
+    return normalized
 
 
 def _add_control_annotations(
@@ -235,30 +339,17 @@ def _add_control_annotations(
     for row in _coverage_rows(control.get("semantic_findings")):
         record_ids.append(add_semantic_finding(run_dir, row)["record_id"])
     if isinstance(control.get("handoff"), dict):
-        record_ids.append(add_handoff(run_dir, control["handoff"])["record_id"])
+        normalized = control["handoff"]
+        record_ids.append(
+            append_annotation(
+                run_dir,
+                "PROTECTED_HANDOFF",
+                normalized,
+                idempotency_key=(f"handoff:{normalized['handoff_id']}:{normalized['status']}"),
+            )["record_id"]
+        )
     if isinstance(control.get("acquisition_context"), dict):
-        value = dict(control["acquisition_context"])
-        value.setdefault("action_id", action_id)
-        method = str(value.get("method") or "").upper()
-        if method not in {"NATURAL", "CONTROLLED_NAVIGATION", "NOT_APPLICABLE"}:
-            raise StateError(
-                "Acquisition method must be NATURAL, CONTROLLED_NAVIGATION, or NOT_APPLICABLE."
-            )
-        if not isinstance(value.get("fresh"), bool):
-            raise StateError("Acquisition context needs an explicit boolean fresh state.")
-        if method != "NOT_APPLICABLE":
-            references = value.get("evidence_refs", [])
-            known = stream_record_by_id(read_stream(run_dir)[0])
-            if not isinstance(references, list) or not references:
-                raise StateError(
-                    "Applicable acquisition context needs machine evidence references."
-                )
-            unknown = [str(reference) for reference in references if str(reference) not in known]
-            if unknown:
-                raise StateError(
-                    "Acquisition context references unknown evidence: " + ", ".join(unknown)
-                )
-        value["method"] = method
+        value = control["acquisition_context"]
         record_ids.append(
             append_annotation(
                 run_dir,
@@ -279,35 +370,64 @@ def commit_action(
 ) -> dict[str, Any]:
     plan = load_plan(run_dir)
     records, _ = read_stream(run_dir)
-    open_actions = [action for action in action_windows(records) if action["status"] == "OPEN"]
+    actions = action_windows(records)
+    open_actions = [action for action in actions if action["status"] == "OPEN"]
     if action_id:
         open_actions = [action for action in open_actions if action["action_id"] == action_id]
-    if len(open_actions) != 1:
-        raise StateError("commit requires exactly one matching open action.")
-    action = open_actions[0]
+    resuming = False
+    if len(open_actions) == 1:
+        action = open_actions[0]
+    else:
+        committed = [
+            action
+            for action in actions
+            if action_id and action["action_id"] == action_id and action["status"] == "COMMITTED"
+        ]
+        if len(committed) != 1:
+            raise StateError("commit requires exactly one matching open action.")
+        action = committed[0]
+        resuming = True
     machine_bundle, control = _split_bundle(bundle)
     prepared = _inject_action(machine_bundle, action["action_id"], "after")
     validate_bundle_value(run_dir, prepared, required_adapters={"health", "page"})
+    control = _normalized_controls(run_dir, control, action["action_id"])
     captures = capture_bundle_value(run_dir, prepared, source_id=f"commit:{action['action_id']}")
-    commit = append_annotation(
-        run_dir,
-        "ACTION_COMMIT",
-        {
-            "action_id": action["action_id"],
-            "committed_at": utc_now(),
-            "outcome_may_have_occurred": (
-                control.get("outcome_may_have_occurred")
-                if outcome_may_have_occurred is None
-                else outcome_may_have_occurred
-            ),
-            "capture_record_ids": [record["record_id"] for record in captures],
-        },
-        idempotency_key=f"action-commit:{action['action_id']}:{content_digest(prepared)}",
+    capture_ids = [record["record_id"] for record in captures]
+    outcome = (
+        control.get("outcome_may_have_occurred")
+        if outcome_may_have_occurred is None
+        else outcome_may_have_occurred
     )
+    if resuming:
+        commit = next(
+            record
+            for record in reversed(records)
+            if record.get("kind") == "ACTION_COMMIT"
+            and record.get("data", {}).get("action_id") == action["action_id"]
+        )
+        if (
+            commit.get("data", {}).get("capture_record_ids") != capture_ids
+            or commit.get("data", {}).get("outcome_may_have_occurred") != outcome
+        ):
+            raise StateError(
+                "The committed action can only be resumed with its exact original bundle."
+            )
+    else:
+        commit = append_annotation(
+            run_dir,
+            "ACTION_COMMIT",
+            {
+                "action_id": action["action_id"],
+                "committed_at": utc_now(),
+                "outcome_may_have_occurred": outcome,
+                "capture_record_ids": capture_ids,
+            },
+            idempotency_key=f"action-commit:{action['action_id']}:{content_digest(prepared)}",
+        )
     annotation_ids = _add_control_annotations(run_dir, control, action_id=action["action_id"])
     final_records, _ = read_stream(run_dir)
     model = build_model(run_dir, plan, final_records)
-    observed = source_event_names(model, action["action_id"])
+    observed = source_event_names(model, action["action_id"], authoritative_only=True)
     duplicates = sorted({name for name in observed if observed.count(name) > 1})
     expected_names = {
         str(event_by_id(plan, event_id).get("event_name"))
@@ -317,6 +437,31 @@ def commit_action(
     unexpected = [
         name for name in observed if name not in expected_names and not name.startswith("gtm.")
     ]
+    current_evidence = action_evidence(model, action["action_id"])
+    provisional = []
+    for event_id in action.get("event_ids", []):
+        event_result = judge_event(run_dir, plan, final_records, str(event_id), model=model)
+        provisional.append(
+            {
+                "event_id": event_id,
+                "status": event_result["status"],
+                "layers": {
+                    domain: {
+                        "status": value.get("status"),
+                        "reason": value.get("reason"),
+                    }
+                    for domain, value in event_result.get("domains", {}).items()
+                },
+            }
+        )
+    awaiting = []
+    if any(
+        row.get("layers", {}).get("gtm", {}).get("status") in {"BLOCKED", "PENDING"}
+        for row in provisional
+    ):
+        awaiting.append("one targeted Preview detail pass")
+    if any(row.get("status") == "PENDING" for row in provisional):
+        awaiting.append("remaining material scenario coverage")
     pulse_data = {
         "action_id": action["action_id"],
         "event_ids": action.get("event_ids", []),
@@ -325,8 +470,10 @@ def commit_action(
             "duplicates": duplicates,
             "unexpected_events": unexpected,
         },
-        "awaiting": ["Preview synchronization", "remaining scenario coverage"],
-        "issued_at": utc_now(),
+        "observed_network_sends": len(current_evidence.get("logical_sends", [])),
+        "observed_preview_messages": len(current_evidence.get("preview_events", [])),
+        "provisional_events": provisional,
+        "awaiting": awaiting,
     }
     pulse = append_derived(
         run_dir,
@@ -336,7 +483,7 @@ def commit_action(
     )
     return {
         "commit": commit,
-        "captures": [record["record_id"] for record in captures],
+        "captures": capture_ids,
         "annotations": annotation_ids,
         "pulse": {**pulse_data, "record_id": pulse["record_id"], "certifying": False},
     }
@@ -346,17 +493,23 @@ def issue_event_feedback(run_dir: Path | str, event_id: str) -> dict[str, Any]:
     plan = load_plan(run_dir)
     records, _ = read_stream(run_dir)
     result = judge_event(run_dir, plan, records, event_id)
-    reviewed_through = max((int(record.get("seq", 0)) for record in records), default=0)
+    output_kinds = {"ACTION_PULSE", "EVENT_FEEDBACK_ISSUED", "PREVIEW_SYNC"}
+    reviewed_through = max(
+        (int(record.get("seq", 0)) for record in records if record.get("kind") not in output_kinds),
+        default=0,
+    )
+    feedback_data = {
+        "event_id": event_id,
+        "status": result["status"],
+        "final": result["final"],
+        "reviewed_through_seq": reviewed_through,
+        "result_digest": content_digest(result),
+    }
     record = append_derived(
         run_dir,
         "EVENT_FEEDBACK_ISSUED",
-        {
-            "event_id": event_id,
-            "status": result["status"],
-            "final": result["final"],
-            "reviewed_through_seq": reviewed_through,
-        },
-        idempotency_key=f"feedback:{event_id}:{reviewed_through}:{result['status']}:{result['final']}",
+        feedback_data,
+        idempotency_key=f"feedback:{event_id}:{content_digest(feedback_data)}",
     )
     return {**result, "feedback_record_id": record["record_id"]}
 
@@ -370,6 +523,7 @@ def sync_preview(
     plan = load_plan(run_dir)
     records, _ = read_stream(run_dir)
     machine_bundle, control = _split_bundle(bundle)
+    control = _normalized_controls(run_dir, control, None)
     if machine_bundle:
         validate_bundle_value(run_dir, machine_bundle)
         captures = capture_bundle_value(
@@ -399,17 +553,21 @@ def sync_preview(
                     event_ids.extend(map(str, action.get("event_ids", [])))
     normalized_ids = list(dict.fromkeys(event_ids or []))
     _event_slice(plan, normalized_ids)
-    through_seq = max((int(record.get("seq", 0)) for record in records), default=0)
+    output_kinds = {"ACTION_PULSE", "EVENT_FEEDBACK_ISSUED", "PREVIEW_SYNC"}
+    through_seq = max(
+        (int(record.get("seq", 0)) for record in records if record.get("kind") not in output_kinds),
+        default=0,
+    )
+    sync_data = {
+        "event_ids": normalized_ids,
+        "through_seq": through_seq,
+        "capture_record_ids": [record["record_id"] for record in captures],
+    }
     sync = append_derived(
         run_dir,
         "PREVIEW_SYNC",
-        {
-            "event_ids": normalized_ids,
-            "through_seq": through_seq,
-            "capture_record_ids": [record["record_id"] for record in captures],
-            "synced_at": utc_now(),
-        },
-        idempotency_key=f"preview-sync:{through_seq}:{content_digest(normalized_ids)}",
+        sync_data,
+        idempotency_key=f"preview-sync:{content_digest(sync_data)}",
     )
     feedback = [issue_event_feedback(run_dir, event_id) for event_id in normalized_ids]
     return {
@@ -421,50 +579,12 @@ def sync_preview(
 
 
 def add_handoff(run_dir: Path | str, value: dict[str, Any]) -> dict[str, Any]:
-    gate = str(value.get("gate") or "").upper()
-    allowed = {
-        "CAPTCHA",
-        "CREDENTIALS",
-        "MFA",
-        "EMAIL_VERIFICATION",
-        "SMS_VERIFICATION",
-        "MAGIC_LINK",
-        "PAYMENT",
-        "EXTERNAL_APPROVAL",
-    }
-    if gate not in allowed:
-        raise StateError("Protected handoff has an unsupported gate kind.")
-    status = str(value.get("status") or "PENDING").upper()
-    if status not in {"PENDING", "RESUMED", "ABANDONED"}:
-        raise StateError("Handoff status must be PENDING, RESUMED, or ABANDONED.")
-    records, _ = read_stream(run_dir)
-    handoff_id = str(value.get("handoff_id") or f"H-{uuid4().hex[:10].upper()}")
-    binding = value.get("binding")
-    if not isinstance(binding, dict) or not all(
-        binding.get(key) for key in ("browser_context_id", "tab_id", "document_id", "action_id")
-    ):
-        raise StateError("Protected handoff must bind browser context, tab, document, and action.")
-    if status == "RESUMED":
-        prior = next(
-            (
-                record.get("data", {})
-                for record in reversed(records)
-                if record.get("kind") == "PROTECTED_HANDOFF"
-                and record.get("data", {}).get("handoff_id") == handoff_id
-                and record.get("data", {}).get("status") == "PENDING"
-            ),
-            None,
-        )
-        if prior is None or prior.get("binding") != binding:
-            raise StateError(
-                "Protected handoff did not resume the exact browser/tab/document/action lineage."
-            )
-    normalized = {**value, "handoff_id": handoff_id, "gate": gate, "status": status}
+    normalized = _normalized_handoff(run_dir, value)
     return append_annotation(
         run_dir,
         "PROTECTED_HANDOFF",
         normalized,
-        idempotency_key=f"handoff:{handoff_id}:{status}",
+        idempotency_key=f"handoff:{normalized['handoff_id']}:{normalized['status']}",
     )
 
 

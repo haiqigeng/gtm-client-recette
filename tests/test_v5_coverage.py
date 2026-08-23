@@ -99,6 +99,41 @@ class ScenarioCoverageTests(unittest.TestCase):
         self.assertEqual(result["status"], "PASS")
         self.assertEqual([row["status"] for row in result["scenarios"]], ["PASS", "PASS"])
 
+    def test_enum_value_must_match_the_specific_scenario_context(self) -> None:
+        event = default_event("E-page", "page_view")
+        event["requirements"].append(
+            {
+                "field_path": "page_language",
+                "match_rule": "one_of",
+                "allowed_values": ["en", "fr"],
+                "expected_type": "string",
+            }
+        )
+        harness = V5Harness(self.root, events=[event])
+        action = harness.begin(
+            ["E-page"], scenario_id="english", scenario_values={"page_language": "en"}
+        )
+        payload = {"event": "page_view", "page_language": "fr"}
+        harness.commit(action, [payload])
+        result = harness.sync(
+            ["E-page"],
+            [payload],
+            action_id=action,
+            coverage=harness.coverage(
+                "E-page",
+                [action],
+                scenario_id="english",
+                scenario_values={"page_language": "en"},
+            ),
+        )["events"][0]
+        self.assertEqual(result["status"], "FAIL")
+        self.assertTrue(
+            any(
+                row["inspection_target"].endswith("page_language") and row["status"] == "FAIL"
+                for row in result["inspections"]
+            )
+        )
+
     def test_live_discovered_value_is_tested_and_reported_as_plan_gap_not_passed(self) -> None:
         event = default_event("E-page", "page_view")
         event["requirements"].append(
@@ -294,6 +329,23 @@ class ScenarioCoverageTests(unittest.TestCase):
         harness.add_coverage(blocked)
         result = coverage_result(load_plan(harness.run), read_stream(harness.run)[0], "E-view_item")
         self.assertEqual(result["status"], "BLOCKED")
+
+    def test_new_executed_scenario_reopens_previous_coverage(self) -> None:
+        harness = V5Harness(self.root)
+        first, result = harness.execute_pass()
+        self.assertEqual(result["coverage"]["status"], "PASS")
+        second = harness.begin(["E-view_item"], scenario_id="new-context")
+        payload = {"event": "view_item"}
+        harness.commit(second, [payload])
+        harness.sync(["E-view_item"], [payload], action_id=second)
+        reopened = harness.feedback("E-view_item")
+        self.assertEqual(reopened["coverage"]["status"], "BLOCKED")
+        self.assertTrue(
+            any(
+                "absent from scenario coverage" in error for error in reopened["coverage"]["errors"]
+            )
+        )
+        self.assertNotEqual(reopened["status"], "PASS")
 
 
 if __name__ == "__main__":

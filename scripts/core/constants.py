@@ -9,7 +9,6 @@ from typing import Any
 SCHEMA_VERSION = "5.0"
 
 STATUSES = frozenset({"PASS", "FAIL", "BLOCKED", "REVIEW", "NOT_APPLICABLE", "PENDING"})
-FINAL_STATUSES = frozenset(STATUSES - {"PENDING"})
 STATUS_PRIORITY = {
     "NOT_APPLICABLE": 0,
     "PASS": 1,
@@ -70,7 +69,6 @@ MACHINE_RECORD_KINDS = frozenset(
         "CAPTURE_NETWORK",
         "CAPTURE_LIFECYCLE",
         "CAPTURE_DOM",
-        "CAPTURE_SCREENSHOT",
     }
 )
 DERIVED_RECORD_KINDS = frozenset(
@@ -94,7 +92,6 @@ CAPTURE_KINDS = {
     "network": "CAPTURE_NETWORK",
     "lifecycle": "CAPTURE_LIFECYCLE",
     "dom": "CAPTURE_DOM",
-    "screenshot": "CAPTURE_SCREENSHOT",
 }
 
 MATERIALITY_DEFINITION = (

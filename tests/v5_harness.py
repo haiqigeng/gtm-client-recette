@@ -367,12 +367,21 @@ class V5Harness:
                     "full_tag_summary": full_details,
                     "completeness": {
                         "event_list": complete,
+                        "api_call": full_details,
+                        "data_layer_state": full_details,
                         "fired_list": full_details,
                         "not_fired_set": full_details,
                         "tag_details": full_details,
                         "variables": full_details,
                         "runtime_parameters": full_details,
                     },
+                    "api_call": {
+                        "arguments": [payload],
+                        "complete": full_details,
+                    }
+                    if full_details
+                    else None,
+                    "data_layer_state": payload if full_details else None,
                     "resolved_state": payload if full_details else None,
                     "consent": consent,
                     "fired_tags": fired_tags,
@@ -383,6 +392,7 @@ class V5Harness:
             self.preview_index += 1
         return {
             "complete": complete,
+            "action_id": action_id,
             "epoch": "EPOCH-1",
             "preview_session_id": "PREVIEW-1",
             "container_ids": ["GTM-EXPECTED"],

@@ -1,141 +1,106 @@
 # v5 Regression and Downgrade Audit
 
-Status: final local audit for the v5.0.0 release, 2026-08-23.
+Status: v5.1.0 release audit, 2026-08-23.
 
 ## Executive result
 
-No known deterministic regression or quality downgrade remains against the contracts
-retained from v3.0.0, v3.1.0 and v3.2.0. The redesign removes procedural machinery, not
-inspection questions. Local tests pass, packaging verifies, and controlled latency is
-small.
+No known deterministic accuracy regression remains against the retained v3.0.0,
+v3.1.0, or v5.0.0 contracts. v5.1 removes startup gates and fixes false authority and
+cross-layer gaps while preserving scenario depth, continuous anomaly analysis,
+business-reality checks, protected journeys, and mandatory per-event layer feedback.
 
-Live deployment safety is still unproven because the configured existing-browser bridge
-was unavailable. The real first-three-event pilot remains blocked and is disclosed as a
-release limitation. It would be a false claim to compare local core milliseconds
-directly with the historical live run that took hours.
+The remaining deployment risk is external: the release was not rerun end to end in the
+owner's live Chromium/Tag Assistant session after these changes. Controlled latency is
+evidence about the architecture, not a substitute for that pilot.
 
-## Historical comparison boundary
+## Reproducible historical comparison
 
-The Git repository contains tags through v3.2.0. It has no v4.0.0 tag, so v4 comparisons
-use the prior worktree/design and documented field evidence; they are not independently
-reproducible from a release tag.
+The tagged source trees were extracted without changing the working tree and their own
+test suites were run successfully.
 
-Approximate active-source shape:
+| Version | Repository runtime files/lines | Test result | Startup architecture |
+| --- | ---: | ---: | --- |
+| v3.0.0 | 32 / 16,472 | 189 pass | preflight approval, full case/tag inventory, fixed layer scaffolds, results plus session ledger |
+| v3.1.0 | 41 / 21,712 | 255 pass | all-event frozen coverage, normalized results, Preview/session ledger, staged operator closure |
+| v5.0.0 | 28 / 10,164 | 76 pass | vertical workflow, but incomplete direct workbook/API Call/cross-layer handling |
+| v5.1.0 | 28 / 11,512 | 88 pass | vertical workflow with corrected intake and evidence contracts |
 
-| Version | SKILL lines | References | Runtime/repository scripts | Public parser routes | Approx. active lines |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| v3.0.0 | 408 | 23 / 4,054 lines | 32 / 17,596 lines | 36 | 22,058 |
-| v3.1.0 | 266 | 8 / 485 lines | 41 / 23,187 lines | 42 | 23,938 |
-| v3.2.0 | 275 | 8 / 516 lines | 41 / 23,946 lines | 42 | 24,737 |
-| v5.0.0 | 157 | 4 / 368 lines | 25 runtime files / 10,689 lines | 9 | 11,214 |
+The v5.1 runtime is about 30% smaller than v3.0 and 47% smaller than v3.1 by this
+repository-level line count. Its increase over v5.0 is concentrated in general workbook
+intake, action-local correlation, and per-field cross-surface judgement. No extra public
+command, ledger, browser implementation, service, or dependency was added.
 
-The current runtime figure excludes three repository-only package/release validators.
-Line count is not used as a speed claim; it is evidence that removed ledgers/routes did
-not survive under new names.
+## Controlled latency
 
-## Latency evidence
+| Measure | v5.1 result | Interpretation |
+| --- | ---: | --- |
+| 100 events / 2,000 requirements compile | 63.2 ms median; 66.8 ms max, five runs | Plan size creates no future cases or evidence. |
+| Synthetic init-to-canonical-feedback | 219.9 ms median; 222.6 ms max, ten runs | Deterministic replay and output are not a minutes-long bottleneck. |
+| Direct representative multi-sheet workbook intake | 2.77 s median, three runs | The unmodified supported layout compiles directly. |
+| Same workbook start to first provisional inspected-layer pulse | 2.88 s, one controlled run | Includes intake, begin, commit, 79 current-event claims, and layer pulse; excludes real browser UI time. |
+| Three-event cluster | Under five-second test budget with one capability capture, one binding, and one Preview batch | Shared collection and targeted batching remain intact. |
 
-| Measure | Historical evidence | v5 controlled result | Interpretation |
-| --- | --- | ---: | --- |
-| Live time to first inspection | v3.1/v3.2/v4 field reports include 20+ minutes without inspection and one multi-attempt run lasting hours without first event feedback | Not measurable in the existing browser because its bridge was unavailable | Real acceptance remains blocked; no synthetic substitution. |
-| CLI cold `--help` | Not a useful historical live metric | median 316.0 ms; min 310.6; max 327.0 (10 processes) | Import/CLI overhead is small but not the primary speed claim. |
-| Compile 100 events / 2,000 requirements | Later versions could front-load per-event artifacts | median 63.6 ms; max 66.0 ms (5 local runs) | Plan size does not create runtime cases or evidence before action. |
-| Cold local init-to-first canonical feedback | Older fixture results are not directly comparable across architectures | median 215.4 ms; max 218.6 ms (10 synthetic runs) | Deterministic core is not the bottleneck. Browser/Preview cost remains to be proven. |
-| Three-event cluster | Later versions repeated setup and staged validation | controlled contract passes with one capability capture, one binding capture and one Preview batch, under its five-second local budget | Sharing is implemented; visible-browser behavior remains the acceptance gate. |
-| Full deterministic suite | Not comparable because test contracts changed | 76 tests in about 15.5 s | Broad local regression coverage, not live-site proof. |
+The tagged v5.0 compiler rejected that supported two-block workbook layout after about
+2.8 seconds. v5.1 accepts it directly; no custom normalizer or event-count-specific
+branch is involved.
 
-## Downgrade matrix
+## v5 field-feedback problems and general resolutions
 
-| Capability | v5 result | Downgrade assessment |
+| Observed class | General resolution | Patch/overengineering review |
 | --- | --- | --- |
-| Plan order, source provenance and malformed rows | Preserved with source coordinates, tabular row accounting, safe contiguous fill-down, hard failure for orphan/ambiguous rows and event-local predicate errors | Improved: requirements cannot disappear silently and a later malformed predicate cannot block the first valid event. |
-| Strict types and value states | Missing, null, empty, boolean, number/integer and strings remain distinct | No downgrade. |
-| Raw dataLayer/API proof | Document-start call-time or declared direct source is required | No laundering downgrade; unavailable raw capture blocks only dependent source claims. |
-| Complete unplanned stream | Every captured push/argument and state update is retained across and between actions | No downgrade; explicit interjection and contamination tests pass. |
-| GTM event, variables and tags | Preview identity, event occurrence, full fired/relevant-not-fired inventory, configuration, firing count and runtime values are separate rows | No downgrade from collapsing six domains; operational detail remains. |
-| Static configuration reuse | Reused only with exact container and workspace identity | Speed gain with no action-time cache. Identity change blocks reuse. |
-| Browser delivery | Runtime parameter, logical vendor hit, destination, tag identity, request parameters, retry/redirect and outcome are independent | No downgrade; GA4 batches/items and Ads sends are decoded. |
-| Several tags or destinations | Tag/destination identity is explicit and one request cannot silently certify unrelated tags | No downgrade. |
-| Dead/soft-404 and failed actions | Reality independently controls overall result | Improved over coherent-tag false pass. |
-| Cart/product/ecommerce truth | Visible item, cart membership/count/delta, order items, transaction, currency and anchored value are checked | Improved over coherent-empty false pass. |
-| Media behavior | Player state, progress, identity, completion and declared visibility are independent anchors | Improved; missing player truth blocks rather than guessing. |
-| Duplicate/missing/weird chronology | Duplicate, absent, unexpected, premature/delayed, interstitial state and repeated purchase are first-class findings | No downgrade; later events may amend earlier feedback. |
-| Languages and finite enums | Every reachable manageable material value is required and expected values remain scenario-local | No downgrade. `en` and `fr` can each pass in their own context. |
-| Shipping/payment dependencies | Reachable country/state-dependent combinations are required | No downgrade; no irrelevant global Cartesian matrix. |
-| Hundreds of products/content | Behavior-signature representatives plus ordinary/contrast/boundary/exception expansion | No brute-force downgrade and no arbitrary sample cap. |
-| Live values omitted by plan | Recorded as plan gaps and tested when material | Improved over plan-only coverage. |
-| Consent | Typed event-time Preview/transition/tag-requirement evidence | Improved over keyword activation; denied sends fail and override-only proof blocks. |
-| Acquisition/SEO-sensitive tracking | Natural or labelled controlled referral/fresh context supported | Improved; scope limits remain honest. |
-| Forms/CAPTCHA/auth/payment | Ordinary synthetic forms are tested; protected or consequential gates use exact-lineage handoff | No safety downgrade and no unauthenticated replacement window. |
-| Privacy and report safety | Pre-persistence redaction/quarantine, screenshot review and formula-safe output retained | No downgrade. |
-| Per-event feedback | Scenario/domain summary plus each operational target/status/reason/check-next/evidence | Improved actionability without adding capture work. |
-| Final output | Frozen canonical JSON, Markdown, XLSX and focused sidecars | No alternate report authority or premature finalization. |
+| Raw workbook required custom normalization | Recognize the common event-metadata plus variable-table structure, typed headers, stop markers, and code examples in the single compiler. | Necessary intake fix; no client names, sheet counts, or paths. |
+| Code examples became requirements | Reject code/script-shaped field paths and stop at explicit code/image sections. | Necessary false-requirement prevention. |
+| A source-only message acquired a vendor delivery expectation | Separate source event, state-only mode, forwarding requirement, and delivery event identity. | Necessary semantic model correction. |
+| Data Layer tab was treated as the API Call | Only call-time recorder or complete expanded API Call is source authority; accumulated state remains a separate GTM row. | Necessary non-substitution rule. |
+| One tag field could appear coherent against a much wider plan | Project every destination-applicable plan field to state, Variables, effective mapping, runtime, and request; fail each absent field when complete. | Necessary acceptance baseline; no count heuristic. |
+| Missing concerned-tag details were not exposed | Require complete fired/relevant-not-fired inventory and targeted tag details for current plan fields. | Necessary; scoped deep reads avoid global scans. |
+| Evidence completeness leaked between actions | Bind source, Preview, and network completeness to each action. | Necessary false-pass/false-fail prevention. |
+| A normal reload caused a document conflict | Exclude only the old before-page from occurrence identity after an explicit new-document rebind. | Narrow general fix; mixed post-action documents still block. |
+| API fallback lost weird events | Feed authoritative expanded API Calls into the same continuous anomaly stream. | Necessary quality preservation. |
+| Coverage stayed closed after another action | Require all executed actions in the latest coverage decision and reopen on new work. | Necessary stale-coverage prevention. |
+| Immediate output hid layer state | Commit emits provisional domain statuses/counts; final event feedback includes every applicable operational row. | Output-only reuse of existing evidence; no browser cost. |
+| Retries duplicated stream state | Exact commit replay returns the existing capture/commit/pulse records; changed replay is rejected. | Necessary recovery fix without another ledger. |
 
-## Bugs found and corrected during implementation audit
+## Capability downgrade matrix
 
-1. `state == absent` could not pass because generic missing-value handling ran first.
-   Predicate dispatch was corrected and regression-tested.
-2. Missing expected static tag configuration was classified as mismatch `FAIL` before
-   checking extraction completeness. It now becomes `BLOCKED`; an observed different
-   configuration remains `FAIL`.
-3. Static configuration was re-read per event. Exact container/workspace reuse was added
-   for configuration only, with identity-change and conflict blocking.
-4. The initial business evaluator lacked explicit cart/order item continuity,
-   transaction/currency/anchored-value checks, media-player relations and repeated
-   transaction detection. These are now general event-family checks with executable
-   regressions.
-5. The final telemetry omitted the browser operations that explain field delays.
-   Optional counters now reuse health captures without creating another ledger.
-6. Tabular intake skipped non-empty requirement rows when an XLSX/CSV event identity was
-   visually merged or filled down. The compiler now carries identity only inside a
-   contiguous table, reports row accounting, and fails on orphan/ambiguous rows before
-   browser work.
+| Capability | v5.1 result |
+| --- | --- |
+| Plan order/provenance/types | Preserved; intake is more direct and loss-aware. |
+| Call-time source versus accumulated state | Improved separation; no source laundering. |
+| GTM event, Variables, tags, mapping, runtime | Preserved as distinct rows and expanded per planned field. |
+| Browser delivery and destination | Preserved; GA4 batches/items and Ads identity are corrected. |
+| Missing/duplicate/interjected chronology | Preserved across actions and through API Call fallback. |
+| Dead page and business incoherence | Preserved as independent overall failures. |
+| Languages and finite values | Preserved; values are strict inside their selected scenarios. |
+| Shipping/payment dependencies | Preserved through reachable dependent combinations. |
+| High-cardinality products/content | Preserved through behavior-signature representatives and adaptive expansion. |
+| Plan-omitted live values | Preserved as visible gaps that expand coverage when material. |
+| Forms, consent, acquisition, CAPTCHA/auth/payment | Preserved; ordinary journeys run and protected gates use same-session handoff. |
+| Privacy and report safety | Preserved; central redaction and formula-safe output remain. Runtime screenshot persistence was removed because it had no caller. |
+| Per-event feedback | Strengthened: scenario plus every applicable layer/check, status, expected, observed, reason, check-next, and evidence. |
+| Final output | Preserved as one frozen canonical JSON/Markdown/XLSX/CSV projection. |
 
-None of these fixes contains a client URL, container/destination ID, client-specific
-workbook layout, selector, run path or prior-run evidence.
+## Regression risks reviewed
 
-## Stress-test result
+- **More claims per field:** required to expose missing mapping/runtime/request values;
+  they reuse one action and one Preview read and therefore add deterministic comparisons,
+  not browser interactions.
+- **API Call fallback:** accepted only when fully expanded and complete; partial panels
+  block rather than pass.
+- **Preview batching:** retained only while action/document/event/tag attribution is
+  unambiguous; navigation or anomaly triggers an earlier sync.
+- **Navigation tolerance:** applies only to the before-page after an explicit rebind;
+  foreign post-action evidence is still blocked.
+- **Dynamic scenarios:** no arbitrary cap or full Cartesian product was introduced.
+- **Static cache:** configuration only; runtime, occurrence, consent, requests, and page
+  outcomes remain action-specific.
+- **Later anomaly revisions:** earlier event feedback may be amended, preserving the
+  continuous-session truth rather than freezing an incorrect pass.
 
-The research catalogue contains 978 unique design-space scenarios. It is a saturation
-catalogue, not 978 executed browser tests. Claiming otherwise would repeat the earlier
-fixture-confidence error.
+## Release conclusion
 
-The implementation suite executes 76 generalized tests covering:
-
-- all 13 orthogonal taxonomy dimensions;
-- all 12 mutation operators through the mutation contract and focused cases;
-- all 32 generalized failed-run cases through a complete contract crosswalk;
-- compiler/tabular-intake/predicate, occurrence/correlation, identity/confidence, privacy/integrity,
-  finite/dependent/high-cardinality coverage, typed consent/acquisition, business
-  reality, weird chronology, reports/freeze and workflow/startup contracts;
-- one controlled three-event sharing test and one real Playwright Chromium helper suite
-  for recorder/census behavior and observer non-interference.
-
-Browser-UI-only catalogue items remain skill instructions plus mandatory real-pilot
-gates. They are not marked passed by local mocks.
-
-## Risk matrix
-
-| Risk | Level | Evidence and disposition |
-| --- | --- | --- |
-| Compiler drops rows/rules/allowed values/types | Low | Shared predicate registry, merged/fill-down fixtures, source coordinates, row accounting, orphan hard-fail and event-local error tests pass. |
-| Speed optimization skips GTM or request inspection | Low locally | Source/GTM/runtime/request non-substitution and partial-evidence tests pass. Real extraction still needs the pilot. |
-| Preview batching causes wrong attribution | Low locally | Document/action/epoch tests and one-cluster batch pass; ambiguity requires early sync. |
-| Static reuse leaks stale dynamic values | Low | Only configuration is reused under exact identity; current runtime/consent/firing/request remain uncached. |
-| Weird events or coherent business errors pass | Low locally | Interjection, duplicate, cart, checkout, purchase and media tests pass. |
-| High-cardinality sampling misses a new signature | Medium | Coverage must reopen on new signatures/anomalies; sampling cannot mathematically prove an unknown population. |
-| Very long real stream replay becomes material | Medium-low | No evidence in current profiles; add an index only after measurement, not pre-emptively. |
-| Existing-browser attachment/Preview extraction stalls | High until tested | Actual bridge unavailable here; first-three-event pilot is mandatory and blocked. |
-| Agent ignores the workflow | Medium | Renderer-owned status and one command model reduce bypasses, but cannot force an unconstrained external agent. Weak-agent live testing remains required. |
-
-## Recommendation
-
-Do not add a generic “slow but safe” fallback. It would restore the machinery that
-caused the delay. If a surface is unavailable, block only its dependent claims within a
-bounded attempt and continue independent checks.
-
-The redesign is technically suitable for this personal v5.0.0 release. Before treating
-it as live-deployment accepted, restore the existing-browser bridge and run the
-authorized real first-three-event pilot. Accept the live workflow only if the first event
-meets the controlled time envelope, the second and third reuse setup/static facts, all
-applicable operational rows remain visible, and there is no ad hoc repair loop.
+v5.1 is a quality-preserving correction and is safer than v5.0 for deployment. It does
+not need a generic “slow but safe” mode: complex funnels already activate the same proof
+rules and more scenarios when evidence requires them. Run a fresh live pilot and reject
+the deployment only if measured browser attachment, Preview extraction, or first-event
+feedback still performs global setup, opens replacement tabs, or stalls indefinitely.

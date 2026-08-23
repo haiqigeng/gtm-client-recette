@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import shutil
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -18,7 +17,7 @@ from client_side_rules import (
 from decode_browser_requests import decode_requests
 from value_semantics import json_value_type, parse_iso_timestamp
 
-from .constants import CAPTURE_KINDS, MACHINE_RECORD_KINDS, OPERATION_COUNTERS, utc_now
+from .constants import CAPTURE_KINDS, MACHINE_RECORD_KINDS, OPERATION_COUNTERS
 from .state import (
     RunPaths,
     StateError,
@@ -29,8 +28,6 @@ from .state import (
     load_plan,
 )
 
-MAX_CAPTURE_BYTES = 64 * 1024 * 1024
-EXECUTABLE_SUFFIXES = {".py", ".js", ".mjs", ".cjs", ".ps1", ".bat", ".cmd", ".exe"}
 TECHNICAL_EVENTS = {
     "gtm.js",
     "gtm.dom",
@@ -213,33 +210,6 @@ def _write_json_evidence(
     return reference, findings, safe
 
 
-def _write_screenshot(
-    run_dir: Path | str,
-    source: Path,
-    *,
-    privacy_reviewed: bool,
-) -> dict[str, Any]:
-    if not privacy_reviewed:
-        raise StateError("Screenshot capture requires an explicit privacy-reviewed/cropped flag.")
-    if not source.is_file():
-        raise StateError(f"Screenshot does not exist: {source}")
-    if source.stat().st_size > MAX_CAPTURE_BYTES:
-        raise StateError("Screenshot exceeds the capture size limit.")
-    paths = initialize_paths(run_dir)
-    digest = file_digest(source)
-    suffix = source.suffix.lower() if source.suffix else ".bin"
-    target = paths.evidence / _safe_artifact_name("screenshot", digest, suffix)
-    if not target.exists():
-        shutil.copyfile(source, target)
-    return {
-        "path": str(target.relative_to(paths.root)).replace("\\", "/"),
-        "sha256": digest,
-        "quarantined": False,
-        "privacy_reviewed": True,
-        "media_type": suffix.lstrip("."),
-    }
-
-
 def load_evidence(run_dir: Path | str, reference: dict[str, Any]) -> Any:
     paths = RunPaths.at(run_dir)
     relative = str(reference.get("path") or "")
@@ -337,6 +307,7 @@ def _normalize_datalayer(value: Any, run_id: str) -> tuple[dict[str, Any], dict[
         "latest_call_index": max(seen) if seen else None,
         "recorder_integrity": value.get("integrity", []),
         "capture_mode": capture_mode,
+        "action_id": value.get("action_id"),
         "document_start": value.get(
             "installedAtDocumentStart", value.get("installed_at_document_start")
         )
@@ -361,6 +332,7 @@ def _normalize_network(value: Any) -> tuple[dict[str, Any], dict[str, Any]]:
             "tab_id",
             "document_id",
             "frame_id",
+            "action_id",
             "collection_mode",
             "parameter_capture_complete",
             "body_capture_complete",
@@ -380,6 +352,22 @@ def _normalize_source(value: Any) -> tuple[dict[str, Any], dict[str, Any]]:
         raise StateError("Direct-source capture must contain a signals array.")
     identities: set[str] = set()
     summary = []
+    normalized_signals = []
+    top_mode = str(value.get("capture_mode") or "").strip().casefold()
+    forbidden_mechanisms = {
+        "tag_assistant_message",
+        "tag_assistant_data_layer",
+        "preview_data_layer",
+        "data_layer_state",
+        "post_processed_state",
+    }
+    known_call_time = {
+        "data_layer_push",
+        "data_layer_api_call",
+        "gtag_call",
+        "direct_api_call",
+        "vendor_queue_call",
+    }
     for position, signal in enumerate(value["signals"], start=1):
         if not isinstance(signal, dict):
             raise StateError(f"Direct-source signal {position} is not an object.")
@@ -387,28 +375,81 @@ def _normalize_source(value: Any) -> tuple[dict[str, Any], dict[str, Any]]:
         if identity in identities:
             raise StateError("Direct-source signal IDs must be unique within a capture.")
         identities.add(identity)
-        mechanism = str(signal.get("mechanism") or "").strip()
+        mechanism = str(signal.get("mechanism") or "").strip().casefold()
         event_name = str(signal.get("event_name") or signal.get("name") or "").strip()
-        if not mechanism or not event_name:
-            raise StateError("Every direct-source signal needs a mechanism and event_name.")
+        if not mechanism:
+            raise StateError("Every direct-source signal needs a mechanism.")
+        if mechanism in forbidden_mechanisms:
+            raise StateError(
+                "Accumulated Tag Assistant/Data Layer state is not direct-source evidence; "
+                "capture it as preview.data_layer_state."
+            )
+        mode = str(signal.get("capture_mode") or top_mode).strip().casefold()
+        if not mode:
+            mode = "call_time" if mechanism in known_call_time else ""
+        if mode not in {"call_time", "preview_api_call"}:
+            raise StateError("Direct-source capture_mode must be call_time or preview_api_call.")
+        if (
+            mode == "call_time"
+            and mechanism not in known_call_time
+            and signal.get("call_time_proven") is not True
+        ):
+            raise StateError(
+                f"Direct-source mechanism {mechanism!r} needs explicit call_time_proven=true."
+            )
+        if mode == "preview_api_call":
+            if mechanism != "tag_assistant_api_call":
+                raise StateError(
+                    "preview_api_call source evidence must use mechanism=tag_assistant_api_call."
+                )
+            if signal.get("api_call_complete") is not True:
+                raise StateError(
+                    "Tag Assistant API Call evidence must be fully expanded and complete."
+                )
+            if signal.get("preview_event_index") is None or not signal.get("preview_epoch"):
+                raise StateError(
+                    "Tag Assistant API Call evidence needs Preview event index and epoch identity."
+                )
+        if not event_name and signal.get("state_only") is not True:
+            raise StateError(
+                "A direct-source signal needs event_name unless it is explicitly state_only."
+            )
         timestamp = signal.get("timestamp", signal.get("observed_at"))
         if timestamp is not None and parse_iso_timestamp(timestamp) is None:
             raise StateError(f"Direct-source signal {identity} has an invalid timestamp.")
         if "payload" not in signal and "value" not in signal:
             raise StateError(f"Direct-source signal {identity} needs payload or value evidence.")
+        normalized_signal = {
+            **signal,
+            "signal_id": identity,
+            "mechanism": mechanism,
+            "event_name": event_name or None,
+            "capture_mode": mode,
+            "authoritative": True,
+        }
+        normalized_signals.append(normalized_signal)
         summary.append(
             {
                 "signal_id": identity,
                 "mechanism": mechanism,
-                "event_name": event_name,
+                "event_name": event_name or None,
+                "capture_mode": mode,
+                "authoritative": True,
                 "timestamp": timestamp,
                 "action_id": signal.get("action_id"),
             }
         )
-    return value, {
+    window_complete = value.get("complete") is True and (
+        all(signal.get("capture_mode") == "call_time" for signal in normalized_signals)
+        or value.get("event_list_complete") is True
+    )
+    normalized = {**value, "signals": normalized_signals}
+    return normalized, {
         "signal_count": len(summary),
         "signals": summary,
         "complete": value.get("complete") is True,
+        "authoritative_complete": window_complete,
+        "action_id": value.get("action_id"),
     }
 
 
@@ -433,6 +474,17 @@ def _normalize_preview(value: Any) -> tuple[dict[str, Any], dict[str, Any]]:
         not_fired = event.get("not_fired_tags", [])
         if not isinstance(fired, list) or not isinstance(not_fired, list):
             raise StateError("Preview tag summaries must be arrays.")
+        api_call = event.get("api_call")
+        if api_call is not None:
+            if not isinstance(api_call, dict) or not isinstance(api_call.get("arguments"), list):
+                raise StateError(
+                    "Preview api_call must contain the fully expanded API Call arguments array."
+                )
+            if api_call.get("complete") is not True:
+                raise StateError("Preview api_call evidence must be explicitly complete.")
+        data_layer_state = event.get("data_layer_state")
+        if data_layer_state is not None and not isinstance(data_layer_state, dict):
+            raise StateError("Preview data_layer_state must be the accumulated state object.")
         summary.append(
             {
                 "epoch": str(epoch),
@@ -446,6 +498,8 @@ def _normalize_preview(value: Any) -> tuple[dict[str, Any], dict[str, Any]]:
                 "not_fired_tag_count": len(not_fired),
                 "full_tag_summary": event.get("full_tag_summary") is True,
                 "has_resolved_state": isinstance(event.get("resolved_state"), dict),
+                "has_data_layer_state": isinstance(data_layer_state, dict),
+                "has_api_call": isinstance(api_call, dict),
                 "has_runtime_extract": isinstance(event.get("tags"), list),
                 "history_stable": event.get("history_stable") is True,
                 "bookmarked": event.get("bookmarked") is True,
@@ -456,6 +510,7 @@ def _normalize_preview(value: Any) -> tuple[dict[str, Any], dict[str, Any]]:
         "event_count": len(summary),
         "events": summary,
         "complete": value.get("complete") is True,
+        "action_id": value.get("action_id"),
         "preview_session_id": value.get("preview_session_id"),
         "container_ids": value.get("container_ids", []),
         "workspace_version": value.get("workspace_version"),
@@ -660,7 +715,7 @@ def capture_value(
     source_id: str | None = None,
     quarantine: bool = False,
 ) -> dict[str, Any]:
-    if adapter not in CAPTURE_KINDS or adapter == "screenshot":
+    if adapter not in CAPTURE_KINDS:
         raise StateError(f"Unsupported JSON capture adapter: {adapter}")
     plan = load_plan(run_dir)
     if isinstance(value, dict) and value.get("run_id") not in (None, plan["run_id"]):
@@ -674,7 +729,6 @@ def capture_value(
     safe_digest = reference["sha256"]
     record_data = {
         "adapter": adapter,
-        "captured_at": utc_now(),
         "evidence_ref": reference,
         "summary": summary if safe is not None else {"quarantined": True},
         "privacy_findings": findings,
@@ -685,32 +739,6 @@ def capture_value(
         CAPTURE_KINDS[adapter],
         record_data,
         idempotency_key=f"capture:{adapter}:{key}",
-    )
-
-
-def capture_screenshot(
-    run_dir: Path | str,
-    source: Path | str,
-    *,
-    privacy_reviewed: bool,
-    metadata: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    load_plan(run_dir)
-    reference = _write_screenshot(
-        run_dir, Path(source).expanduser().resolve(), privacy_reviewed=privacy_reviewed
-    )
-    data = {
-        "adapter": "screenshot",
-        "captured_at": utc_now(),
-        "evidence_ref": reference,
-        "summary": metadata or {},
-        "privacy_findings": [],
-    }
-    return _append_machine(
-        run_dir,
-        "CAPTURE_SCREENSHOT",
-        data,
-        idempotency_key=f"capture:screenshot:{reference['sha256']}",
     )
 
 
@@ -781,45 +809,6 @@ def capture_bundle_value(
         for name in supported
         if name in value
     ]
-
-
-def capture_file(
-    run_dir: Path | str,
-    adapter: str,
-    source: Path | str,
-    *,
-    quarantine: bool = False,
-    required_adapters: set[str] | None = None,
-) -> list[dict[str, Any]]:
-    path = Path(source).expanduser().resolve()
-    if not path.is_file() or path.stat().st_size > MAX_CAPTURE_BYTES:
-        raise StateError("Capture input is missing or exceeds the 64 MiB safety limit.")
-    if path.suffix.lower() in EXECUTABLE_SUFFIXES:
-        raise StateError("Executable files are not valid capture inputs.")
-    if adapter == "screenshot":
-        raise StateError("Use the screenshot adapter with privacy-reviewed metadata.")
-    try:
-        value = json.loads(path.read_text(encoding="utf-8-sig"))
-    except (OSError, json.JSONDecodeError) as error:
-        raise StateError(f"Cannot read capture JSON: {error}") from error
-    if adapter != "bundle":
-        return [
-            capture_value(
-                run_dir,
-                adapter,
-                value,
-                source_id=file_digest(path),
-                quarantine=quarantine,
-            )
-        ]
-    if quarantine:
-        raise StateError("A bundle cannot be quarantined as one opaque payload.")
-    return capture_bundle_value(
-        run_dir,
-        value,
-        source_id=file_digest(path),
-        required_adapters=required_adapters,
-    )
 
 
 def verify_evidence_references(run_dir: Path | str, records: list[dict[str, Any]]) -> list[str]:

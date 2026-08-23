@@ -17,10 +17,3 @@ def ensure_distinct_output(output: Path, *inputs: Path, label: str = "output") -
     for source in inputs:
         if target == resolved(source):
             raise ValueError(f"{label} must not overwrite input file {source}")
-
-
-def ensure_distinct_paths(*paths: Path) -> None:
-    """Reject duplicate paths in a set of independently written artifacts."""
-    normalized = [resolved(path) for path in paths]
-    if len(set(normalized)) != len(normalized):
-        raise ValueError("artifact paths must resolve to distinct files")

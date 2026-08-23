@@ -4,7 +4,7 @@
 [![CI](https://github.com/haiqigeng/gtm-client-recette/actions/workflows/ci.yml/badge.svg)](https://github.com/haiqigeng/gtm-client-recette/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Repository version: **v5.0.0**.
+Repository version: **v5.1.0**.
 
 GTM Client Recette is a personal expert skill for client-side GTM Preview acceptance
 testing. It follows an existing tracking plan or explicit rules, operates in the user's
@@ -21,7 +21,8 @@ delay the first inspection for many minutes. Version 5 is a zero-based architect
 
 - the unit of work is a typed measurement claim in a material scenario;
 - one staged compiler and one canonical occurrence/evidence model;
-- continuous call-time dataLayer and browser-network deltas;
+- continuous call-time dataLayer and browser-network deltas, with fully expanded Tag
+  Assistant API Call as a source fallback;
 - one vertical browser action can satisfy several applicable claims;
 - Preview is synchronized in safe micro-batches, with selective deep reads;
 - finite and dependent live values are discovered just in time;
@@ -44,16 +45,17 @@ Applicable proof is grouped into six diagnostic domains:
 5. surrounding behavior;
 6. data safety.
 
-Evidence confidence and scenario completeness are closure gates. These are not eight
-mandatory browser stages. A state-only dataLayer update may need source, reality and
-behavior proof but no invented GA4 request; an ordinary GA4 event can automatically
-check one parameter across source, resolved GTM state, tag runtime and decoded request
-from the same captured action.
+Evidence confidence and scenario completeness are closure gates. These are not serial
+browser stages. A source-only/state-only update does not receive invented delivery
+requirements. When a state-only core block explicitly feeds `page_view`, or for an
+ordinary GA4 event, each destination-applicable planned field is checked independently
+against call-time source, Tag Assistant Data Layer state, Variables, effective tag
+mapping, tag runtime and the decoded browser request from the same action.
 
-Operational detail remains visible per target: DataLayer API, GTM Preview event and
-variable, named tag configuration/firing/runtime, browser request/destination, business
-anchor, anomaly, safety and gate. This keeps feedback actionable without restoring a
-fixed nine- or nineteen-layer workflow.
+Operational detail remains visible per target: DataLayer/API Call, accumulated GTM Data
+Layer state, GTM Preview event and Variables, fired/not-fired inventory, named tag
+configuration/effective mapping/firing/runtime, browser request/destination, business
+anchor, anomaly, safety and gate. The Data Layer tab never substitutes for an API Call.
 
 ## Minimal CLI
 
@@ -74,11 +76,12 @@ append, provenance override, layer setter or verdict setter.
 ## Tracking-plan intake
 
 JSON, YAML, CSV/TSV, XLSX and the supported GA4 tracking-plan handoff compile through one
-predicate vocabulary shared with runtime judgement. Tabular intake preserves source
-coordinates, allowed values, JSON types, tag/destination scope and contiguous
-merged/fill-down event rows. It reports rows seen, compiled, inherited and intentionally
-ignored. An orphan or ambiguous requirement fails immediately; an unsupported rule is
-localized to its event so a malformed later event cannot block the first valid event.
+predicate vocabulary shared with runtime judgement. XLSX intake supports ordinary flat
+tables and common sheets with an event-metadata block followed by a variable table;
+JavaScript examples are excluded. Intake preserves source coordinates, allowed values,
+JSON types, tag/destination scope and contiguous merged/fill-down rows, and reports what
+was compiled or ignored. An orphan/ambiguous requirement fails immediately; an
+unsupported later-event rule is localized so the first valid event can start.
 
 ## Scenario behavior
 
@@ -97,10 +100,11 @@ the selected product/cart identity remains strict.
 
 ## Outputs
 
-Each completed event receives a scenario/domain summary followed by operational rows
-with status, simple expected/observed detail, exact `Check next` target and stable
-evidence references. The final output includes a plan-ordered conclusion, JSON, Markdown,
-validated XLSX, defect/retest views and telemetry.
+Each completed event must receive a scenario/domain summary followed by one status row
+for every applicable operational layer, with simple expected/observed detail, exact
+`Check next` target and stable evidence references. Every differing value and every
+`FAIL`, `BLOCKED` or `REVIEW` remains visible. The final output includes a plan-ordered
+conclusion, JSON, Markdown, validated XLSX, defect/retest views and telemetry.
 
 Canonical statuses are `PASS`, `FAIL`, `BLOCKED`, `REVIEW`, `NOT_APPLICABLE` and
 `PENDING`; user-facing reports map pass/fail to OK/KO. The renderer—not the conversational
@@ -120,14 +124,13 @@ python -m ruff check --no-cache scripts tests
 python -m ruff format --check scripts tests
 python -m unittest discover -s tests -v
 python -B tests/run_browser_helpers.py
-python -B scripts/check_release.py --tag v5.0.0
+python -B scripts/check_release.py --tag v5.1.0
 ```
 
-The controlled harness covers the generalized stress catalogue through executable
-contracts and representative metamorphic mutations; it does not claim 978 independent
-browser executions. Existing-browser speed and Tag Assistant extraction remain an
-explicit deployment acceptance item because the local control bridge was unavailable
-during release validation; no synthetic test is presented as that live pilot.
+The controlled harness covers generalized compiler, evidence-authority, cross-layer,
+scenario, anomaly, identity, protocol, output and startup contracts. Controlled timings
+are diagnostic only; a clean run in the owner's already-open browser remains the live
+acceptance test, and no local fixture is presented as that pilot.
 
 See the [design conformance](docs/v5-design-conformance.md),
 [regression and downgrade audit](docs/v5-regression-downgrade-audit.md), and

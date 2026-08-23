@@ -72,23 +72,6 @@ def _status_text(status: str) -> str:
     return f"{status_label(status)} ({status})" if status in {"PASS", "FAIL"} else status
 
 
-def render_action_pulse(value: dict[str, Any]) -> str:
-    defects = value.get("immediate_defects", {})
-    lines = [
-        f"Action: {value.get('action_id')}",
-        "Observed: " + (", ".join(value.get("observed_events", [])) or "no named event yet"),
-        "Immediate defects: "
-        + (
-            "; ".join(
-                f"{key}={', '.join(map(str, items))}" for key, items in defects.items() if items
-            )
-            or "none from current deltas"
-        ),
-        "Awaiting: " + ", ".join(value.get("awaiting", [])),
-    ]
-    return "\n".join(lines) + "\n"
-
-
 def render_event_feedback(result: dict[str, Any], *, compact: bool = False) -> str:
     lines = [
         f"Event: {result.get('event_name') or result.get('event_id')} - {_status_text(result['status'])}",
@@ -139,8 +122,8 @@ def render_event_feedback(result: dict[str, Any], *, compact: bool = False) -> s
         return "\n".join(lines).rstrip() + "\n"
     lines.extend(
         [
-            "| Inspection target | Domain | Status | Observed | Expected | Check next | Evidence |",
-            "|---|---|---|---|---|---|---|",
+            "| Scenario | Inspection target | Domain | Status | Observed | Expected | Reason | Check next | Evidence |",
+            "|---|---|---|---|---|---|---|---|---|",
         ]
     )
     for row in result.get("inspections", []):
@@ -149,11 +132,13 @@ def render_event_feedback(result: dict[str, Any], *, compact: bool = False) -> s
             + " | ".join(
                 markdown_safe(value)
                 for value in (
+                    row.get("scenario_label") or row.get("scenario_id") or "ordinary",
                     row.get("inspection_target"),
                     DOMAIN_LABELS.get(str(row.get("domain")), row.get("domain")),
                     row.get("status"),
                     row.get("observed"),
                     row.get("expected"),
+                    row.get("reason"),
                     row.get("check_next") or "-",
                     ", ".join(row.get("evidence", [])) or "-",
                 )
@@ -246,17 +231,36 @@ def telemetry_view(plan: dict[str, Any], records: list[dict[str, Any]]) -> dict[
     def elapsed(end: Any) -> float | None:
         return round((end - created).total_seconds(), 3) if created and end else None
 
-    operations = {key: 0 for key in OPERATION_COUNTERS}
+    operations: dict[str, int | None] = {key: None for key in OPERATION_COUNTERS}
+    preview_events_observed = 0
+    network_requests_observed = 0
+    preview_deep_read_captures_observed = 0
     for record in records:
+        summary = record.get("data", {}).get("summary", {})
+        if record.get("kind") == "CAPTURE_PREVIEW" and isinstance(summary, dict):
+            preview_events_observed += int(summary.get("event_count") or 0)
+            events = summary.get("events", [])
+            if isinstance(events, list) and any(
+                isinstance(event, dict)
+                and (
+                    event.get("has_runtime_extract") is True
+                    or event.get("has_data_layer_state") is True
+                    or event.get("has_api_call") is True
+                )
+                for event in events
+            ):
+                preview_deep_read_captures_observed += 1
+        if record.get("kind") == "CAPTURE_NETWORK" and isinstance(summary, dict):
+            network_requests_observed += int(summary.get("request_count") or 0)
         if record.get("kind") != "CAPTURE_HEALTH":
             continue
-        observed = record.get("data", {}).get("summary", {}).get("operations", {})
+        observed = summary.get("operations", {}) if isinstance(summary, dict) else {}
         if not isinstance(observed, dict):
             continue
         for key in OPERATION_COUNTERS:
-            value = observed.get(key, 0)
+            value = observed.get(key)
             if isinstance(value, int) and not isinstance(value, bool):
-                operations[key] += value
+                operations[key] = (operations[key] or 0) + value
 
     return {
         "first_action_seconds": elapsed(first_action),
@@ -270,6 +274,10 @@ def telemetry_view(plan: dict[str, Any], records: list[dict[str, Any]]) -> dict[
         "pulses": kinds["ACTION_PULSE"],
         "feedbacks": kinds["EVENT_FEEDBACK_ISSUED"],
         "stream_records": len(records),
+        "operation_counters_instrumented": any(value is not None for value in operations.values()),
+        "preview_events_observed": preview_events_observed,
+        "preview_deep_read_captures_observed": preview_deep_read_captures_observed,
+        "network_requests_observed": network_requests_observed,
         **operations,
     }
 

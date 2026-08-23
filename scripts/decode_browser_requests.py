@@ -137,6 +137,24 @@ def _safe_url(parsed: Any, query: dict[str, Any]) -> str:
     )
 
 
+def _protocol_metadata(parsed: Any) -> dict[str, Any]:
+    """Extract non-personal vendor routing IDs before generic privacy redaction."""
+    host = (parsed.hostname or "").casefold()
+    path = parsed.path.casefold()
+    ads_host = any(
+        host.endswith(suffix)
+        for suffix in ("googleadservices.com", "google.com", "doubleclick.net")
+    )
+    if ads_host and "conversion" in path:
+        fragments = [part for part in parsed.path.split("/") if part]
+        conversion_id = next((part for part in fragments if part.isdigit()), None)
+        return {
+            "protocol_hint": "google_ads",
+            "protocol_identifiers": {"conversion_id": conversion_id},
+        }
+    return {}
+
+
 def _decode_body(
     body: str | None,
     raw_bytes: bytes | None,
@@ -262,6 +280,7 @@ def decode_request(
         "outcome": row.get("outcome", row.get("status", "initiated")),
         "response_status": row.get("response_status"),
         "failure_reason": row.get("failure_reason"),
+        **_protocol_metadata(parsed),
     }
 
 

@@ -1,5 +1,52 @@
 # Changelog
 
+## [v5.1.0](https://github.com/haiqigeng/gtm-client-recette/releases/tag/v5.1.0) (2026-08-23)
+
+- Compile common multi-sheet tracking workbooks directly when each sheet contains an
+  event-metadata block followed by a variable table. Exclude code/example sections,
+  preserve typed finite enums, canonicalize ecommerce item paths, expose ignored-row
+  diagnostics, and prevent a malformed later event from blocking the first valid event.
+  Keep finite enums and unambiguous event/action/step constants strict while treating
+  singleton product, amount, label, and other contextual examples as scenario evidence
+  rather than guessed global literals.
+- Model source identity separately from delivery identity. A core/state-only block no
+  longer creates a fictitious source event or same-named vendor request; explicitly
+  required core forwarding is checked against the real delivery event such as
+  `page_view`.
+- Accept only document-start call capture or a complete, fully expanded Tag Assistant
+  API Call as authoritative dataLayer source evidence. Keep the Tag Assistant Data Layer
+  tab as independent accumulated-state evidence and reject late/final-state laundering.
+- Expand each destination-applicable planned field across source, accumulated Data Layer
+  state, Variables, effective tag mapping, runtime payload, and decoded request. Missing
+  fields fail per surface when extraction is complete, including object/settings and
+  runtime-discovered tag handling.
+- Make completeness action-local so evidence from another action cannot make a missing
+  event, parameter, request or Preview detail pass or fail conclusively. Preserve API
+  Call fallback in continuous anomaly detection and exclude late snapshots from the
+  authoritative source stream.
+- Treat a documented navigation as an old before-page followed by an explicitly rebound
+  new occurrence document. Continue blocking mixed post-action documents, foreign
+  Preview epochs, unexpected containers and unattributed worker requests.
+- Strengthen GA4 batch/item decoding, Google Ads identity retention through redaction,
+  destination filtering, request lifecycle merging, wildcard multi-item validation, and
+  per-scenario finite-value strictness.
+- Reopen scenario coverage whenever a new action is executed, require every executed
+  action in the latest coverage review, and retain continuous duplicate, missing,
+  unexpected/interjected and contaminating-state findings between planned interactions.
+- Make `commit` exact-retry idempotent and emit truthful provisional per-event domain
+  statuses plus observed source/network/Preview counts. Validate controls before
+  persistence and report uninstrumented operation counters as unknown rather than zero.
+- Require final per-event feedback to show scenario, every applicable layer/check,
+  status, observed/expected detail, reason, check-next target and evidence. Conditional
+  checks remain applicability-driven rather than a fixed layer matrix.
+- Remove unreachable legacy screenshot/file capture helpers and unused compatibility
+  wrappers. Retain one compiler, occurrence model, stream, verdict authority, nine-command
+  CLI and four runtime guides; no client/run-specific paths, values or branches are added.
+- Add regressions for direct workbook intake, API Call versus accumulated state,
+  twelve-to-one field loss, action-local completeness, navigation rebinding, interjected
+  events, multi-item carts, scenario enums, coverage reopening, exact retries, protocol
+  decoding and truthful telemetry.
+
 ## [v5.0.0](https://github.com/haiqigeng/gtm-client-recette/releases/tag/v5.0.0) (2026-08-23)
 
 - Replace inherited event/layer workflow assumptions with typed measurement

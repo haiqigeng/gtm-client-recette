@@ -1,128 +1,102 @@
 # v5 Design Conformance
 
-Status: v5.0.0 release conformance, 2026-08-23. Local deterministic and package
-validation pass. Real existing-browser acceptance was blocked by the unavailable browser
-bridge and remains an explicit deployment limitation.
+Status: v5.1.0 release review, 2026-08-23.
 
 ## Decision
 
-The implementation corresponds to the zero-based design in its runtime model,
-workflow, evidence authority, scenario model, verdict rules, output, and deliberately
-rejected machinery. It is a redesign rather than a patch to a particular run.
+The implementation conforms to the accepted target architecture in the deterministic
+runtime, capture contracts, judgement, output, and controlled performance tests. It is a
+general redesign correction, not a branch for one client, workbook, event count, or run.
 
-The release is accepted for clean personal installation with that limitation disclosed.
-Passing local fixtures does not replace the first-three-event pilot in the owner's
-already-open Chromium and visible Tag Assistant session, and no live speed claim is made.
+The release is suitable for clean personal installation. A fresh end-to-end run in the
+owner's existing Chromium and Tag Assistant session remains the live acceptance gate;
+local fixtures do not prove browser-control latency or panel availability.
 
-## North star implemented
+## North star
 
-The skill maximizes trustworthy findings per expensive browser interaction. Its unit of
-certification is one typed measurement claim in one material scenario, not an event
-name, tag firing, fixed layer row, or tracking-plan cell in isolation.
+Maximize trustworthy findings per expensive browser interaction. The unit of judgement
+is one typed measurement claim in one material real-world scenario. An event cannot pass
+only because a tag fired or because empty technical surfaces agree: page reality,
+business state, source, GTM decisions, delivery, surrounding behavior, evidence quality,
+and scenario coverage must tell one attributable story.
 
-A technically coherent chain cannot pass when independent reality is wrong. Examples
-implemented in the judge include dead/soft-404 pages, failed forms, unconfirmed
-purchases, populated carts represented as empty, stale products, cart/order item
-mismatches, wrong transaction/currency/value anchors, media-player inconsistencies,
-and repeated purchase identifiers.
+## Default applicable evidence chain
+
+For an ordinary planned dataLayer event with a browser-sending tag, one captured action
+supports these separate operational checks:
+
+1. page/action and business reality;
+2. document-start call-time dataLayer capture, or a complete expanded Tag Assistant API
+   Call fallback;
+3. Tag Assistant accumulated Data Layer state;
+4. Tag Assistant Variables;
+5. complete concerned fired/not-fired tag inventory;
+6. concerned tag configuration, effective mapping, firing count, and runtime payload;
+7. decoded browser request, destination, and transport result;
+8. continuous surrounding source/network behavior;
+9. safety, evidence confidence, and scenario coverage.
+
+These are applicable proof surfaces, not nine sequential setup stages. Source-only or
+state-only requirements do not receive invented delivery obligations. Consent,
+acquisition, forms, trigger/sequence evidence, media, and protected handoffs activate
+only when relevant.
 
 ## Design-to-implementation crosswalk
 
-| Designed contract | Implementation | Verification |
+| Contract | Implementation | Verification |
 | --- | --- | --- |
-| Lossless staged compiler | `scripts/core/plan.py` reads JSON, YAML, CSV/TSV, XLSX and the supported tracking-plan handoff. It retains source coordinates, contiguous merged/fill-down event identity, allowed values, types and tag/destination scope; intake row accounting is visible and orphan/ambiguous rows fail before browser work. Predicate errors remain event-local. | Compiler tests cover all primary formats, merged XLSX and fill-down CSV rows, orphan/separator safety, malformed later events, enum/type rules, source coordinates and identity validation. |
-| One predicate vocabulary | `scripts/core/predicates.py` is used by both compilation and judgement. It preserves missing/null/empty/value distinctions, strict JSON types, safe regex, ranges, count/order, URLs and explicit-only wire coercion. | Differential and preserved-behaviour tests pass. An absent-state dispatch defect found during implementation was corrected and retained as a regression. |
-| Typed claims rather than fixed layers | Plan rows compile to reality, source, GTM, delivery, sequence and safety archetypes. State-only/source-only claims do not inherit fabricated tag or request obligations. | State-only and missing-surface tests prove narrower applicability and cross-surface non-substitution. |
-| Six diagnostic domains and two closure gates | `scripts/core/judge.py` renders Reality, Source, GTM, Delivery, Behavior and Safety independently. Evidence confidence and scenario completeness control closure. | Every event result contains all six domain summaries while every applicable operational check remains separate. |
-| One causal occurrence model | `scripts/core/correlate.py` joins target, document/frame, action, source call, Preview event, tag, logical send and transport attempt. It never assigns evidence merely because an action is open. | Document/Preview identity conflicts, request-ID reuse, inter-action messages, retries and batched sends have executable regressions. |
-| Capability-selected evidence authority | The first action records one capability profile and live binding. Document-start call-time capture is authoritative for raw dataLayer proof when available. Preview can remain primary for what GTM processed, but cannot be relabelled as raw API-call proof. | Capability failures block only dependent claims without waiting or opening another browser. Late snapshots cannot pass raw-source claims. |
-| Continuous source and network deltas | Typed capture adapters retain all source arguments, state-only/unplanned messages, request lifecycle, redirects/retries, document/worker identity, payload completeness and privacy metadata. | Recorder/browser-helper, network lifecycle, privacy and interstitial anomaly tests pass. |
-| Summary-first Preview micro-batches | One Preview sync can cover a short unambiguous event cluster. Fired/relevant-not-fired inventories stay complete; deep details remain scoped. Static configuration alone can be reused under exact container and workspace identity. | The three-event cluster uses one handshake and one Preview batch. Static-cache reuse and identity-change blocking are tested. Runtime values, consent, firing and requests are never cached. |
-| Targeted reality anchors | Page/action captures carry URL/status/soft-404, target, before/after business state and completion evidence rather than forcing a full DOM census after every action. | Dead page, failed outcome, cart, product, checkout, purchase and media tests pass. Missing anchors block or fail according to evidence completeness. |
-| Just-in-time scenario coverage | `scripts/core/coverage.py` validates finite values, reachable dependent combinations, high-cardinality behavior signatures, live plan gaps and honest unresolved branches without prebuilding future cases. | Language, shipping-country, products, plan gaps and unknown-population tests pass. |
-| Human-like surrounding analysis | The judge inspects duplicates, absence, unexpected/interjected/premature/delayed activity, material state contamination, cross-surface count disagreement, runtime errors, ecommerce continuity, media state and duplicate transactions. | Quality and mutation tests prove the engine does not inspect planned events only in isolation. Later evidence can amend earlier feedback. |
-| Typed consent and acquisition | Consent activates from plan/tag requirements, Preview consent state, and initialization/update/user-choice chronology. Acquisition requires a bound natural or controlled-navigation context. | Override-only consent blocks, denied sends fail, and fresh Google-referral simulation is accepted with explicit limits. |
-| Consequence-aware protected journeys | `handoff` binds CAPTCHA, authentication, verification, payment and approval pauses to the exact browser/tab/document/action lineage. Consequential first actions require a cheap authoritative source self-test. | Same-lineage resume, wrong-lineage rejection and consequential-action preflight tests pass. |
-| Renderer-owned statuses | Machine observations enter only through typed capture adapters. Semantic findings may add only evidence-backed `FAIL` or `REVIEW`; no public setter can author `PASS`. | Provenance, transactional bundle, CLI-surface and report-freeze tests pass. |
-| Event-first actionable output | `commit` emits a non-certifying pulse. Canonical event feedback contains scenario rows, six domains and operational rows with expected, observed, reason, evidence and `Check next`. Final JSON/Markdown/XLSX/CSV views share the same result model. | Report generation is refused before freeze, formula/privacy safety is verified, and each non-pass row has a target for investigation. |
-| Lightweight browser-cost diagnostics | Optional counters ride inside existing health captures for navigation/reset/reload, tab switches, full preflights, Preview summary/deep reads/retries and AI semantic passes. | Counter validation and final telemetry aggregation are tested; no new command or state authority was added. |
-
-## Independent-review conditions
-
-### 1. Probe the real browser integration
-
-Performed before final acceptance. The configured Chrome and Edge control clients were
-not available to this task. Local diagnostics found Edge installed, but its ChatGPT
-extension was disabled and the native-host registration was absent. No replacement
-browser was opened and no isolated Playwright fixture was misreported as the user's
-existing session.
-
-Design consequence: the skill remains capability-adaptive and fails dependent proof
-quickly. Preview may prove GTM-processed state; raw dataLayer claims remain blocked
-without document-start or another declared direct source.
-
-### 2. Harvest the verified evaluator kernel, not the old architecture
-
-Satisfied. The redesign retains characterized path/value/privacy/recorder/report-safety
-utilities. It replaces the old plan normalization, correlation, ledgers, fixed-layer
-rollup, command surface and output projection. No legacy schema migration or alternate
-result authority remains active.
-
-### 3. Require a real first-three-event slice before live deployment acceptance
-
-Not yet satisfied. The controlled three-event contract passes locally, but the authorized
-real-site run could not be executed without the existing-browser bridge. This limitation
-is `BLOCKED`, not simulated or reported as passed; it does not invalidate deterministic
-release packaging, but it prevents claiming live operational acceptance.
-
-### Consent and agent-authority clarifications
-
-Satisfied. Consent is typed and vendor-neutral; keyword detection or a CMP registry is
-not used. The deterministic renderer owns status and closure. Agent judgment can expose
-an evidence-bound semantic concern but cannot upgrade, suppress or invent machine proof.
+| Direct, loss-aware plan intake | One compiler reads JSON, YAML, delimited files, ordinary tabular XLSX, event-metadata/variable-table XLSX, and supported handoffs. It retains source coordinates, typed values, contiguous fill-down identity, ignored-row diagnostics, and event-local errors. | Flat and two-block workbooks, code-section exclusion, merged/fill-down rows, orphan rows, duplicate IDs, types, enums, and malformed later events are tested. |
+| Correct source authority | Document-start invocation capture is primary. Fully expanded Preview API Call arguments are the fallback. Accumulated Data Layer state is a separate GTM check and cannot prove one push. | Late snapshot laundering fails; API Call fallback passes when complete and still exposes interjected events. |
+| Plan-first cross-layer projection | Every destination-applicable planned field creates independent source, Data Layer state, Variables, effective mapping, runtime, and request obligations. Object/settings and automatic mapping count only when proved. | A twelve-field plan with a one-field tag creates eleven GTM, eleven runtime, and eleven request failures. |
+| Source/delivery identity separation | State-only core fields have no fabricated source event. Explicit forwarding can target a real delivery event such as `page_view`. | Source-only/state-only tests and direct workbook compilation prevent a fictitious same-named vendor request. |
+| One causal model | Actions, documents, frames, Preview epochs, source calls, tags, logical sends, transport attempts, and completeness windows join in one replay-derived model. | Identity conflicts, redirects/retries, request reuse, API fallback, and action-local completeness are tested. |
+| Legitimate navigation | The old document remains the before-state; an explicitly rebound new document owns post-navigation occurrence evidence. | A proved rebind passes; mixed or foreign post-action identity remains blocked. |
+| Human-like anomaly and reality checks | Duplicates, absence, interjection, premature/delayed events, state contamination, stale product/cart data, empty populated carts, dead pages, failed forms, media inconsistency, and repeated purchases are first-class findings. | Quality, ecommerce, media, mutation, and cross-event tests pass. |
+| Scenario depth without brute force | Finite values are exhausted, dependent values are tested in reachable states, high-cardinality members are sampled by behavior signature, and live plan gaps reopen coverage. | Language, shipping dependency, product signatures, omitted values, per-scenario strictness, and coverage reopening are tested. |
+| Fast vertical workflow | `init` creates no future cases/evidence. One handshake and persistent collectors feed `begin`, `commit`, one targeted Preview sync, and immediate feedback. Static configuration alone is cacheable under exact identity. | Large-plan, first-feedback, three-event cluster, idempotent retry, and capability-fast-fail contracts pass. |
+| Mandatory actionable output | `commit` emits a non-certifying layer pulse. Closed events render scenario/domain summaries and every applicable operational layer with status, expected, observed, reason, check-next, and evidence. | Renderer, telemetry, freeze, XLSX, and non-pass detail tests pass. |
+| One verdict authority | Typed capture paths create observations; deterministic replay owns status. Analyst reasoning may only add evidenced `FAIL` or `REVIEW`. | Invalid controls fail before persistence; no public pass/verdict setter exists. |
 
 ## Quality-preserving speed decisions
 
-- Compile the accepted plan once and expose its first executable event; do not build
-  future-event scenarios, layer rows, reports or ledgers.
-- Share persistent source/network capture and one live identity handshake.
-- Let one natural action cover several planned events when identities remain clear.
-- Batch Preview summaries, then deep-read only expected or suspicious details.
-- Reuse only immutable tag configuration under exact identity; never cache action-time
-  evidence.
-- Discover scenarios just in time and schedule by information value and transition cost.
-- Render the pulse and event feedback from already captured evidence; output adds no
-  browser work.
-- Fast-fail an unavailable surface and continue independent checks instead of retrying
-  indefinitely or opening a replacement browser.
+- Compile and attach concurrently where the control surface permits.
+- Localize later-event compile errors; only the selected event must be executable.
+- Install persistent source/network observers once and consume deltas.
+- Read only new Preview events, current planned Variables, and concerned/suspicious tags.
+- Reuse only static configuration under exact container/workspace identity.
+- Build coverage just in time and reuse safe journey prefixes.
+- Retry one transient panel read; block only its dependent claims rather than restarting.
+- Render from captured evidence without another browser pass.
 
-## Machinery deliberately not implemented
+Controlled results on the release machine were approximately 63 ms median for a
+100-event/2,000-requirement synthetic compile, 220 ms median for a synthetic
+init-to-canonical-feedback path, and 2.9 seconds from direct multi-sheet workbook intake
+to the first provisional inspected-layer pulse. These are local architecture checks, not
+a promise for website or browser UI latency.
 
-- fixed nine- or nineteen-layer matrices;
-- whole-plan scenario/result scaffolds;
-- event/session/coverage/runtime ledger families;
-- a generic slow mode;
-- Firefox or a cross-browser adapter program;
-- private Tag Assistant API reverse engineering;
-- graph database, workers, service, dashboard or telemetry platform;
-- exhaustive products/pages, arbitrary scenario caps or a global Cartesian matrix;
-- full DOM, Preview, variable or request-body dumps after every action;
-- one AI call per field/layer;
-- ad hoc container injection or browser replacement as normal recovery;
-- CMP/vendor registries, migration framework or client/run-specific branches.
+## Machinery deliberately absent
+
+- fixed 19-layer rows or whole-plan scenario/tag scaffolds;
+- result/session/coverage/runtime ledger families;
+- global tag/container or historical-domain inventories;
+- Firefox or a cross-browser abstraction for this personal skill;
+- databases, workers, services, dashboards, or a telemetry platform;
+- private Tag Assistant APIs, container injection, or replacement-browser recovery;
+- arbitrary scenario caps, exhaustive product browsing, or Cartesian combinations;
+- one model call per field/layer or caching of action-time evidence;
+- client/run-specific paths, values, counts, selectors, or repair branches.
 
 ## Conformance verdict
 
 | Area | Verdict |
 | --- | --- |
-| Architecture and runtime model | CONFORMS |
-| Inspection depth and operational detail | CONFORMS |
-| Scenario variability and sampling | CONFORMS |
-| Weird-behavior and business-semantic detection | CONFORMS |
-| Speed-oriented workflow shape | CONFORMS in code and controlled fixtures |
-| Repository/general-use hygiene | CONFORMS |
-| Existing-browser controlled pilot | BLOCKED by unavailable browser bridge |
-| Real-site first-three-event acceptance | NOT RUN; required before live deployment acceptance |
+| Architecture and authority | CONFORMS |
+| Plan normalization | CONFORMS |
+| Inspection depth and per-field comparison | CONFORMS |
+| Scenario variability and anomaly detection | CONFORMS |
+| Controlled startup/performance | CONFORMS |
+| Output and repository hygiene | CONFORMS |
+| Fresh existing-browser end-to-end pilot | PENDING |
 
-The implementation conforms and is release-accepted with the existing-browser limitation
-explicitly documented. Live deployment acceptance remains pending the real pilot.
+No known deterministic blocker remains. Deployment confidence becomes complete only
+after a fresh live pilot confirms the browser-control and Tag Assistant extraction path.

@@ -1,198 +1,141 @@
 # v5 Technical Review
 
-Status: final technical review of the v5.0.0 release, 2026-08-23.
+Status: final v5.1.0 technical review, 2026-08-23.
 
-## Overall verdict
+## Verdict
 
-The technical design is lean enough for a sophisticated personal skill and materially
-healthier than the v3.1/v3.2 architecture. It has one immutable plan, one append-only
-evidence/occurrence stream, one deterministic judge, one renderer and nine public
-commands. No dead runtime route, legacy ledger, browser matrix or run-specific patch was
-found.
+The implementation is technically fit for this personal expert skill. The added code
+addresses real generalized correctness gaps: supported workbook intake, source authority,
+source/delivery identity, action-local completeness, planned-field projection,
+navigation identity, protocol decoding, coverage freshness, retry safety, and detailed
+feedback. It does not recreate the v3/v4 operating machinery.
 
-Local technical quality and packaging are suitable for release. Operational deployment
-is not accepted until the existing-browser first-three-event pilot passes.
+No known run-bound path, client literal, selector, container/destination ID, event count,
+prior evidence, backup, or compatibility branch is present in the release tree.
 
-## Runtime structure
+## Runtime architecture
 
-The packaged runtime contains 25 Python/JavaScript files and approximately 10,689 lines.
-Together with the 157-line skill entry and four references (368 lines), the active
-instruction/runtime surface is approximately 11,214 lines. This is less than half the
-approximate active surface of v3.1/v3.2 while preserving their useful quality questions.
+The runtime has one authority at each stage:
 
-The core responsibilities are cohesive:
+1. `plan.py` compiles accepted inputs into immutable typed claims;
+2. `capture.py` validates and redacts typed machine evidence;
+3. `state.py` appends immutable records and evidence references;
+4. `correlate.py` reconstructs one action/document/event/tag/request model;
+5. `judge.py` derives all claims, domains, anomalies, gates, and verdicts;
+6. `workflow.py` exposes nine non-bypassable commands;
+7. `report.py` renders the same canonical result to immediate and final outputs.
 
-1. `plan.py` and `predicates.py`: staged source-preserving compilation and one typed
-   predicate vocabulary;
-2. `capture.py`: typed, transactional, privacy-gated evidence intake;
-3. `correlate.py` plus GA4/Ads decoders: canonical occurrences and logical delivery;
-4. `coverage.py` and `judge.py`: JIT scenario closure, deterministic claims, business
-   relations, anomalies, confidence and rollup;
-5. `workflow.py` and `report.py`: minimal operating surface, pulses, event feedback,
-   freeze and final outputs.
+There is no alternate ledger, mutable status file, manual PASS setter, browser adapter
+family, background service, database, or migration runtime.
 
-Separate recorder, request-decoder, DOM-census, safe-value/path/privacy and synthetic
-form helpers survive because each owns a tested runtime contract. Three redundant
-standalone inspection/diff/retest scripts were removed after their behavior became a
-projection of the compiler or final report.
+## Necessity review of v5.1 changes
 
-## Public operating surface
+| Change | Keep? | Reason |
+| --- | --- | --- |
+| Two-block XLSX parser | Yes | Removes a real intake blocker with a common structural rule and no client-specific branch. |
+| Code/example row exclusion | Yes | Prevents fabricated requirements. |
+| Source/delivery event split | Yes | Prevents impossible vendor expectations for source-only messages. |
+| API Call fallback plus separate Data Layer state | Yes | Restores correct evidence authority when document-start injection is unavailable. |
+| Per-field state/Variables/mapping/runtime/request claims | Yes | Detects partial tag implementations against the plan baseline. |
+| Action-local completeness | Yes | Prevents evidence from one action deciding another. |
+| Explicit navigation rebind rule | Yes | Avoids blocking normal navigation while retaining identity safety. |
+| Continuous API-fallback anomaly stream | Yes | Preserves weird-event detection when the recorder is late. |
+| Coverage reopening | Yes | Prevents a stale PASS after another scenario executes. |
+| Exact commit idempotency | Yes | Makes safe retry recovery deterministic without a new state system. |
+| Provisional per-layer pulse | Yes | Gives immediate targeted feedback from evidence already captured. |
+| Optional operation counters | Yes | Diagnoses real browser cost without creating work or a gate. |
+| Firefox/cross-browser framework | No | Outside the personal Chromium use case. |
+| Global tag inventory/deep read | No | Slow and unrelated to current accepted claims. |
+| Generic slow mode | No | Hides bottlenecks and is not needed for deeper scenario coverage. |
+| Graph/worker/service/cache platform | No | No measured need. |
+| Run-specific normalizer or selectors | No | Would merely patch one execution. |
 
-Exactly nine routes are exposed:
+## Size and complexity
 
-`init`, `begin`, `commit`, `sync-preview`, `status`, `handoff`, `finish`, `report`, and
-`reopen`.
+The source tree has 28 Python/JavaScript files under `scripts` and about 11,512 lines,
+versus 16,472 in v3.0 and 21,712 in v3.1. v5.1 is larger than v5.0 by about 1,300 lines
+because the previous release did not implement the required intake and cross-surface
+contracts. The public interface remains nine commands and the installed reference set
+remains four files.
 
-There is no generic append command, verdict setter, layer setter, alternate plan/results
-file, per-event scaffold command or provenance override. `status` is read-only. Machine
-observations can be written only through typed capture adapters. A finished run rejects
-mutation until explicit user reopen authorization.
+Static analysis reports average cyclomatic complexity in grade B. The main maintainability
+risk is concentrated in the workbook parser/compiler and deterministic judge. Splitting
+them now would move the same domain logic across more modules without reducing browser
+work or user-facing complexity, so no architecture-only refactor was added. Future splits
+should follow stable boundaries only when another change makes those functions difficult
+to verify.
 
-## Dependencies
+The dead-code scan reports only known false positives for ZIP/openpyxl attributes.
+Unreachable screenshot/file capture functions, unused status/path helpers, an unused
+future-coverage helper, and an unused report wrapper were removed. Browser screenshots
+are not a runtime evidence adapter in this release.
 
-Runtime dependencies are limited to:
+## Correctness and safety controls
 
-- `openpyxl` for XLSX intake/output;
-- `PyYAML` for YAML intake.
+- strict missing/undefined/null/empty/value and JSON-type semantics;
+- source, accumulated GTM state, Variables, tag mapping/runtime, and request
+  non-substitution;
+- complete-window requirements for absence and missing-delivery failures;
+- exact action/document/frame/Preview/container/destination attribution;
+- old-before/new-after document handling only with an explicit rebind;
+- centralized persistence redaction and sensitive-data findings;
+- immutable plan and append-only stream with digest-bound evidence;
+- exact retry idempotency and pre-persistence validation;
+- deterministic status ownership and final freeze;
+- formula-safe, reload-validated XLSX output.
 
-Playwright is optional and used only by the browser-helper development test. Ruff,
-Vulture and Radon are development checks. No Firefox dependency, browser abstraction
-framework, database, worker, service, dashboard, image library or vendor SDK was added.
+## Performance health
 
-## Static health results
+No wait, sleep, polling loop, browser retry loop, network call, model call, or whole-plan
+scenario generation exists in the deterministic core. The principal startup cost for a
+multi-sheet XLSX is openpyxl parsing. Field projection increases comparisons but does not
+increase browser interactions because all layers reuse the same action and targeted
+Preview extraction.
 
-| Check | Result |
-| --- | --- |
-| Ruff lint | PASS |
-| Ruff format | PASS |
-| Git whitespace check | PASS |
-| JavaScript syntax (`datalayer_recorder.js`, `dom_interaction_census.js`) | PASS |
-| Vulture at 80% confidence | No findings |
-| Release metadata/tree check | PASS for v5.0.0 |
-| Clean archive manifest verification | PASS |
-| Extracted install verification and CLI startup | PASS |
+The controlled benchmarks show about 2.9 seconds from direct representative workbook
+intake to the first provisional inspected-layer pulse and about 220 ms median for a
+synthetic canonical-feedback path. A live run taking many minutes before inspection
+therefore indicates browser/agent workflow nonconformance, not required deterministic
+setup.
 
-Cyclomatic complexity averages grade B (about 7 across the script tree). After the
-final media refactor, no function is grade E or F. The highest remaining functions are
-grade D and are concentrated in parsing, capture normalization, coverage validation and
-domain-specific judgement where branching is intrinsic and directly tested.
+## Verification gates
 
-Maintainability-index tools grade the largest semantic modules (`judge.py`, `plan.py`,
-`capture.py`, and the preserved client-side rule helper) as C because of size and dense
-branching. This is a maintainability warning, not an executed correctness defect.
-Splitting `judge.py` solely to improve a metric was rejected for now: it would add
-cross-module plumbing without reducing the proof model. A split becomes justified when
-two independent change streams or profiling/debugging evidence show real friction.
+The release requires:
 
-## Dynamic and regression results
+- Ruff lint and formatting;
+- Python compile check;
+- full deterministic unit/stress suite;
+- real-browser helper smoke test;
+- release metadata/tree/residue check;
+- skill package validation;
+- deterministic archive and manifest verification;
+- clean installation manifest verification;
+- repository diff scan for user-bound/run-bound residue.
 
-- 76 deterministic unit/contract/metamorphic tests pass in about 15.5 seconds.
-- Browser recorder/census helper tests pass in isolated Chromium, including observer
-  non-interference checks.
-- The 100-event/2,000-requirement compiler benchmark is about 64 ms median locally.
-- Cold synthetic init-to-first canonical event feedback is about 215 ms median.
-- The three-event sharing contract uses one capability record, one live binding and one
-  Preview batch.
-- Package build, manifest verification, clean extraction, installed-tree verification
-  and packaged CLI startup all pass.
+The tagged v3.0.0, v3.1.0, and v5.0.0 suites were also run from clean archives to make
+the comparison explicit. Historical suites prove their own baselines; the v5.1 stress
+tests prove the corrected contracts.
 
-These timings prove the deterministic runtime is not recreating the old front-loaded
-machinery. They do not prove live browser speed.
+Final local results: Ruff and compilation pass; 88 deterministic tests pass in about
+16 seconds; browser helpers pass; release-tree and skill validation pass; and the
+deterministic v5.1.0 archive/manifest verifies successfully.
 
-## Correctness and false-pass safeguards
+## Remaining risks
 
-- Compiler and judge share the same supported predicate registry; unsupported rules
-  become localized compile errors before browser work.
-- XLSX and delimited intake preserve contiguous merged/fill-down event rows, expose row
-  accounting, and reject orphan/ambiguous rows instead of silently dropping them.
-- Missing, null, empty and populated values remain distinct. JSON booleans cannot pass
-  as numbers; wire coercion is explicit and transport-only.
-- Each evidence surface proves only itself. Source, Preview, tag runtime and request
-  rows cannot substitute for one another.
-- Empty complete windows can prove absence; partial/late/truncated windows block.
-- Current origin/document/container/Preview identity is an independent gate.
-- Dead pages and failed business outcomes control the overall verdict even when tags
-  and requests look coherent.
-- Full fired and relevant-not-fired inventories remain required before selective deep
-  inspection can pass.
-- Static reuse is confined to configuration under exact container/workspace identity.
-- Continuous source messages and cross-event anomalies remain available to revise
-  earlier feedback.
-- Semantic annotations can only add evidence-backed `FAIL` or `REVIEW`.
-- Privacy redaction occurs before ordinary persistence; raw bodies require named
-  quarantine and cannot enter results.
+1. **Live control/Preview integration — medium until retested.** A fresh existing-browser
+   pilot must confirm attachment, expanded API Call/Data Layer/Variables extraction, and
+   targeted concerned-tag reads.
+2. **Agent compliance — medium.** Instructions are explicit and the CLI prevents verdict
+   fabrication, but a weak agent can still waste time before invoking the vertical path.
+3. **Large deterministic modules — low-to-medium maintainability risk.** They are tested
+   and cohesive; profile or split only after evidence of change friction.
+4. **Very long streams — low unmeasured risk.** Replay is currently fast. Add indexing
+   only if a real profile shows it is material.
 
-## Bugs discovered by the review
+## Deployment recommendation
 
-Three deterministic defects were found by adversarial tests and fixed:
-
-1. the `state: absent` predicate was intercepted by generic missing-value failure;
-2. an unextracted expected static tag configuration was reported as a mismatch `FAIL`
-   instead of observability `BLOCKED`.
-3. tabular requirements under merged/fill-down event cells were silently skipped; they
-   are now retained within a contiguous event block, while orphan rows fail at intake.
-
-Both have focused regressions. The review also closed semantic omissions for cart/order
-continuity, media-player state and repeated transactions, and added exact static reuse
-plus browser-cost counters.
-
-## Dead code, residues and genericity
-
-- Vulture reports no probable dead Python code at the selected confidence threshold.
-- The release checker enforces the exact active reference/core/protocol/CLI trees and
-  rejects unclassified root scripts.
-- Obsolete v3/v4 ledger, layer, migration, operator and duplicate report utilities were
-  removed rather than retained behind compatibility switches.
-- An untracked prior-run directory and the stale local v4 distribution archive were
-  removed. They were not Git-tracked and are not recoverable through this worktree;
-  external copies and Git history are unaffected.
-- `runs/`, evidence, reports, logs, spreadsheets, caches and build output are ignored and
-  excluded from the release artifact.
-- Generic scans found no user-bound absolute path, client/container/destination literal,
-  run selector, prior evidence or specific site patch in active source/guides.
-- Historical behavior remains in Git/tests and documentation, not as discoverable
-  installed backup skills or runtime compatibility code.
-
-## Overengineering review
-
-Necessary mechanisms retained:
-
-- typed compiler and predicate registry;
-- one capability profile and current live binding;
-- append-only evidence with provenance and transactional bundles;
-- continuous source/network capture and protocol decoding;
-- one occurrence correlation model;
-- JIT finite/dependent/signature coverage;
-- deterministic business/anomaly/confidence judgement;
-- consequence-aware protected handoff;
-- detailed event-first and final reporting;
-- small operation counters needed to diagnose browser cost.
-
-Rejected as unnecessary:
-
-- fixed-layer bureaucracy, whole-plan setup, parallel ledgers and migration framework;
-- databases, workers, services, dashboards or telemetry platform;
-- Firefox/cross-browser support for this personal use case;
-- a generic slow mode or repeated global validation;
-- private Preview API integration, vendor/CMP registries and broad static inventories;
-- exhaustive high-cardinality browsing, arbitrary caps or full Cartesian combinations;
-- one model call per check and cache of action-time evidence.
-
-## Remaining risks and next technical action
-
-1. **Existing-browser integration — high acceptance risk.** The actual Chrome/Edge
-   control bridge was unavailable, so document-start injection, continuous network
-   events and visible Tag Assistant extraction could not be validated end to end.
-2. **Long real streams — medium-low risk.** Replay remains authoritative and currently
-   fast. Add an in-memory cursor/index only if an actual long-run profile shows material
-   cost.
-3. **Large semantic modules — medium-low maintainability risk.** Functions are bounded
-   and tested; split by stable domain boundaries only when change evidence justifies it.
-4. **Agent compliance — medium operational risk.** Renderer-owned statuses and nine
-   routes prevent many bypasses, but a weak-agent existing-browser run remains necessary.
-
-The next action is not more machinery. Restore the configured browser bridge, run the
-authorized first-three-event pilot, inspect its operation counters and phase timing, and
-fix only a measured general bottleneck or correctness gap. Do not treat live deployment
-as accepted if that pilot requires replacement tabs, improvised plan rebuilding,
-repeated full preflight, evidence recreation or hidden repair loops.
+Release and install v5.1.0, then run a short representative live pilot before a full
+funnel. The acceptance signs are: first layer pulse after the first action, no global
+inventory/setup, one existing browser/Preview session, separate API Call and Data Layer
+state evidence, complete per-field tag/request comparisons, and mandatory detailed
+per-event feedback. Fix only a measured general issue if that pilot disagrees.

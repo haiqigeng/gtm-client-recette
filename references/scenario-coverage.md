@@ -32,7 +32,9 @@ cannot be called exhaustive.
 
 Test all manageable finite values, including values absent from the plan. Expectations
 remain contextual: the English route expects `en`, the French route expects `fr`; either
-can pass in its own scenario, but neither is accepted everywhere.
+can pass in its own scenario, but neither is accepted everywhere. Apply that selected
+scenario value to every applicable source/GTM/runtime/request comparison, so an allowed
+enum cannot pass merely because the wrong allowed member appeared.
 
 For dependent values, execute every reachable material combination, not a global
 Cartesian product. Example: discover shipping methods under each materially distinct

@@ -51,6 +51,9 @@ def _validate_scenarios(
     seen: set[str] = set()
     values_by_dimension: dict[str, set[str]] = defaultdict(set)
     roles: set[str] = set()
+    covered_actions: set[str] = set()
+    if not scenarios:
+        errors.append("Coverage needs at least one executed scenario.")
     for index, scenario in enumerate(scenarios, start=1):
         if not isinstance(scenario, dict):
             errors.append(f"Scenario {index} is not an object.")
@@ -74,6 +77,7 @@ def _validate_scenarios(
         if not isinstance(action_ids, list) or not action_ids:
             errors.append(f"Scenario {label} has no executed action.")
         for action_id in action_ids if isinstance(action_ids, list) else []:
+            covered_actions.add(str(action_id))
             action = actions.get(str(action_id))
             if action is None:
                 errors.append(f"Scenario {label} references unknown action {action_id}.")
@@ -88,6 +92,17 @@ def _validate_scenarios(
             and not str(scenario.get("behavior_signature") or "").strip()
         ):
             errors.append(f"Sampled scenario {label} needs an explainable behavior signature.")
+    committed_for_event = {
+        action_id
+        for action_id, action in actions.items()
+        if action.get("status") == "COMMITTED"
+        and event_id in {str(value) for value in action.get("event_ids", [])}
+    }
+    unreviewed = sorted(committed_for_event - covered_actions)
+    if unreviewed:
+        errors.append(
+            "Executed event actions are absent from scenario coverage: " + ", ".join(unreviewed)
+        )
     return errors, seen, values_by_dimension, roles
 
 
@@ -320,15 +335,3 @@ def coverage_result(
         "materiality": MATERIALITY_DEFINITION,
         "record_id": review.get("record_id"),
     }
-
-
-def future_event_artifacts(plan: dict[str, Any], records: list[dict[str, Any]]) -> list[str]:
-    """Return events with coverage state but no action; useful for structural speed tests."""
-    acted = {
-        event_id
-        for action in action_windows(records)
-        for event_id in map(str, action.get("event_ids", []))
-    }
-    reviewed = set(coverage_reviews(records))
-    known = {str(event.get("event_id")) for event in plan.get("events", [])}
-    return sorted((reviewed - acted) & known)

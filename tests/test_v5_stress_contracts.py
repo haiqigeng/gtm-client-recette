@@ -69,6 +69,82 @@ class StressContractTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
+    def test_plan_parameters_are_checked_across_source_gtm_runtime_and_request(self) -> None:
+        requirements = [
+            {
+                "field_path": f"parameter_{index:02d}",
+                "match_rule": "equals",
+                "expected_value": f"value-{index:02d}",
+                "expected_type": "string",
+            }
+            for index in range(1, 13)
+        ]
+        event = {
+            "event_id": "E-core",
+            "label": "Core DataLayer",
+            "mode": "state_only",
+            "delivery_event_name": "page_view",
+            "requirements": requirements,
+            "tags": [],
+        }
+        harness = V5Harness(self.root, events=[event])
+        action = harness.begin(["E-core"])
+        source_payload = {row["field_path"]: row["expected_value"] for row in requirements}
+        sent_payload = {"event": "page_view", "parameter_01": "value-01"}
+        commit_action(
+            harness.run,
+            {
+                "health": harness._health("after"),
+                "page": {"states": [harness._page("after")]},
+                "datalayer": harness.datalayer([source_payload], action_id=action),
+                "network": harness.network(
+                    ["page_view"], action_id=action, payloads=[sent_payload]
+                ),
+            },
+            action_id=action,
+        )
+        preview = harness.preview([source_payload, sent_payload], action_id=action)
+        preview_event = preview["events"][1]
+        preview_event["fired_tags"] = ["runtime-google-tag"]
+        preview_event["tags"] = [
+            {
+                "tag_id": "runtime-google-tag",
+                "tag_name": "GA4 Google tag",
+                "category": "GA4",
+                "fired": True,
+                "firing_count": 1,
+                "configuration": {
+                    "measurement_id": "G-TEST123",
+                    "parameter_01": "{{parameter_01}}",
+                },
+                "runtime_parameters": {"parameter_01": "value-01"},
+            }
+        ]
+        result = sync_preview(
+            harness.run,
+            {
+                "preview": preview,
+                "coverage": harness.coverage("E-core", [action]),
+            },
+            event_ids=["E-core"],
+        )["events"][0]
+
+        self.assertEqual(result["domains"]["source"]["status"], "PASS")
+        self.assertEqual(result["domains"]["gtm"]["status"], "FAIL")
+        self.assertEqual(result["domains"]["delivery"]["status"], "FAIL")
+        codes = [row["reason_code"] for row in result["inspections"]]
+        self.assertEqual(codes.count("gtm.variable.value.absent"), 11)
+        self.assertEqual(codes.count("gtm.effective_mapping_absent"), 11)
+        self.assertEqual(codes.count("delivery.runtime_parameter_absent"), 11)
+        self.assertEqual(codes.count("delivery.request_parameter.value.absent"), 11)
+        self.assertTrue(
+            all(
+                row["status"] == "PASS"
+                for row in result["inspections"]
+                if row["inspection_target"].startswith("Tag Assistant Data Layer state")
+            )
+        )
+
     def test_every_taxonomy_dimension_mutation_and_failed_run_case_is_mapped(self) -> None:
         expected = TAXONOMY_DIMENSIONS | MUTATIONS | FAILED_RUN_CASES
         self.assertEqual(set(STRESS_CROSSWALK), expected)
@@ -140,6 +216,48 @@ class StressContractTests(unittest.TestCase):
             if row["reason_code"] == "binding.occurrence_identity_mismatch"
         )
         self.assertEqual(identity["status"], "BLOCKED")
+
+    def test_documented_navigation_rebind_does_not_confuse_before_page_with_occurrence(
+        self,
+    ) -> None:
+        harness = V5Harness(self.root)
+        action = harness.begin()
+        payload = {"event": "view_item"}
+        datalayer = harness.datalayer([payload], action_id=action)
+        datalayer["document_id"] = "DOC-2"
+        datalayer["records"][0]["documentId"] = "DOC-2"
+        network = harness.network(["view_item"], action_id=action)
+        network["document_id"] = "DOC-2"
+        network["requests"][0]["document_id"] = "DOC-2"
+        commit_action(
+            harness.run,
+            {
+                "binding": harness.binding(document_id="DOC-2"),
+                "health": {**harness._health("after"), "document_id": "DOC-2"},
+                "page": {
+                    "states": [harness._page("after", document_id="DOC-2", frame_id="FRAME-2")]
+                },
+                "datalayer": datalayer,
+                "network": network,
+            },
+            action_id=action,
+        )
+        preview = harness.preview([payload], action_id=action)
+        preview["events"][0]["document_id"] = "DOC-2"
+        result = sync_preview(
+            harness.run,
+            {
+                "preview": preview,
+                "coverage": harness.coverage("E-view_item", [action]),
+            },
+            event_ids=["E-view_item"],
+        )["events"][0]
+        binding = next(
+            row
+            for row in result["inspections"]
+            if row["inspection_target"] == "Live browser/Preview binding"
+        )
+        self.assertEqual(binding["status"], "PASS")
 
     def test_static_configuration_reuse_requires_exact_container_workspace_identity(self) -> None:
         events = [default_event("E-list", "view_item_list"), default_event("E-item", "view_item")]
@@ -232,6 +350,7 @@ class StressContractTests(unittest.TestCase):
                 "category": "GA4",
                 "fired": True,
                 "configuration": {"measurement_id": "G-TEST123"},
+                "runtime_parameters": payload,
             }
         ]
         result = sync_preview(

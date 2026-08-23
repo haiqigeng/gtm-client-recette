@@ -7,7 +7,6 @@ call the same functions, so a plan cannot emit a rule the runtime does not under
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -357,7 +356,3 @@ def predicate_expected(predicate: dict[str, Any]) -> Any:
     if operator == "order":
         return predicate.get("sequence")
     return operator
-
-
-def all_supported() -> Iterable[str]:
-    return tuple(sorted(SUPPORTED_OPERATORS))

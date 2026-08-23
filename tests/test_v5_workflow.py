@@ -11,11 +11,12 @@ from openpyxl import load_workbook
 from tests.v5_harness import ROOT, SCRIPTS, V5Harness, default_event, write_json
 
 from core.capture import capture_value
-from core.coverage import future_event_artifacts
+from core.correlate import action_windows
+from core.coverage import coverage_reviews
 from core.plan import initialize_run
 from core.report import build_reports, render_event_feedback, status_view
 from core.state import StateError, load_plan, read_stream
-from core.workflow import finish_run, sync_preview
+from core.workflow import commit_action, finish_run, sync_preview
 
 
 class WorkflowTests(unittest.TestCase):
@@ -41,11 +42,76 @@ class WorkflowTests(unittest.TestCase):
             )
         )
         records, _ = read_stream(harness.run)
-        self.assertEqual(future_event_artifacts(load_plan(harness.run), records), [])
+        acted = {
+            event_id
+            for action in action_windows(records)
+            for event_id in map(str, action.get("event_ids", []))
+        }
+        self.assertFalse(set(coverage_reviews(records)) - acted)
         rendered = render_event_feedback(result)
+        self.assertIn(
+            "| Scenario | Inspection target | Domain | Status | Observed | Expected | Reason |",
+            rendered,
+        )
         self.assertIn("Source signal PASS", rendered)
         self.assertIn("GTM decision PASS", rendered)
         self.assertIn("Destination delivery PASS", rendered)
+        telemetry = status_view(harness.run)["telemetry"]
+        self.assertFalse(telemetry["operation_counters_instrumented"])
+        self.assertIsNone(telemetry["preview_tab_switches"])
+        self.assertEqual(telemetry["preview_events_observed"], 1)
+        self.assertEqual(telemetry["network_requests_observed"], 1)
+
+    def test_commit_retry_is_idempotent_and_pulse_reports_real_layers_and_transport(self) -> None:
+        harness = V5Harness(self.root)
+        action = harness.begin()
+        payload = {"event": "view_item"}
+        bundle = {
+            "health": harness._health("after"),
+            "page": {"states": [harness._page("after")]},
+            "datalayer": harness.datalayer([payload], action_id=action),
+            "network": harness.network(["view_item"], action_id=action),
+        }
+        first = commit_action(harness.run, bundle, action_id=action)
+        count_after_first = len(read_stream(harness.run)[0])
+        second = commit_action(harness.run, bundle, action_id=action)
+        self.assertEqual(len(read_stream(harness.run)[0]), count_after_first)
+        self.assertEqual(first["commit"]["record_id"], second["commit"]["record_id"])
+        self.assertEqual(first["pulse"]["record_id"], second["pulse"]["record_id"])
+        self.assertEqual(first["pulse"]["observed_network_sends"], 1)
+        self.assertEqual(first["pulse"]["observed_preview_messages"], 0)
+        layers = first["pulse"]["provisional_events"][0]["layers"]
+        self.assertEqual(layers["source"]["status"], "PASS")
+        self.assertEqual(layers["gtm"]["status"], "BLOCKED")
+
+    def test_invalid_control_is_rejected_before_commit_evidence_is_written(self) -> None:
+        harness = V5Harness(self.root)
+        action = harness.begin()
+        records_before = len(read_stream(harness.run)[0])
+        evidence_before = {path.name for path in (harness.run / "evidence").iterdir()}
+        with self.assertRaisesRegex(StateError, "Coverage review is invalid"):
+            commit_action(
+                harness.run,
+                {
+                    "health": harness._health("after"),
+                    "page": {"states": [harness._page("after")]},
+                    "datalayer": harness.datalayer([{"event": "view_item"}], action_id=action),
+                    "coverage": {
+                        "event_id": "E-view_item",
+                        "mode": "EXHAUSTIVE",
+                        "complete": True,
+                        "rationale": "invalid on purpose",
+                        "stop_reason": "invalid on purpose",
+                        "dimensions": [],
+                        "scenarios": [],
+                    },
+                },
+                action_id=action,
+            )
+        self.assertEqual(len(read_stream(harness.run)[0]), records_before)
+        self.assertEqual(
+            {path.name for path in (harness.run / "evidence").iterdir()}, evidence_before
+        )
 
     def test_source_does_not_substitute_for_missing_preview(self) -> None:
         harness = V5Harness(self.root)

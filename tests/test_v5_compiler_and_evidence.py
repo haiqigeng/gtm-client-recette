@@ -16,6 +16,7 @@ from core.predicates import PredicateError, compile_predicate, evaluate_predicat
 from core.protocols import decode_logical_sends
 from core.state import StateError, load_plan, read_stream
 from core.workflow import add_handoff, begin_action
+from decode_browser_requests import decode_requests
 
 
 class CompilerAndEvidenceTests(unittest.TestCase):
@@ -35,6 +36,82 @@ class CompilerAndEvidenceTests(unittest.TestCase):
             "tag_scope": ["GA4"],
             **updates,
         }
+
+    def test_common_two_block_workbook_compiles_without_custom_normalization(self) -> None:
+        workbook = Workbook()
+        core = workbook.active
+        core.title = "Core DataLayer"
+        core.append([None, "Nature", "Page", "Trigger"])
+        core.append([None, "Core DataLayer", "All pages", "Before GTM"])
+        core.append([])
+        core.append([None, "variables", "Type", "Status", "Summary", "Values"])
+        core.append([None, "page_language", "string", "Mandatory", "Locale", "en | fr"])
+        core.append([None, "product_name", "string", "Mandatory", "Product", "Example..."])
+        core.append([])
+        core.append([None, "CODE :"])
+        core.append([None, "dataLayer.push({event: 'should_not_compile'})"])
+        item = workbook.create_sheet("View Item")
+        item.append([None, "Name of the event", "Page", "Trigger"])
+        item.append([None, "view_item", "Product", "View product"])
+        item.append([])
+        item.append([None, "variables", "Type", "Status", "Summary", "Values"])
+        item.append([None, "event", "string", "Mandatory", "Event", "view_item"])
+        item.append([None, "item_id", "string", "Mandatory", "ID", "SKU..."])
+        item.append([None, "currency", "string", "Mandatory", "Currency", "EUR"])
+        item.append([None, "quantity", "number", "Mandatory", "Quantity", 2])
+        item.append([None, "checkout_step", "number", "Mandatory", "Step", 3])
+        source = self.root / "two-block.xlsx"
+        workbook.save(source)
+
+        plan = normalize_plan(source, scope=self.scope())
+        self.assertEqual(plan["event_count"], 2)
+        self.assertEqual(plan["requirement_count"], 7)
+        self.assertFalse(plan["events"][0]["compile_errors"])
+        self.assertEqual(plan["events"][0]["mode"], "state_only")
+        self.assertIsNone(plan["events"][0]["source_event_name"])
+        self.assertEqual(plan["events"][0]["delivery_event_name"], "page_view")
+        core_claims = plan["events"][0]["claims"]
+        self.assertTrue(
+            all(
+                claim["target"].get("event_name") is None
+                for claim in core_claims
+                if claim["target"].get("check") == "data_layer_state"
+            )
+        )
+        self.assertTrue(
+            all(
+                claim["target"].get("event_name") == "page_view"
+                for claim in core_claims
+                if claim["target"].get("check")
+                in {
+                    "resolved_variable",
+                    "effective_mapping",
+                    "runtime_parameter",
+                    "tag_inventory",
+                    "tag_configuration",
+                    "tag_firing",
+                    "destination_request",
+                    "request_parameter",
+                }
+            )
+        )
+        self.assertEqual(
+            plan["events"][0]["known_dimensions"][0]["values"],
+            [{"value": "en", "source": "plan"}, {"value": "fr", "source": "plan"}],
+        )
+        item_paths = {claim.get("target", {}).get("path") for claim in plan["events"][1]["claims"]}
+        self.assertIn("ecommerce.items[].item_id", item_paths)
+        self.assertNotIn("should_not_compile", json.dumps(plan))
+        source_predicates = {
+            claim["target"].get("path"): claim["predicate"]
+            for claim in plan["events"][1]["claims"]
+            if claim["domain"] == "source"
+        }
+        self.assertEqual(source_predicates["event"]["expected"], "view_item")
+        self.assertEqual(source_predicates["ecommerce.checkout_step"]["expected"], 3)
+        self.assertEqual(source_predicates["ecommerce.currency"]["operator"], "present")
+        self.assertEqual(source_predicates["ecommerce.items[].quantity"]["operator"], "present")
+        self.assertEqual(source_predicates["ecommerce.items[].item_id"]["operator"], "present")
 
     def test_json_yaml_and_xlsx_compile_to_typed_claims_with_source_coordinates(self) -> None:
         json_path = write_json(self.root / "plan.json", {"events": [default_event()]})
@@ -257,6 +334,26 @@ class CompilerAndEvidenceTests(unittest.TestCase):
         self.assertEqual([row["destination"] for row in sends], ["G-TEST123", "G-TEST123"])
         self.assertTrue(all(row["tag_ids"] == ["GA4-event"] for row in sends))
 
+    def test_google_ads_destination_survives_sensitive_path_redaction(self) -> None:
+        decoded = decode_requests(
+            {
+                "complete": True,
+                "requests": [
+                    {
+                        "request_id": "ADS-1",
+                        "url": (
+                            "https://www.googleadservices.com/pagead/conversion/"
+                            "123456789/?label=checkout"
+                        ),
+                    }
+                ],
+            }
+        )["requests"][0]
+        sends = decode_logical_sends(decoded)
+        self.assertEqual(len(sends), 1)
+        self.assertEqual(sends[0]["protocol"], "google_ads")
+        self.assertEqual(sends[0]["destination"], "AW-123456789")
+
     def test_ga4_wire_items_are_decoded_to_canonical_typed_paths(self) -> None:
         sends = decode_logical_sends(
             {
@@ -290,6 +387,25 @@ class CompilerAndEvidenceTests(unittest.TestCase):
             begin_action(harness.run, ["E-view_item"], invalid)
         self.assertEqual(read_stream(harness.run)[0], [])
         self.assertEqual(list((harness.run / "evidence").iterdir()), [])
+
+    def test_accumulated_tag_assistant_state_cannot_be_laundered_as_source(self) -> None:
+        harness = V5Harness(self.root)
+        with self.assertRaisesRegex(StateError, "not direct-source evidence"):
+            capture_value(
+                harness.run,
+                "source",
+                {
+                    "complete": True,
+                    "signals": [
+                        {
+                            "signal_id": "S1",
+                            "mechanism": "tag_assistant_message",
+                            "event_name": "view_item",
+                            "payload": {"event": "view_item"},
+                        }
+                    ],
+                },
+            )
 
     def test_request_lifecycle_updates_merge_without_false_identity_conflict(self) -> None:
         harness = V5Harness(self.root)
