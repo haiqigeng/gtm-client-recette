@@ -58,14 +58,101 @@ HEADER_ALIASES = {
     "configuration_path": {"configuration_path", "tag_configuration_path"},
     "negative": {"negative", "expected_absence", "absence_attendue"},
     "condition": {"condition", "applicability", "applicabilite", "applicabilité"},
+    "mode": {"mode", "event_mode", "measurement_mode"},
+    "source_event_name": {"source_event_name", "source_event", "raw_event_name"},
+    "delivery_event_name": {
+        "delivery_event_name",
+        "destination_event_name",
+        "ga4_event_name",
+        "send_event_name",
+    },
+    "source_only": {"source_only", "source_seulement"},
+    "forwarding_required": {"forwarding_required", "send_required", "delivery_required"},
     "notes": {"notes", "comment", "commentaire", "example", "exemple"},
 }
 
+EVENT_METADATA_FIELDS = {
+    "mode",
+    "source_event_name",
+    "delivery_event_name",
+    "source_only",
+    "forwarding_required",
+}
 TABULAR_REQUIREMENT_FIELDS = frozenset(HEADER_ALIASES) - {
     "event_name",
     "event_id",
     "event_label",
     "notes",
+    *EVENT_METADATA_FIELDS,
+}
+
+SECTION_EVENT_HEADERS = {
+    "name_of_the_event",
+    "event_name",
+    "nom_de_l_evenement",
+    "nom_evenement",
+    "nature",
+}
+SECTION_FIELD_HEADERS = {
+    "variable",
+    "variables",
+    "parameter",
+    "parameters",
+    "dimension",
+    "dimensions",
+}
+SECTION_TYPE_HEADERS = {"type", "json_type", "format"}
+SECTION_STATUS_HEADERS = {"status", "statut", "required", "requiredness"}
+SECTION_VALUE_HEADERS = {"value", "values", "valeur", "valeurs"}
+SECTION_SUMMARY_HEADERS = {
+    "summary",
+    "description",
+    "definition",
+    "définition",
+    "example",
+    "examples",
+}
+SECTION_STOP_MARKERS = {"code", "images", "image", "screenshots", "screenshot"}
+SECTION_EXACT_SINGLETON_FIELDS = {"event", "event_name", "action", "checkout_step"}
+GA4_ECOMMERCE_EVENTS = {
+    "view_promotion",
+    "select_promotion",
+    "view_item_list",
+    "select_item",
+    "view_item",
+    "add_to_wishlist",
+    "add_to_cart",
+    "remove_from_cart",
+    "view_cart",
+    "begin_checkout",
+    "add_shipping_info",
+    "add_payment_info",
+    "purchase",
+    "refund",
+}
+GA4_ITEM_FIELDS = {
+    "item_id",
+    "item_name",
+    "item_brand",
+    "item_category",
+    "item_category2",
+    "item_category3",
+    "item_category4",
+    "item_category5",
+    "item_variant",
+    "item_list_id",
+    "item_list_name",
+    "index",
+    "price",
+    "quantity",
+    "discount",
+    "coupon",
+    "affiliation",
+    "location_id",
+    "creative_name",
+    "creative_slot",
+    "promotion_id",
+    "promotion_name",
 }
 
 ARCHETYPE_ALIASES = {
@@ -98,28 +185,24 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _json_value(value: Any) -> Any:
-    if not isinstance(value, str):
-        return value
-    stripped = value.strip()
-    if not stripped:
-        return ""
-    try:
-        return json.loads(stripped)
-    except json.JSONDecodeError:
-        return value
-
-
 def _list_value(value: Any) -> list[Any]:
-    parsed = _json_value(value)
-    if isinstance(parsed, list):
-        return parsed
-    if parsed in (None, ""):
+    if isinstance(value, list):
+        return value
+    if value in (None, ""):
         return []
-    if isinstance(parsed, str):
-        separator = "|" if "|" in parsed else ","
-        return [item.strip() for item in parsed.split(separator) if item.strip()]
-    return [parsed]
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped.startswith("["):
+            try:
+                parsed = json.loads(stripped)
+            except json.JSONDecodeError as error:
+                raise StateError("allowed_values contains invalid JSON array syntax.") from error
+            if not isinstance(parsed, list):
+                raise StateError("allowed_values JSON must be an array.")
+            return parsed
+        separator = "|" if "|" in stripped else ","
+        return [item.strip() for item in stripped.split(separator) if item.strip()]
+    return [value]
 
 
 def _header_key(value: Any) -> str:
@@ -155,6 +238,291 @@ def _header_row(rows: list[tuple[Any, ...]]) -> tuple[int, dict[int, str]] | Non
 
 def _has_cell_value(value: Any) -> bool:
     return value is not None and (not isinstance(value, str) or bool(value.strip()))
+
+
+def _tabular_expected_value(value: Any, expected_type: Any) -> Any:
+    """Preserve spreadsheet strings unless their declared JSON type requires parsing."""
+    normalized_type = str(expected_type or "").strip().casefold()
+    if not isinstance(value, str):
+        if normalized_type == "string" and value is not None:
+            return str(value)
+        return value
+    stripped = value.strip()
+    if normalized_type in {"boolean", "number", "integer", "null", "array", "object"}:
+        try:
+            parsed = json.loads(stripped)
+        except json.JSONDecodeError as error:
+            raise StateError(
+                f"Expected value {value!r} is not valid JSON for declared type {normalized_type}."
+            ) from error
+        actual_type = (
+            "boolean"
+            if isinstance(parsed, bool)
+            else "integer"
+            if isinstance(parsed, int) and not isinstance(parsed, bool)
+            else "number"
+            if isinstance(parsed, float)
+            else "null"
+            if parsed is None
+            else "array"
+            if isinstance(parsed, list)
+            else "object"
+            if isinstance(parsed, dict)
+            else "string"
+        )
+        compatible = actual_type == normalized_type or (
+            normalized_type == "number" and actual_type == "integer"
+        )
+        if not compatible:
+            raise StateError(
+                f"Expected value {value!r} does not match declared type {normalized_type}."
+            )
+        return parsed
+    return value
+
+
+def _tabular_boolean(value: Any, *, field: str, source: str) -> bool | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().casefold()
+    if normalized in {"1", "true", "yes", "oui"}:
+        return True
+    if normalized in {"0", "false", "no", "non"}:
+        return False
+    raise StateError(f"{source}: {field} must be an explicit true/false value.")
+
+
+def _canonical_event_name(value: Any) -> str:
+    text = " ".join(str(value or "").split())
+    if not text:
+        return ""
+    if re.fullmatch(r"[A-Za-z0-9_.-]+", text):
+        return text.casefold()
+    return re.sub(r"[^a-z0-9]+", "_", text.casefold()).strip("_")
+
+
+def _canonical_field_name(value: Any) -> str:
+    text = unicodedata.normalize("NFKD", str(value or ""))
+    text = "".join(character for character in text if not unicodedata.combining(character))
+    return re.sub(r"[^a-zA-Z0-9_]+", "_", text).strip("_").casefold()
+
+
+def _section_field_path(event_name: str, field_name: str) -> str:
+    if event_name in GA4_ECOMMERCE_EVENTS:
+        if field_name in GA4_ITEM_FIELDS:
+            return f"ecommerce.items[].{field_name}"
+        if field_name != "event":
+            return f"ecommerce.{field_name}"
+    return field_name
+
+
+def _finite_declared_values(value: Any) -> list[str]:
+    """Accept only clearly exhaustive, small pipe-separated enums from prose workbooks."""
+    if not isinstance(value, str) or "|" not in value:
+        return []
+    candidates = [item.strip() for item in value.split("|") if item.strip()]
+    if not 2 <= len(candidates) <= 20:
+        return []
+    if any(
+        len(item) > 80
+        or "..." in item
+        or item.casefold() in {"xxx", "n/a", "na", "etc"}
+        or "{{" in item
+        for item in candidates
+    ):
+        return []
+    return candidates
+
+
+def _section_declared_predicate(
+    value: Any, expected_type: str | None, field_name: str, event_name: str
+) -> dict[str, Any]:
+    """Interpret only unambiguous constants/enums; leave examples and identities dynamic."""
+    allowed_values = _finite_declared_values(value)
+    if allowed_values:
+        return {"match_rule": "one_of", "allowed_values": allowed_values}
+
+    if field_name == "event" and event_name:
+        return {"match_rule": "equals", "expected_value": event_name}
+    if not _has_cell_value(value):
+        return {"match_rule": "present"}
+
+    text = value.strip() if isinstance(value, str) else ""
+    dynamic = bool(
+        text
+        and re.search(
+            r"(?:\.\.\.|…|\b(?:xxx|example|sample|dynamic|variable|n/?a|etc)\b|\{\{|<[^>]+>)",
+            text,
+            re.IGNORECASE,
+        )
+    )
+    ambiguous_list = bool(text and ("|" in text or re.search(r"\s(?:-|/)\s", text) or "," in text))
+    if dynamic or ambiguous_list:
+        return {"match_rule": "present"}
+
+    normalized_type = str(expected_type or "").strip().casefold()
+    if field_name not in SECTION_EXACT_SINGLETON_FIELDS and normalized_type not in {
+        "boolean",
+        "null",
+    }:
+        # A generic "Values" column often contains one illustrative member, not a
+        # global oracle for products, amounts, labels, methods, or other contextual
+        # values. Flat plans can declare expected_value explicitly; finite pipes remain
+        # strict enums above.
+        return {"match_rule": "present"}
+
+    parsed = _tabular_expected_value(value, expected_type)
+    if normalized_type in {"boolean", "number", "integer", "null"}:
+        return {"match_rule": "equals", "expected_value": parsed}
+    if not isinstance(parsed, str):
+        return {"match_rule": "present"}
+
+    if len(text) <= 120:
+        return {"match_rule": "equals", "expected_value": parsed.strip()}
+    return {"match_rule": "present"}
+
+
+def _sectioned_rows(
+    rows: list[tuple[Any, ...]], sheet_title: str
+) -> tuple[list[dict[str, Any]], dict[str, Any]] | None:
+    """Parse the common two-block plan sheet: event metadata, then a variable table."""
+    event_header_index = None
+    event_column = None
+    for row_index, row in enumerate(rows[:40]):
+        for column, value in enumerate(row):
+            if _header_key(value) in SECTION_EVENT_HEADERS:
+                event_header_index, event_column = row_index, column
+                break
+        if event_header_index is not None:
+            break
+    if event_header_index is None or event_column is None:
+        return None
+
+    event_row_index = next(
+        (
+            index
+            for index in range(event_header_index + 1, min(len(rows), event_header_index + 8))
+            if event_column < len(rows[index]) and _has_cell_value(rows[index][event_column])
+        ),
+        None,
+    )
+    if event_row_index is None:
+        return None
+    event_label = " ".join(str(rows[event_row_index][event_column]).split())
+    state_only = _header_key(event_label) in {"core_datalayer", "core_data_layer", "core_state"}
+    event_name = "" if state_only else _canonical_event_name(event_label)
+
+    variable_header_index = None
+    column_map: dict[str, int] = {}
+    for row_index in range(event_row_index + 1, min(len(rows), event_row_index + 30)):
+        normalized = [_header_key(value) for value in rows[row_index]]
+        field_columns = [
+            index for index, key in enumerate(normalized) if key in SECTION_FIELD_HEADERS
+        ]
+        if not field_columns or not any(key in SECTION_TYPE_HEADERS for key in normalized):
+            continue
+        variable_header_index = row_index
+        column_map["field_path"] = field_columns[0]
+        for index, key in enumerate(normalized):
+            if key in SECTION_TYPE_HEADERS:
+                column_map.setdefault("expected_type", index)
+            elif key in SECTION_STATUS_HEADERS:
+                column_map.setdefault("requiredness", index)
+            elif key in SECTION_VALUE_HEADERS:
+                column_map.setdefault("declared_values", index)
+            elif key in SECTION_SUMMARY_HEADERS:
+                column_map.setdefault("summary", index)
+        break
+    if variable_header_index is None:
+        return None
+
+    output: list[dict[str, Any]] = []
+    ignored: list[dict[str, str]] = []
+    for row_index in range(variable_header_index + 1, len(rows)):
+        row = rows[row_index]
+        field_column = column_map["field_path"]
+        raw_field = row[field_column] if field_column < len(row) else None
+        if not _has_cell_value(raw_field):
+            if output:
+                break
+            continue
+        normalized_field = _header_key(raw_field)
+        if normalized_field in SECTION_STOP_MARKERS:
+            break
+        source = f"{sheet_title}!{row_index + 1}"
+        if re.search(
+            r"(?:data\s*layer\s*\.\s*push|window\s*\.\s*data\s*layer|<script)", str(raw_field), re.I
+        ):
+            ignored.append({"source": source, "reason": "code_example"})
+            continue
+        field_name = _canonical_field_name(raw_field)
+        if not field_name:
+            ignored.append({"source": source, "reason": "empty_field_name"})
+            continue
+        expected_type = None
+        if "expected_type" in column_map and column_map["expected_type"] < len(row):
+            expected_type = str(row[column_map["expected_type"]] or "").strip().casefold()
+            if expected_type in {"numer", "numeric", "float", "double"}:
+                expected_type = "number"
+            if expected_type in {"str", "text", "texte"}:
+                expected_type = "string"
+        requiredness = (
+            row[column_map["requiredness"]]
+            if "requiredness" in column_map and column_map["requiredness"] < len(row)
+            else None
+        )
+        declared_values = (
+            row[column_map["declared_values"]]
+            if "declared_values" in column_map and column_map["declared_values"] < len(row)
+            else None
+        )
+        summary = (
+            row[column_map["summary"]]
+            if "summary" in column_map and column_map["summary"] < len(row)
+            else None
+        )
+        declared_predicate = _section_declared_predicate(
+            declared_values,
+            expected_type,
+            field_name,
+            event_name,
+        )
+        output.append(
+            {
+                "event_name": event_name or event_label,
+                "event_id": _slug(sheet_title, f"event-{event_row_index + 1}"),
+                "event_label": event_label,
+                "mode": "state_only" if state_only else "named_event",
+                "delivery_event_name": "page_view" if state_only else None,
+                "forwarding_required": True if state_only else None,
+                "field_path": _section_field_path(event_name, field_name),
+                **declared_predicate,
+                "expected_type": expected_type or None,
+                "action": (
+                    rows[event_row_index][event_column + 2]
+                    if event_column + 2 < len(rows[event_row_index])
+                    else None
+                ),
+                "notes": {
+                    "requiredness": requiredness,
+                    "summary": summary,
+                    "declared_values": declared_values,
+                },
+                "_source": source,
+            }
+        )
+    if not output:
+        return None
+    return output, {
+        "rows_seen": len(output) + len(ignored),
+        "requirements_compiled": len(output),
+        "carried_event_rows": max(0, len(output) - 1),
+        "rows_ignored": len(ignored),
+        "ignored": ignored,
+        "layout": "event_metadata_plus_variable_table",
+    }
 
 
 def _tabular_rows(
@@ -248,16 +616,20 @@ def _rows_from_xlsx(path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
             rows = list(sheet.iter_rows(values_only=True))
             header = _header_row(rows)
             if header is None:
-                ignored_sheets.append(sheet.title)
-                continue
-            header_index, mapping = header
+                sectioned = _sectioned_rows(rows, sheet.title)
+                if sectioned is None:
+                    ignored_sheets.append(sheet.title)
+                    continue
+                table_rows, table_diagnostics = sectioned
+            else:
+                header_index, mapping = header
+                table_rows, table_diagnostics = _tabular_rows(
+                    rows,
+                    header_index,
+                    mapping,
+                    lambda excel_row, title=sheet.title: f"{title}!{excel_row}",
+                )
             tables.append(sheet.title)
-            table_rows, table_diagnostics = _tabular_rows(
-                rows,
-                header_index,
-                mapping,
-                lambda excel_row, title=sheet.title: f"{title}!{excel_row}",
-            )
             output.extend(table_rows)
             for key in (
                 "rows_seen",
@@ -309,8 +681,14 @@ def _requirements_from_rows(
     requirements = []
     for index, row in enumerate(rows, start=1):
         event_name = str(row.get("event_name") or "").strip()
-        expected = _json_value(row.get("expected_value"))
-        rule = str(row.get("match_rule") or ("equals" if expected not in (None, "") else "present"))
+        source = str(row.get("_source") or f"requirement {index}")
+        expected = _tabular_expected_value(row.get("expected_value"), row.get("expected_type"))
+        allowed = _list_value(row.get("allowed_values"))
+        has_expected = _has_cell_value(row.get("expected_value"))
+        rule = str(
+            row.get("match_rule")
+            or ("one_of" if allowed else "equals" if has_expected else "present")
+        )
         expectation = {
             "event_name": event_name,
             "field_path": str(row.get("field_path") or "event").strip(),
@@ -327,16 +705,28 @@ def _requirements_from_rows(
             "request_path",
             "configuration_path",
             "condition",
+            "delivery_event_name",
+            "forwarding_required",
+            "source_only",
         ):
             if row.get(key) not in (None, ""):
                 expectation[key] = row[key]
-        allowed = _list_value(row.get("allowed_values"))
         if allowed:
             expectation["allowed_values"] = allowed
+        negative = _tabular_boolean(row.get("negative"), field="negative", source=source)
+        source_only = _tabular_boolean(row.get("source_only"), field="source_only", source=source)
+        forwarding_required = _tabular_boolean(
+            row.get("forwarding_required"), field="forwarding_required", source=source
+        )
+        if source_only is not None:
+            expectation["source_only"] = source_only
+        if forwarding_required is not None:
+            expectation["forwarding_required"] = forwarding_required
         requirements.append(
             {
                 "requirement_id": str(row.get("requirement_id") or f"REQ-{index:04d}"),
                 "event_group_id": str(row.get("event_id") or event_name),
+                "event_label": row.get("event_label"),
                 "source": {"reference": row.get("_source"), "plan_order": index},
                 "journey": {
                     "action": row.get("action"),
@@ -347,8 +737,12 @@ def _requirements_from_rows(
                 "scenario": row.get("scenario"),
                 "tag": row.get("tag"),
                 "destination": row.get("destination"),
-                "negative": str(row.get("negative") or "").casefold()
-                in {"1", "true", "yes", "oui"},
+                "negative": negative is True,
+                "mode": row.get("mode"),
+                "source_event_name": row.get("source_event_name"),
+                "delivery_event_name": row.get("delivery_event_name"),
+                "source_only": source_only,
+                "forwarding_required": forwarding_required,
             }
         )
     return {"requirements": requirements, "_normalization": diagnostics}
@@ -529,17 +923,25 @@ class _ClaimBuilder:
         )
 
 
-def _occurrence_predicate(value: Any, *, negative: bool = False) -> dict[str, Any]:
+def _occurrence_predicate(
+    value: Any, *, negative: bool = False, location: str = "event"
+) -> dict[str, Any]:
     if negative:
         return {"operator": "count", "exact": 0}
     if isinstance(value, int) and not isinstance(value, bool):
+        if value < 0:
+            raise PredicateError(f"{location}: expected occurrence cannot be negative.")
         return {"operator": "count", "exact": value}
-    normalized = str(value or "once_per_action").casefold()
+    normalized = str(value or "once_per_action").strip().casefold()
+    if normalized.isdigit():
+        return {"operator": "count", "exact": int(normalized)}
     if normalized in {"none", "never", "absent", "zero"}:
         return {"operator": "count", "exact": 0}
     if normalized in {"one_or_more", "at_least_once"}:
         return {"operator": "count", "minimum": 1}
-    return {"operator": "count", "exact": 1}
+    if normalized in {"once", "once_per_action", "one", "exactly_once"}:
+        return {"operator": "count", "exact": 1}
+    raise PredicateError(f"{location}: unsupported expected occurrence '{value}'.")
 
 
 def _requirement_source(row: dict[str, Any], index: int) -> dict[str, Any]:
@@ -556,7 +958,20 @@ def _safe_path(value: Any, location: str) -> str:
     path = str(value or "").strip()
     if not path:
         raise PredicateError(f"{location}: field path is empty.")
-    if len(path) > 512 or "\n" in path or "```" in path or not valid_path(path):
+    looks_like_example = bool(
+        re.search(
+            r"(?:^\s*(?:ex(?:ample|emple)?|code)\s*:|data\s*layer\s*\.\s*push\s*\(|<script|=>)",
+            path,
+            re.IGNORECASE,
+        )
+    )
+    if (
+        len(path) > 512
+        or "\n" in path
+        or "```" in path
+        or looks_like_example
+        or not valid_path(path)
+    ):
         raise PredicateError(f"{location}: invalid or implausible field path '{path[:80]}'.")
     return path
 
@@ -669,10 +1084,31 @@ def _add_ga4_forwarding_claims(
     source: dict[str, Any],
     applicability: dict[str, Any],
     path: str,
-    source_event_name: str | None,
+    delivery_event_name: str | None,
+    state_event_name: str | None,
+    tag_event_name: str | None,
     ga4_tags: list[dict[str, Any]],
+    destinations: list[str],
     scope: dict[str, Any],
 ) -> None:
+    dynamic_target = {
+        "tag_scope": ["GA4"],
+        "destination_allowlist": destinations,
+    }
+    builder.add(
+        "gtm",
+        {
+            "surface": "preview",
+            "check": "data_layer_state",
+            "path": path,
+            "event_name": state_event_name,
+            "label": f"Tag Assistant Data Layer state - {path}",
+        },
+        predicate,
+        ["preview"],
+        source,
+        applicability=applicability,
+    )
     if expectation.get("resolved_path") in (None, ""):
         builder.add(
             "gtm",
@@ -680,7 +1116,7 @@ def _add_ga4_forwarding_claims(
                 "surface": "preview",
                 "check": "resolved_variable",
                 "path": path,
-                "event_name": source_event_name,
+                "event_name": tag_event_name,
                 "label": f"Resolved variable - {path}",
             },
             predicate,
@@ -688,7 +1124,31 @@ def _add_ga4_forwarding_claims(
             source,
             applicability=applicability,
         )
-    for tag in ga4_tags:
+    targets = ga4_tags or [None]
+    for tag in targets:
+        tag_id = tag["tag_id"] if tag else None
+        destination = tag.get("destination") if tag else None
+        tag_name = tag["tag_name"] if tag else "runtime-discovered GA4 tag"
+        common = {
+            "tag_id": tag_id,
+            "destination": destination,
+            **({} if tag else dynamic_target),
+        }
+        builder.add(
+            "gtm",
+            {
+                "surface": "preview",
+                "check": "effective_mapping",
+                "path": path,
+                "event_name": tag_event_name,
+                **common,
+                "label": f"Effective tag mapping - {tag_name} - {path}",
+            },
+            {"operator": "present"},
+            ["preview"],
+            source,
+            applicability=applicability,
+        )
         if expectation.get("runtime_path") in (None, ""):
             builder.add(
                 "delivery",
@@ -696,17 +1156,16 @@ def _add_ga4_forwarding_claims(
                     "surface": "preview",
                     "check": "runtime_parameter",
                     "path": path,
-                    "event_name": source_event_name,
-                    "tag_id": tag["tag_id"],
-                    "destination": tag.get("destination"),
-                    "label": f"Tag runtime - {tag['tag_name']} - {path}",
+                    "event_name": tag_event_name,
+                    **common,
+                    "label": f"Tag runtime - {tag_name} - {path}",
                 },
                 predicate,
                 ["preview"],
                 source,
                 applicability=applicability,
             )
-        send_required = tag.get("browser_send_required")
+        send_required = tag.get("browser_send_required") if tag else None
         if send_required is None:
             send_required = scope.get("browser_send_required", True)
         if send_required and expectation.get("request_path") in (None, ""):
@@ -716,11 +1175,10 @@ def _add_ga4_forwarding_claims(
                     "surface": "network",
                     "check": "request_parameter",
                     "path": path,
-                    "event_name": source_event_name,
-                    "tag_id": tag["tag_id"],
-                    "destination": tag.get("destination"),
+                    "event_name": delivery_event_name,
+                    **common,
                     "protocol": "ga4",
-                    "label": f"Browser parameter - {tag['tag_name']} - {path}",
+                    "label": f"Browser parameter - {tag_name} - {path}",
                 },
                 predicate,
                 ["network"],
@@ -738,8 +1196,10 @@ def _compile_requirement(
     destinations: list[str],
     scope: dict[str, Any],
     source_event_name: str | None,
+    delivery_event_name: str | None,
     source_only: bool,
     state_only: bool,
+    event_negative: bool,
 ) -> None:
     expectation = row.get("expectation") if isinstance(row.get("expectation"), dict) else row
     source = _requirement_source(row, index)
@@ -752,14 +1212,15 @@ def _compile_requirement(
     predicate = compile_predicate(expectation, location=location)
     condition = expectation.get("condition")
     applicability = condition if isinstance(condition, dict) else {}
-    builder.add(
-        archetype,
-        _claim_target(archetype, path, source_event_name, expectation),
-        predicate,
-        ["datalayer", "source"] if archetype == "source" else [archetype],
-        source,
-        applicability=applicability,
-    )
+    if not (event_negative and archetype == "source"):
+        builder.add(
+            archetype,
+            _claim_target(archetype, path, source_event_name, expectation),
+            predicate,
+            ["datalayer", "source"] if archetype == "source" else [archetype],
+            source,
+            applicability=applicability,
+        )
 
     inferred_tag = expectation.get("tag_name")
     if inferred_tag in (None, "") and len(tags) == 1:
@@ -791,8 +1252,9 @@ def _compile_requirement(
         archetype == "source"
         and forwarding_required
         and not source_only
-        and not state_only
-        and (ga4_tags or ga4_scope)
+        and delivery_event_name is not None
+        and not event_negative
+        and (ga4_tags or (not tags and ga4_scope))
     ):
         _add_ga4_forwarding_claims(
             builder,
@@ -801,8 +1263,11 @@ def _compile_requirement(
             source,
             applicability,
             path,
-            source_event_name,
+            delivery_event_name,
+            None if state_only else delivery_event_name,
+            delivery_event_name,
             ga4_tags,
+            destinations,
             scope,
         )
     for business_rule in expectation.get("business_rules", []):
@@ -828,7 +1293,9 @@ def _add_event_tag_claims(
     source: dict[str, Any],
 ) -> None:
     occurrence = _occurrence_predicate(
-        raw.get("expected_occurrence"), negative=raw.get("negative") is True
+        raw.get("expected_occurrence"),
+        negative=raw.get("negative") is True,
+        location=str(source.get("reference") or "event"),
     )
     builder.add(
         "gtm",
@@ -868,6 +1335,40 @@ def _add_event_tag_claims(
             ["preview"],
             source,
         )
+        dynamic_tag = {
+            "tag_id": None,
+            "tag_name": "Runtime-discovered in-scope tag",
+            "category": None,
+            "expected": "not_fire" if raw.get("negative") is True else "fire",
+            "destination": None,
+            "configuration": None,
+            "consent_requirements": [],
+            "browser_send_required": scope.get("browser_send_required", True),
+        }
+        for check, label in (
+            ("tag_configuration", "Concerned tag effective configuration"),
+            ("tag_firing", "Concerned tag firing"),
+        ):
+            builder.add(
+                "gtm",
+                {
+                    "surface": "preview",
+                    "check": check,
+                    "event_name": event_name,
+                    "tag_id": None,
+                    "tag": dynamic_tag,
+                    "tag_scope": scope.get("tag_scope", []),
+                    "destination_allowlist": destinations,
+                    "label": label,
+                },
+                {"operator": "present"}
+                if check == "tag_configuration"
+                else {"operator": "count", "exact": 0}
+                if raw.get("negative") is True
+                else {"operator": "count", "minimum": 1},
+                ["preview"],
+                source,
+            )
     for tag in tags:
         _add_one_tag_claims(builder, tag, event_name, destinations, scope, source)
     if not tags and scope.get("browser_send_required"):
@@ -882,6 +1383,79 @@ def _add_event_tag_claims(
                     "label": f"Destination routing - {destination}",
                 },
                 occurrence,
+                ["network"],
+                source,
+            )
+
+
+def _add_state_delivery_claims(
+    builder: _ClaimBuilder,
+    raw: dict[str, Any],
+    delivery_event_name: str,
+    destinations: list[str],
+    scope: dict[str, Any],
+    source: dict[str, Any],
+) -> None:
+    """Inspect a global/core state against its GA4 page send without inventing a source event."""
+    builder.add(
+        "gtm",
+        {
+            "surface": "preview",
+            "check": "tag_inventory",
+            "event_name": delivery_event_name,
+            "label": "GTM fired/non-fired inventory",
+        },
+        {"operator": "present"},
+        ["preview"],
+        source,
+    )
+    dynamic_tag = {
+        "tag_id": None,
+        "tag_name": "Runtime-discovered in-scope tag",
+        "category": None,
+        "expected": "fire",
+        "destination": None,
+        "configuration": None,
+        "consent_requirements": [],
+        "browser_send_required": scope.get("browser_send_required", True),
+    }
+    for check, label, predicate in (
+        ("tag_configuration", "Concerned tag effective configuration", {"operator": "present"}),
+        ("tag_firing", "Concerned tag firing", {"operator": "count", "minimum": 1}),
+    ):
+        builder.add(
+            "gtm",
+            {
+                "surface": "preview",
+                "check": check,
+                "event_name": delivery_event_name,
+                "tag_id": None,
+                "tag": dynamic_tag,
+                "tag_scope": scope.get("tag_scope", []),
+                "destination_allowlist": destinations,
+                "label": label,
+            },
+            predicate,
+            ["preview"],
+            source,
+        )
+    if scope.get("browser_send_required"):
+        for destination in destinations:
+            builder.add(
+                "delivery",
+                {
+                    "surface": "network",
+                    "check": "destination_request",
+                    "destination": destination,
+                    "event_name": delivery_event_name,
+                    "protocol": "ga4",
+                    "label": f"Destination routing - {destination}",
+                },
+                _occurrence_predicate(
+                    raw.get("expected_occurrence"),
+                    negative=False,
+                    location=str(source.get("reference") or "state event"),
+                ),
                 ["network"],
                 source,
             )
@@ -903,6 +1477,7 @@ def _add_one_tag_claims(
             "event_name": event_name,
             "tag_id": tag["tag_id"],
             "tag": tag,
+            "destination_allowlist": destinations,
             "label": f"Tag configuration - {tag['tag_name']}",
         },
         {"operator": "present"},
@@ -924,6 +1499,7 @@ def _add_one_tag_claims(
             "event_name": event_name,
             "tag_id": tag["tag_id"],
             "tag": tag,
+            "destination_allowlist": destinations,
             "label": f"Tag firing - {tag['tag_name']}",
         },
         firing_predicate,
@@ -946,6 +1522,7 @@ def _add_one_tag_claims(
             "tag_id": tag["tag_id"],
             "tag": tag,
             "destination": destination,
+            "destination_allowlist": destinations,
             "event_name": event_name if _tag_protocol(tag) == "ga4" else None,
             "protocol": _tag_protocol(tag),
             "label": f"Browser request - {tag['tag_name']}",
@@ -973,9 +1550,27 @@ def _compile_event(
         "state_only",
         "core_state",
     }
-    source_event_name = None if state_only else event_name
+    event_label_name = event_name
+    if state_only:
+        event_name = None
+    explicit_source_event = raw.get("source_event_name")
+    source_event_name = (
+        str(explicit_source_event).strip()
+        if explicit_source_event not in (None, "")
+        else None
+        if state_only
+        else event_name
+    )
+    explicit_delivery_event = raw.get("delivery_event_name")
+    delivery_event_name = (
+        str(explicit_delivery_event).strip()
+        if explicit_delivery_event not in (None, "")
+        else None
+        if state_only
+        else event_name
+    )
     source_only = raw.get("source_only") is True or not scope.get("certify_tags", True)
-    errors: list[str] = []
+    errors: list[str] = [str(value) for value in raw.get("_input_errors", [])]
     builder = _ClaimBuilder(event_id)
     journey = (
         raw.get("journey")
@@ -997,21 +1592,27 @@ def _compile_event(
         ["page"],
         default_source,
     )
-    if event_name and not state_only:
-        builder.add(
-            "source",
-            {
-                "surface": "source",
-                "check": "event_occurrence",
-                "event_name": event_name,
-                "label": f"dataLayer/direct source - {event_name}",
-            },
-            _occurrence_predicate(
-                raw.get("expected_occurrence"), negative=raw.get("negative") is True
-            ),
-            ["datalayer", "source"],
-            default_source,
-        )
+    if source_event_name:
+        try:
+            source_occurrence = _occurrence_predicate(
+                raw.get("expected_occurrence"),
+                negative=raw.get("negative") is True,
+                location=str(default_source["reference"]),
+            )
+            builder.add(
+                "source",
+                {
+                    "surface": "source",
+                    "check": "event_occurrence",
+                    "event_name": source_event_name,
+                    "label": f"dataLayer/direct source - {source_event_name}",
+                },
+                source_occurrence,
+                ["datalayer", "source"],
+                default_source,
+            )
+        except PredicateError as error:
+            errors.append(str(error))
 
     for index, row in enumerate(requirements, start=1):
         try:
@@ -1023,14 +1624,37 @@ def _compile_event(
                 destinations=destinations,
                 scope=scope,
                 source_event_name=source_event_name,
+                delivery_event_name=delivery_event_name,
                 source_only=source_only,
                 state_only=state_only,
+                event_negative=raw.get("negative") is True,
             )
         except PredicateError as error:
             errors.append(str(error))
 
-    if not source_only and not state_only:
-        _add_event_tag_claims(builder, raw, event_name, tags, destinations, scope, default_source)
+    if not source_only and delivery_event_name is not None:
+        try:
+            if state_only:
+                _add_state_delivery_claims(
+                    builder,
+                    raw,
+                    delivery_event_name,
+                    destinations,
+                    scope,
+                    default_source,
+                )
+            else:
+                _add_event_tag_claims(
+                    builder,
+                    raw,
+                    delivery_event_name,
+                    tags,
+                    destinations,
+                    scope,
+                    default_source,
+                )
+        except PredicateError as error:
+            errors.append(str(error))
 
     builder.add(
         "sequence",
@@ -1055,10 +1679,31 @@ def _compile_event(
         _scenario(value, event_id, index, negative=value in negative)
         for index, value in enumerate([*explicit, *negative], start=1)
     ]
+    known_dimensions = [
+        dict(value) for value in raw.get("known_dimensions", []) if isinstance(value, dict)
+    ]
+    known_names = {str(value.get("name")) for value in known_dimensions}
+    for row in requirements:
+        expectation = row.get("expectation") if isinstance(row.get("expectation"), dict) else row
+        allowed = expectation.get("allowed_values")
+        path = str(expectation.get("field_path") or "")
+        if not path or not isinstance(allowed, list) or not allowed or path in known_names:
+            continue
+        known_dimensions.append(
+            {
+                "name": path,
+                "kind": "manageable_finite",
+                "material": True,
+                "values": [{"value": value, "source": "plan"} for value in allowed],
+            }
+        )
+        known_names.add(path)
     return {
         "event_id": event_id,
         "event_name": event_name,
-        "label": str(raw.get("label") or raw.get("event_label") or event_name or event_id),
+        "source_event_name": source_event_name,
+        "delivery_event_name": delivery_event_name,
+        "label": str(raw.get("label") or raw.get("event_label") or event_label_name or event_id),
         "plan_order": order,
         "mode": "state_only" if state_only else "named_event",
         "journey": journey,
@@ -1067,7 +1712,7 @@ def _compile_event(
         "tags": tags,
         "destinations": destinations,
         "explicit_scenarios": scenarios,
-        "known_dimensions": raw.get("known_dimensions", []),
+        "known_dimensions": known_dimensions,
         "allowed_companions": raw.get("allowed_companions", []),
         "required_consent_signals": raw.get("required_consent_signals", []),
         "compile_errors": errors,
@@ -1106,17 +1751,43 @@ def _event_inputs(value: dict[str, Any]) -> list[tuple[dict[str, Any], list[dict
         source = row.get("source") if isinstance(row.get("source"), dict) else {}
         normalized = {**row, "source": {**source, "plan_order": source.get("plan_order", index)}}
         grouped.setdefault(group, []).append(normalized)
-    return [
-        (
-            {
-                "event_id": group,
-                "event_name": rows[0].get("expectation", rows[0]).get("event_name", group),
-                "journey": rows[0].get("journey", {}),
-            },
-            rows,
-        )
-        for group, rows in grouped.items()
-    ]
+    output = []
+    for group, rows in grouped.items():
+        first_expectation = rows[0].get("expectation", rows[0])
+        occurrence_values = {
+            str(expectation.get("expected_occurrence"))
+            for row in rows
+            if (
+                expectation := row.get("expectation")
+                if isinstance(row.get("expectation"), dict)
+                else row
+            ).get("expected_occurrence")
+            not in (None, "")
+        }
+        negative_values = {row.get("negative") is True for row in rows}
+        input_errors = []
+        if len(occurrence_values) > 1:
+            input_errors.append(
+                "Conflicting expected_occurrence values exist inside one event group."
+            )
+        if len(negative_values) > 1:
+            input_errors.append("Negative and positive requirements are mixed in one event group.")
+        metadata = {
+            key: next((row.get(key) for row in rows if row.get(key) not in (None, "")), None)
+            for key in EVENT_METADATA_FIELDS
+        }
+        raw = {
+            "event_id": group,
+            "event_name": first_expectation.get("event_name", group),
+            "event_label": rows[0].get("event_label"),
+            "journey": rows[0].get("journey", {}),
+            "negative": True in negative_values,
+            "expected_occurrence": next(iter(occurrence_values), "once_per_action"),
+            "_input_errors": input_errors,
+            **{key: item for key, item in metadata.items() if item not in (None, "")},
+        }
+        output.append((raw, rows))
+    return output
 
 
 def normalize_plan(
@@ -1128,14 +1799,38 @@ def normalize_plan(
     path = Path(source).expanduser().resolve()
     value, source_kind, digest = _load_source(path)
     normalized_scope = _normalize_scope(scope)
+    inputs = _event_inputs(value)
+    seen_ids: dict[str, int] = {}
+    prepared_inputs = []
+    for event, requirements in inputs:
+        raw = dict(event)
+        base_id = str(
+            raw.get("event_id")
+            or raw.get("event_group_id")
+            or raw.get("event_name")
+            or raw.get("name")
+            or "event"
+        )
+        seen_ids[base_id] = seen_ids.get(base_id, 0) + 1
+        if seen_ids[base_id] > 1:
+            explicit_id = raw.get("event_id") not in (None, "") or raw.get(
+                "event_group_id"
+            ) not in (
+                None,
+                "",
+            )
+            if explicit_id:
+                raise StateError(f"Duplicate explicit event identity: {base_id}")
+            raw["event_id"] = f"{base_id}--{seen_ids[base_id]}"
+        prepared_inputs.append((raw, requirements))
     events = [
         _compile_event(event, requirements, order, normalized_scope)
-        for order, (event, requirements) in enumerate(_event_inputs(value), start=1)
+        for order, (event, requirements) in enumerate(prepared_inputs, start=1)
     ]
     if not events:
         raise StateError("Tracking plan contains no event groups.")
     claim_count = sum(event["claim_count"] for event in events)
-    requirement_count = sum(len(requirements) for _, requirements in _event_inputs(value))
+    requirement_count = sum(len(requirements) for _, requirements in inputs)
     source_details = {"kind": source_kind, "path": str(path), "sha256": digest}
     if isinstance(value.get("_normalization"), dict):
         source_details["normalization"] = value["_normalization"]

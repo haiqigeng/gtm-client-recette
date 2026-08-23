@@ -19,10 +19,18 @@ def decode_ads_sends(request: dict[str, Any]) -> list[dict[str, Any]]:
         host.endswith(suffix)
         for suffix in ("googleadservices.com", "google.com", "doubleclick.net")
     )
-    if not recognized_host or "conversion" not in path:
+    protocol_hint = request.get("protocol_hint")
+    if not ((recognized_host and "conversion" in path) or protocol_hint == "google_ads"):
         return []
     query = request.get("query") if isinstance(request.get("query"), dict) else {}
     conversion_id = _first(query.get("google_conversion_id", query.get("conversion_id")))
+    if conversion_id is None:
+        metadata = (
+            request.get("protocol_identifiers")
+            if isinstance(request.get("protocol_identifiers"), dict)
+            else {}
+        )
+        conversion_id = metadata.get("conversion_id")
     if conversion_id is None:
         fragments = [part for part in path.split("/") if part]
         conversion_id = next((part for part in fragments if part.isdigit()), None)
@@ -43,5 +51,6 @@ def decode_ads_sends(request: dict[str, Any]) -> list[dict[str, Any]]:
             "correlation_id": request.get("correlation_id"),
             "endpoint": endpoint,
             "outcome": request.get("outcome"),
+            "collection_complete": request.get("collection_complete") is True,
         }
     ]

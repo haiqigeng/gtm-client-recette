@@ -1,6 +1,6 @@
 # Contributing
 
-The source version is **v5.0.0**. Use synthetic fixtures only. Never commit
+The source version is **v5.1.0**. Use synthetic fixtures only. Never commit
 client plans, domains, container or destination IDs, browser traces,
 screenshots, reports, credentials, tokens, form data, or run artifacts.
 
@@ -16,6 +16,9 @@ screenshots, reports, credentials, tokens, form data, or run artifacts.
 - Preserve continuous call-time source and request deltas, strict JSON
   types/states, declared-only wire coercion, document/action/Preview identity,
   evidence-source non-substitution and independent business outcome.
+- Keep the Tag Assistant API Call, Data Layer state, Variables, tag inventory,
+  effective tag mapping/runtime and browser request as separate authorities. Compare
+  every destination-applicable planned field on every applicable surface.
 - Preserve six diagnostic domains plus confidence and coverage gates. Detailed
   operational rows must remain applicable and per-target, not fixed stages.
 - Semantic annotations may only add evidence-backed `FAIL` or `REVIEW`; the
@@ -36,12 +39,12 @@ python -m ruff check --no-cache scripts tests
 python -m ruff format --check scripts tests
 python -m unittest discover -s tests -v
 python -B tests/run_browser_helpers.py
-python -B scripts/check_release.py --tag v5.0.0
+python -B scripts/check_release.py --tag v5.1.0
 ```
 
 ## Versioning
 
-Use semantic tags and archive names. Store `5.0.0` in `pyproject.toml`, tag it
-as `v5.0.0`, and package it as `gtm-client-recette-v5.0.0.zip`. Increment major
+Use semantic tags and archive names. Store `5.1.0` in `pyproject.toml`, tag it
+as `v5.1.0`, and package it as `gtm-client-recette-v5.1.0.zip`. Increment major
 for incompatible architecture/contracts, minor for compatible capability, and
 patch for compatible corrections.

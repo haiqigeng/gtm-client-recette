@@ -246,7 +246,7 @@ def _path_tokens(path: str) -> list[str | int | None] | None:
                 if closing < 0:
                     return None
                 content = value[cursor:closing]
-                if content == "":
+                if content in {"", "*"}:
                     tokens.append(None)
                 elif content.isdigit():
                     tokens.append(int(content))

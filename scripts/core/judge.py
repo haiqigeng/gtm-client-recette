@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import urlsplit
 
-from client_side_rules import MISSING, evaluate_business_rule, path_value
+from client_side_rules import MISSING, evaluate_business_rule, path_value, path_values
 from value_semantics import strict_equal
 
 from .constants import DOMAINS, compact_reason, worst_status
@@ -33,6 +33,45 @@ def _summary(value: Any, *, depth: int = 0) -> Any:
             output["..."] = f"{len(value) - 10} more keys"
         return output
     return value
+
+
+def _one_or_distinct(values: list[Any]) -> Any:
+    distinct: list[Any] = []
+    seen: set[str] = set()
+    for value in values:
+        key = canonical_json(value)
+        if key not in seen:
+            seen.add(key)
+            distinct.append(value)
+    return distinct[0] if len(distinct) == 1 else distinct if distinct else MISSING
+
+
+def _path_observations(payloads: list[Any], path: str) -> Any:
+    values = [value for payload in payloads for value in path_values(payload, path)]
+    if "[]" in path or "[*]" in path:
+        return values if values else MISSING
+    return _one_or_distinct(values)
+
+
+def _evaluate_claim_value(
+    actual: Any, claim: dict[str, Any], *, wire: bool = False
+) -> dict[str, Any]:
+    predicate = claim.get("predicate", {})
+    path = str(claim.get("target", {}).get("path") or "")
+    operator = predicate.get("operator")
+    if (
+        isinstance(actual, list)
+        and ("[]" in path or "[*]" in path)
+        and operator not in {"count", "order"}
+    ):
+        results = [evaluate_predicate(value, predicate, wire=wire) for value in actual]
+        failing = next((result for result in results if result["status"] != "PASS"), None)
+        return failing or {
+            "status": "PASS",
+            "reason_code": "predicate.pass",
+            "reason": f"Predicate satisfied by all {len(actual)} addressed values.",
+        }
+    return evaluate_predicate(actual, predicate, wire=wire)
 
 
 def _inspection(
@@ -129,6 +168,8 @@ def _applicable(claim: dict[str, Any], scenario: dict[str, Any]) -> bool | None:
     if not isinstance(condition, dict) or not condition.get("path"):
         return None
     actual = path_value(scenario.get("values", {}), str(condition["path"]))
+    if actual is MISSING:
+        return None
     predicate = (
         condition.get("predicate") if isinstance(condition.get("predicate"), dict) else condition
     )
@@ -140,25 +181,19 @@ def _applicable(claim: dict[str, Any], scenario: dict[str, Any]) -> bool | None:
     return None
 
 
-def _collection_complete(model: dict[str, Any], adapter: str) -> bool:
-    collection = model.get("collections", {}).get(adapter, {})
-    if collection.get("complete") is True:
-        return True
-    if adapter == "datalayer":
-        return any(row.get("collection_complete") is True for row in model["source_calls"])
+def _evidence_collection_complete(evidence: dict[str, list[dict[str, Any]]], adapter: str) -> bool:
+    if adapter == "preview":
+        return any(
+            row.get("complete") is True and row.get("event_list_complete") is True
+            for row in evidence.get("preview_windows", [])
+        ) or _preview_complete(evidence.get("preview_events", []), "event_list")
     if adapter == "network":
-        return any(row.get("collection_complete") is True for row in model["requests"])
+        return any(
+            row.get("complete") is True for row in evidence.get("network_windows", [])
+        ) or any(
+            row.get("collection_complete") is True for row in evidence.get("logical_sends", [])
+        )
     return False
-
-
-def _authoritative_source_complete(model: dict[str, Any]) -> bool:
-    datalayer = model.get("collections", {}).get("datalayer", {})
-    direct = model.get("collections", {}).get("source", {})
-    return (
-        datalayer.get("complete") is True
-        and datalayer.get("capture_mode") == "call_time"
-        and datalayer.get("document_start") is True
-    ) or direct.get("complete") is True
 
 
 def _capability(model: dict[str, Any], surface: str) -> bool | str:
@@ -179,6 +214,10 @@ def _binding_for_evidence(
         for key in ("pages", "source_calls", "requests")
         for row in evidence.get(key, [])
         if row.get("document_id")
+        # A navigation action is expected to start on one document and produce its
+        # measurement evidence on the next. Keep the before page for business/reality
+        # comparisons, but do not treat it as an occurrence-document conflict.
+        and not (key == "pages" and row.get("phase") == "before")
     }
     bindings = model.get("bindings", [])
     binding = next(
@@ -205,6 +244,9 @@ def _binding_identity_mismatch(
     binding: dict[str, Any],
     document_ids: set[str],
     evidence: dict[str, list[dict[str, Any]]],
+    *,
+    expected_containers: set[str],
+    action_id: str | None,
 ) -> dict[str, Any] | None:
     bound_document = str(binding.get("document_id") or "")
     foreign_documents = sorted(
@@ -217,7 +259,34 @@ def _binding_identity_mismatch(
     foreign_epochs = sorted(
         value for value in preview_epochs if bound_epoch and value != bound_epoch
     )
-    if not foreign_documents and not foreign_epochs:
+    foreign_preview = [
+        row.get("occurrence_id")
+        for row in evidence.get("preview_events", [])
+        if expected_containers
+        and not expected_containers.issubset(
+            {str(value) for value in row.get("container_ids", []) if value}
+        )
+    ]
+    unbound_worker_requests = [
+        row.get("request_id")
+        for row in evidence.get("requests", [])
+        if row.get("document_id") in (None, "")
+        and row.get("worker_id") not in (None, "")
+        and (
+            not action_id
+            or str(row.get("action_id") or "") != action_id
+            or (
+                row.get("browser_context_id") not in (None, binding.get("browser_context_id"))
+                or row.get("tab_id") not in (None, binding.get("tab_id"))
+            )
+        )
+    ]
+    if (
+        not foreign_documents
+        and not foreign_epochs
+        and not foreign_preview
+        and not unbound_worker_requests
+    ):
         return None
     refs = [
         binding.get("evidence_ref"),
@@ -233,6 +302,9 @@ def _binding_identity_mismatch(
             "evidence_documents": sorted(document_ids),
             "bound_preview_epoch": bound_epoch,
             "evidence_preview_epochs": sorted(preview_epochs),
+            "expected_preview_containers": sorted(expected_containers),
+            "foreign_preview_occurrences": foreign_preview,
+            "unattributed_worker_requests": unbound_worker_requests,
         },
         "evidence": refs,
     }
@@ -317,7 +389,16 @@ def _binding_result(
             scenario_id=scenario_id,
         )
 
-    mismatch = _binding_identity_mismatch(binding, document_ids, evidence)
+    expected_containers = set(plan.get("scope", {}).get("expected_container", [])) or set(
+        binding.get("active_container_ids", [])
+    )
+    mismatch = _binding_identity_mismatch(
+        binding,
+        document_ids,
+        evidence,
+        expected_containers=expected_containers,
+        action_id=action.get("action_id") if isinstance(action, dict) else None,
+    )
     if mismatch is not None:
         return _inspection(
             claim,
@@ -483,7 +564,7 @@ def _settlement_inspection(
         "predicate": {"operator": "present"},
         "label": "Action settlement",
     }
-    health = evidence.get("health", [])
+    health = [row for row in evidence.get("health", []) if row.get("phase") == "after"]
     latest = health[-1] if health else None
     if latest is None:
         return _inspection(
@@ -528,9 +609,13 @@ def _source_payloads(
 ) -> tuple[list[Any], list[str], bool]:
     payloads: list[Any] = []
     refs: list[str] = []
-    direct_complete = False
+    direct_complete = _source_windows_complete(evidence)
     for row in evidence["source_calls"]:
-        if row.get("capture_mode") != "call_time" or row.get("document_start") is not True:
+        call_time = row.get("capture_mode") == "call_time" and row.get("document_start") is True
+        preview_api = (
+            row.get("capture_mode") == "preview_api_call" and row.get("authoritative") is True
+        )
+        if not (call_time or preview_api):
             continue
         for argument in row.get("arguments", []):
             if not isinstance(argument, dict):
@@ -540,11 +625,31 @@ def _source_payloads(
                 refs.append(row.get("evidence_ref"))
         direct_complete = direct_complete or row.get("collection_complete") is True
     for signal in evidence["direct_signals"]:
+        if signal.get("authoritative") is not True:
+            continue
         if event_name is None or signal.get("event_name") == event_name:
             payloads.append(signal.get("payload", signal.get("value")))
             refs.append(signal.get("evidence_ref"))
-        direct_complete = direct_complete or signal.get("collection_complete") is True
-    return payloads, refs, direct_complete
+        direct_complete = direct_complete or (
+            signal.get("collection_complete") is True
+            and (
+                signal.get("capture_mode") == "call_time"
+                or signal.get("event_list_complete") is True
+            )
+        )
+    return payloads, list(dict.fromkeys(refs)), direct_complete
+
+
+def _source_windows_complete(evidence: dict[str, list[dict[str, Any]]]) -> bool:
+    return any(
+        window.get("complete") is True
+        and window.get("truncated") is not True
+        and (
+            (window.get("capture_mode") == "call_time" and window.get("document_start") is True)
+            or window.get("authoritative_complete") is True
+        )
+        for window in evidence.get("source_windows", [])
+    )
 
 
 def _acquisition_inspection(
@@ -607,7 +712,6 @@ def _acquisition_inspection(
 def _source_result(
     claim: dict[str, Any],
     evidence: dict[str, list[dict[str, Any]]],
-    model: dict[str, Any],
     scenario_id: str,
 ) -> dict[str, Any]:
     target = claim.get("target", {})
@@ -618,10 +722,7 @@ def _source_result(
         actual: Any = len(payloads)
     else:
         path = str(target.get("path") or "")
-        values = [path_value(payload, path) for payload in payloads]
-        present = [value for value in values if value is not MISSING]
-        actual = present[0] if len(present) == 1 else present if present else MISSING
-    complete = complete or _authoritative_source_complete(model)
+        actual = _path_observations(payloads, path)
     if truncated:
         return _inspection(
             claim,
@@ -644,7 +745,7 @@ def _source_result(
             check_next="Document-start source collector or declared direct source",
             scenario_id=scenario_id,
         )
-    result = evaluate_predicate(actual, claim.get("predicate", {}))
+    result = _evaluate_claim_value(actual, claim)
     return _inspection(
         claim,
         result["status"],
@@ -702,6 +803,36 @@ def _find_tag(rows: list[dict[str, Any]], tag_id: str) -> tuple[list[dict[str, A
         )
         fired_count = max(fired_count, explicit_count)
     return details, fired_count, seen_not_fired
+
+
+def _concerned_tag_ids(rows: list[dict[str, Any]], target: dict[str, Any]) -> list[str]:
+    tag_id = str(target.get("tag_id") or "")
+    if tag_id:
+        return [tag_id]
+    scopes = target.get("tag_scope", [])
+    output = []
+    for event in rows:
+        for tag in event.get("tags", []):
+            if isinstance(tag, dict) and _tag_matches_scope(tag, scopes):
+                identity = _tag_identity(tag)
+                if identity and identity not in output:
+                    output.append(identity)
+    return output
+
+
+def _find_concerned_tags(
+    rows: list[dict[str, Any]], target: dict[str, Any]
+) -> tuple[list[dict[str, Any]], int, bool, list[str]]:
+    identities = _concerned_tag_ids(rows, target)
+    details: list[dict[str, Any]] = []
+    fired_count = 0
+    seen_not_fired = False
+    for identity in identities:
+        found, count, not_fired = _find_tag(rows, identity)
+        details.extend(found)
+        fired_count += count
+        seen_not_fired = seen_not_fired or not_fired
+    return details, fired_count, seen_not_fired, identities
 
 
 def _tag_identity(value: Any) -> str:
@@ -769,9 +900,13 @@ def _tag_matches_scope(tag: Any, scopes: list[Any]) -> bool:
 
 
 def _gtm_missing_result(
-    claim: dict[str, Any], model: dict[str, Any], check: Any, scenario_id: str
+    claim: dict[str, Any],
+    model: dict[str, Any],
+    evidence: dict[str, list[dict[str, Any]]],
+    check: Any,
+    scenario_id: str,
 ) -> dict[str, Any]:
-    complete = _collection_complete(model, "preview")
+    complete = _evidence_collection_complete(evidence, "preview")
     if check == "event_match" and complete:
         result = evaluate_predicate(0, claim.get("predicate", {}))
         return _inspection(
@@ -969,9 +1104,7 @@ def _gtm_variable_result(
     claim: dict[str, Any], rows: list[dict[str, Any]], refs: list[Any], scenario_id: str
 ) -> dict[str, Any]:
     path = str(claim.get("target", {}).get("path"))
-    values = [path_value(row.get("resolved_state", {}), path) for row in rows]
-    values = [value for value in values if value is not MISSING]
-    actual = values[0] if len(values) == 1 else values if values else MISSING
+    actual = _path_observations([row.get("resolved_state", {}) for row in rows], path)
     if actual is MISSING and not _preview_complete(rows, "variables"):
         return _inspection(
             claim,
@@ -982,7 +1115,7 @@ def _gtm_variable_result(
             evidence=refs,
             scenario_id=scenario_id,
         )
-    result = evaluate_predicate(actual, claim.get("predicate", {}))
+    result = _evaluate_claim_value(actual, claim)
     return _inspection(
         claim,
         result["status"],
@@ -991,6 +1124,119 @@ def _gtm_variable_result(
         observed=actual,
         evidence=refs,
         check_next=f"GTM variable {path}" if result["status"] != "PASS" else None,
+        scenario_id=scenario_id,
+    )
+
+
+def _gtm_data_layer_state_result(
+    claim: dict[str, Any], rows: list[dict[str, Any]], refs: list[Any], scenario_id: str
+) -> dict[str, Any]:
+    path = str(claim.get("target", {}).get("path") or "")
+    actual = _path_observations([row.get("data_layer_state", {}) for row in rows], path)
+    complete = _preview_complete(rows, "data_layer_state")
+    if actual is MISSING and not complete:
+        return _inspection(
+            claim,
+            "BLOCKED",
+            "gtm.data_layer_state_partial",
+            "The Tag Assistant Data Layer state after the selected message was not completely extracted.",
+            check_next=f"Tag Assistant Data Layer tab value {path}",
+            evidence=refs,
+            scenario_id=scenario_id,
+        )
+    result = _evaluate_claim_value(actual, claim)
+    return _inspection(
+        claim,
+        result["status"],
+        f"gtm.data_layer_state.{result['reason_code']}",
+        result["reason"],
+        observed=actual,
+        evidence=refs,
+        check_next=f"Tag Assistant Data Layer tab value {path}"
+        if result["status"] != "PASS"
+        else None,
+        scenario_id=scenario_id,
+    )
+
+
+def _configuration_mentions_path(value: Any, path: str) -> bool:
+    normalized_path = path.casefold()
+    leaf = normalized_path.rsplit(".", 1)[-1].replace("[]", "")
+    if isinstance(value, dict):
+        for key, child in value.items():
+            normalized_key = str(key).casefold()
+            if normalized_key in {normalized_path, leaf}:
+                return True
+            if _configuration_mentions_path(child, path):
+                return True
+        return False
+    if isinstance(value, list):
+        return any(_configuration_mentions_path(child, path) for child in value)
+    if isinstance(value, str):
+        normalized = value.casefold()
+        return normalized_path in normalized or leaf == normalized.strip("{} ")
+    if path.startswith("ecommerce.") and value is True:
+        return False
+    return False
+
+
+def _effective_mapping_result(
+    claim: dict[str, Any],
+    rows: list[dict[str, Any]],
+    refs: list[Any],
+    details: list[dict[str, Any]],
+    tag_ids: list[str],
+    scenario_id: str,
+) -> dict[str, Any]:
+    path = str(claim.get("target", {}).get("path") or "")
+    candidates = [path]
+    if path == "event":
+        candidates.append("event_name")
+    if path.startswith("ecommerce."):
+        candidates.append(path.removeprefix("ecommerce."))
+    direct = [
+        _tag_identity(tag)
+        for tag in details
+        if _configuration_mentions_path(tag.get("configuration"), path)
+    ]
+    runtime = []
+    for tag in details:
+        payload = tag.get("runtime_parameters", tag.get("runtime_payload", {}))
+        if any(path_values(payload, candidate) for candidate in candidates):
+            runtime.append(_tag_identity(tag))
+    covered = list(dict.fromkeys([*direct, *runtime]))
+    if covered:
+        return _inspection(
+            claim,
+            "PASS",
+            "gtm.effective_mapping_proven",
+            "The concerned tag's direct or effective object/settings mapping resolves this planned parameter.",
+            observed={
+                "covered_by_tags": covered,
+                "direct_configuration": direct,
+                "runtime": runtime,
+            },
+            expected={"path": path, "concerned_tags": tag_ids},
+            evidence=refs,
+            scenario_id=scenario_id,
+        )
+    complete = _preview_complete(rows, "tag_details") and (
+        _preview_complete(rows, "runtime_parameters")
+        or any(tag.get("runtime_complete") is True for tag in details)
+    )
+    return _inspection(
+        claim,
+        "FAIL" if complete else "BLOCKED",
+        "gtm.effective_mapping_absent" if complete else "gtm.effective_mapping_partial",
+        (
+            "No direct, object/settings, automatic, or runtime mapping covers the planned parameter."
+            if complete
+            else "Effective tag mapping evidence is incomplete."
+        ),
+        observed={"concerned_tags": tag_ids, "path": path},
+        expected="Effective mapping for every destination-applicable planned parameter",
+        evidence=refs,
+        check_next=f"Concerned tag mapping/runtime value for {path}",
         scenario_id=scenario_id,
     )
 
@@ -1005,7 +1251,7 @@ def _gtm_result(
     rows = _preview_matches(evidence, target.get("event_name"))
     check = target.get("check")
     if not rows:
-        return _gtm_missing_result(claim, model, check, scenario_id)
+        return _gtm_missing_result(claim, model, evidence, check, scenario_id)
 
     refs = [ref for row in rows for ref in row.get("evidence_refs", [])]
     if check == "event_match":
@@ -1026,19 +1272,35 @@ def _gtm_result(
         return _gtm_discovery_result(claim, rows, refs, scenario_id)
 
     tag_id = str(target.get("tag_id") or "")
-    details, fired_count, seen_not_fired = _find_tag(rows, tag_id)
+    details, fired_count, seen_not_fired, tag_ids = _find_concerned_tags(rows, target)
+    display_tag = tag_id or ", ".join(tag_ids) or "runtime-discovered in-scope tag"
     if check == "tag_firing":
         return _gtm_firing_result(
-            claim, rows, refs, tag_id, fired_count, seen_not_fired, scenario_id
+            claim, rows, refs, display_tag, fired_count, seen_not_fired, scenario_id
         )
     if check == "tag_configuration":
+        if not tag_ids:
+            return _gtm_missing_result(claim, model, evidence, check, scenario_id)
+        if not tag_id and len(tag_ids) > 1:
+            configuration_values = [tag.get("configuration") for tag in details]
+            if any(value is None for value in configuration_values):
+                return _inspection(
+                    claim,
+                    "BLOCKED",
+                    "gtm.dynamic_tag_configuration_partial",
+                    "Multiple concerned runtime tags were found and at least one configuration is incomplete.",
+                    observed=tag_ids,
+                    evidence=refs,
+                    check_next="Concerned in-scope tag configurations",
+                    scenario_id=scenario_id,
+                )
         cached, cached_refs, conflict = _cached_tag_configuration(model, rows, tag_id)
         return _gtm_configuration_result(
             claim,
             rows,
             refs,
             details,
-            tag_id,
+            display_tag,
             scenario_id,
             cached,
             cached_refs,
@@ -1046,6 +1308,10 @@ def _gtm_result(
         )
     if check == "resolved_variable":
         return _gtm_variable_result(claim, rows, refs, scenario_id)
+    if check == "data_layer_state":
+        return _gtm_data_layer_state_result(claim, rows, refs, scenario_id)
+    if check == "effective_mapping":
+        return _effective_mapping_result(claim, rows, refs, details, tag_ids, scenario_id)
     return _inspection(
         claim,
         "BLOCKED",
@@ -1062,11 +1328,24 @@ def _destination_matches(expected: Any, observed: Any) -> bool:
     return str(expected).strip().casefold() == str(observed or "").strip().casefold()
 
 
+def _destination_in_scope(target: dict[str, Any], observed: Any) -> bool:
+    expected = target.get("destination") or target.get("tag", {}).get("destination")
+    if expected not in (None, ""):
+        return _destination_matches(expected, observed)
+    allowlist = [
+        str(value).strip().casefold()
+        for value in target.get("destination_allowlist", [])
+        if str(value).strip()
+    ]
+    if allowlist:
+        return str(observed or "").strip().casefold() in allowlist
+    return True
+
+
 def _delivery_candidates(
     evidence: dict[str, list[dict[str, Any]]], target: dict[str, Any]
 ) -> list[dict[str, Any]]:
     event_name = target.get("event_name")
-    destination = target.get("destination") or target.get("tag", {}).get("destination")
     protocol = target.get("protocol")
     tag_id = str(target.get("tag_id") or "")
     output = []
@@ -1075,7 +1354,7 @@ def _delivery_candidates(
             continue
         if event_name and send.get("event_name") != event_name:
             continue
-        if destination and not _destination_matches(destination, send.get("destination")):
+        if not _destination_in_scope(target, send.get("destination")):
             continue
         linked_tags = {str(item) for item in send.get("tag_ids", [])}
         if tag_id and linked_tags and tag_id not in linked_tags:
@@ -1092,7 +1371,8 @@ def _runtime_parameter_result(
     target = claim.get("target", {})
     rows = _preview_matches(evidence, target.get("event_name"))
     tag_id = str(target.get("tag_id") or "")
-    details, fired_count, _ = _find_tag(rows, tag_id)
+    details, fired_count, _, tag_ids = _find_concerned_tags(rows, target)
+    display_tag = tag_id or ", ".join(tag_ids) or "runtime-discovered in-scope tag"
     refs = [ref for row in rows for ref in row.get("evidence_refs", [])]
     if fired_count == 0:
         return _inspection(
@@ -1102,7 +1382,7 @@ def _runtime_parameter_result(
             "The tag did not execute, so runtime parameters were not created.",
             observed="not observed",
             evidence=refs,
-            check_next=f"Tag firing and runtime mapping for {tag_id}",
+            check_next=f"Tag firing and runtime mapping for {display_tag}",
             scenario_id=scenario_id,
         )
     path = str(target.get("path") or "")
@@ -1114,17 +1394,12 @@ def _runtime_parameter_result(
     values = []
     for tag in details:
         runtime = tag.get("runtime_parameters", tag.get("runtime_payload", {}))
-        value = next(
-            (
-                candidate
-                for candidate in (path_value(runtime, item) for item in candidates)
-                if candidate is not MISSING
-            ),
-            MISSING,
-        )
-        if value is not MISSING:
-            values.append(value)
-    actual = values[0] if len(values) == 1 else values if values else MISSING
+        for candidate in candidates:
+            candidate_values = path_values(runtime, candidate)
+            if candidate_values:
+                values.extend(candidate_values)
+                break
+    actual = values if ("[]" in path or "[*]" in path) and values else _one_or_distinct(values)
     if actual is MISSING:
         runtime_complete = _preview_complete(rows, "runtime_parameters") or any(
             tag.get("runtime_complete") is True for tag in details
@@ -1138,11 +1413,11 @@ def _runtime_parameter_result(
                 if runtime_complete
                 else "Runtime parameter detail was not completely observed."
             ),
-            check_next=f"Runtime parameter {path} for {tag_id}",
+            check_next=f"Runtime parameter {path} for {display_tag}",
             evidence=refs,
             scenario_id=scenario_id,
         )
-    result = evaluate_predicate(actual, claim.get("predicate", {}))
+    result = _evaluate_claim_value(actual, claim)
     return _inspection(
         claim,
         result["status"],
@@ -1158,18 +1433,16 @@ def _runtime_parameter_result(
 def _request_parameter_result(
     claim: dict[str, Any],
     sends: list[dict[str, Any]],
-    model: dict[str, Any],
+    evidence: dict[str, list[dict[str, Any]]],
     scenario_id: str,
 ) -> dict[str, Any]:
     target = claim.get("target", {})
     path = str(target.get("path") or "")
     refs = [send.get("evidence_ref") for send in sends]
-    values = [path_value(send.get("parameters", {}), path) for send in sends]
-    values = [value for value in values if value is not MISSING]
-    actual = values[0] if len(values) == 1 else values if values else MISSING
-    complete = _collection_complete(model, "network")
-    parameter_complete = (
-        model.get("collections", {}).get("network", {}).get("parameter_capture_complete") is True
+    actual = _path_observations([send.get("parameters", {}) for send in sends], path)
+    complete = _evidence_collection_complete(evidence, "network")
+    parameter_complete = any(
+        row.get("parameter_capture_complete") is True for row in evidence.get("network_windows", [])
     )
     if actual is MISSING and (not complete or not parameter_complete):
         return _inspection(
@@ -1181,7 +1454,7 @@ def _request_parameter_result(
             evidence=refs,
             scenario_id=scenario_id,
         )
-    result = evaluate_predicate(actual, claim.get("predicate", {}), wire=True)
+    result = _evaluate_claim_value(actual, claim, wire=True)
     return _inspection(
         claim,
         result["status"],
@@ -1253,7 +1526,11 @@ def _shared_send_result(
         tag
         for tag in event.get("tags", [])
         if tag.get("expected") == "fire"
-        and _destination_matches(destination, tag.get("destination"))
+        and (
+            _destination_matches(destination, tag.get("destination"))
+            if destination not in (None, "")
+            else _destination_in_scope(target, tag.get("destination"))
+        )
         and tag.get("browser_send_required") is not False
     ]
     linked = any(
@@ -1290,7 +1567,6 @@ def _shared_send_result(
 def _delivery_result(
     claim: dict[str, Any],
     evidence: dict[str, list[dict[str, Any]]],
-    model: dict[str, Any],
     event: dict[str, Any],
     scenario_id: str,
 ) -> dict[str, Any]:
@@ -1301,12 +1577,12 @@ def _delivery_result(
 
     sends = _delivery_candidates(evidence, target)
     if check == "request_parameter":
-        return _request_parameter_result(claim, sends, model, scenario_id)
+        return _request_parameter_result(claim, sends, evidence, scenario_id)
     if check == "tag_request" and sends:
         sends = _attribute_tag_sends(target, sends)
 
     refs = [send.get("evidence_ref") for send in sends]
-    complete = _collection_complete(model, "network")
+    complete = _evidence_collection_complete(evidence, "network")
     count = len(sends)
     if not complete and count == 0:
         return _inspection(
@@ -1788,7 +2064,7 @@ def _repeated_transaction_anomalies(
     if str(event.get("event_name") or "") != "purchase":
         return []
     occurrences: dict[str, list[dict[str, Any]]] = {}
-    for row in model.get("source_calls", []):
+    for row in _authoritative_stream_rows(model.get("source_calls", [])):
         for argument in row.get("arguments", []):
             if not isinstance(argument, dict) or argument.get("event") != "purchase":
                 continue
@@ -1843,7 +2119,8 @@ def _business_anomalies(
 def _stream_context(
     event: dict[str, Any], evidence: dict[str, list[dict[str, Any]]], model: dict[str, Any]
 ) -> tuple[list[str], set[str], set[str], set[str]]:
-    names = [name for row in evidence["source_calls"] for name in row.get("events", [])]
+    source_rows = _authoritative_stream_rows(evidence["source_calls"])
+    names = [name for row in source_rows for name in row.get("events", [])]
     names.extend(
         str(row.get("event_name")) for row in evidence["direct_signals"] if row.get("event_name")
     )
@@ -1875,6 +2152,15 @@ def _stream_context(
         if candidate.get("event_name")
     }
     return names, action_ids, allowed, planned
+
+
+def _authoritative_stream_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        row
+        for row in rows
+        if (row.get("capture_mode") == "call_time" and row.get("document_start") is True)
+        or (row.get("capture_mode") == "preview_api_call" and row.get("authoritative") is True)
+    ]
 
 
 def _occurrence_anomalies(
@@ -1943,19 +2229,27 @@ def _interstitial_state_anomalies(
     return output
 
 
-def _source_window_complete(
-    evidence: dict[str, list[dict[str, Any]]], model: dict[str, Any]
-) -> bool:
+def _source_window_complete(evidence: dict[str, list[dict[str, Any]]]) -> bool:
     return (
-        _authoritative_source_complete(model)
+        _source_windows_complete(evidence)
         or any(
-            row.get("capture_mode") == "call_time"
-            and row.get("document_start") is True
+            (
+                (row.get("capture_mode") == "call_time" and row.get("document_start") is True)
+                or (
+                    row.get("capture_mode") == "preview_api_call"
+                    and row.get("authoritative") is True
+                )
+            )
             and row.get("collection_complete") is True
             and row.get("truncated") is not True
             for row in evidence["source_calls"]
         )
-        or any(row.get("collection_complete") is True for row in evidence["direct_signals"])
+        or any(
+            row.get("authoritative") is True
+            and row.get("collection_complete") is True
+            and (row.get("capture_mode") == "call_time" or row.get("event_list_complete") is True)
+            for row in evidence["direct_signals"]
+        )
     )
 
 
@@ -1969,10 +2263,8 @@ def _cross_surface_anomalies(
     output: list[dict[str, Any]] = []
     raw_count = names.count(str(event.get("event_name") or ""))
     preview_count = len(_preview_matches(evidence, event.get("event_name")))
-    preview_complete = _collection_complete(model, "preview") or _preview_complete(
-        evidence["preview_events"], "event_list"
-    )
-    if _source_window_complete(evidence, model) and preview_complete and raw_count != preview_count:
+    preview_complete = _evidence_collection_complete(evidence, "preview")
+    if _source_window_complete(evidence) and preview_complete and raw_count != preview_count:
         output.append(
             {
                 "status": "FAIL",
@@ -2010,7 +2302,7 @@ def _stream_anomalies(
     names, action_ids, allowed, planned = _stream_context(event, evidence, model)
     return [
         *_occurrence_anomalies(names, allowed, planned),
-        *_interstitial_state_anomalies(evidence["source_calls"]),
+        *_interstitial_state_anomalies(_authoritative_stream_rows(evidence["source_calls"])),
         *_cross_surface_anomalies(event, evidence, model, names, action_ids),
         *_business_anomalies(event, evidence),
         *_repeated_transaction_anomalies(event, model),
@@ -2026,7 +2318,7 @@ def _behavior_result(
 ) -> dict[str, Any]:
     if claim.get("target", {}).get("check") == "order":
         names = []
-        for row in evidence["source_calls"]:
+        for row in _authoritative_stream_rows(evidence["source_calls"]):
             names.extend(row.get("events", []))
         names.extend(
             str(row.get("event_name"))
@@ -2048,7 +2340,7 @@ def _behavior_result(
     anomalies = _stream_anomalies(event, evidence, model)
     refs = [item for anomaly in anomalies for item in anomaly.get("evidence", [])]
     if not anomalies:
-        has_continuous_stream = _source_window_complete(evidence, model)
+        has_continuous_stream = _source_window_complete(evidence)
         if not has_continuous_stream:
             return _inspection(
                 claim,
@@ -2069,7 +2361,8 @@ def _behavior_result(
                     **model,
                     "source_calls": evidence["source_calls"],
                     "direct_signals": evidence["direct_signals"],
-                }
+                },
+                authoritative_only=True,
             ),
             expected="Causally coherent surrounding behavior",
             scenario_id=scenario_id,
@@ -2387,11 +2680,11 @@ def _evaluate_claim(
     if archetype == "reality":
         return _page_result(claim, evidence, event, scenario_id)
     if archetype == "source":
-        return _source_result(claim, evidence, model, scenario_id)
+        return _source_result(claim, evidence, scenario_id)
     if archetype == "gtm":
         return _gtm_result(claim, evidence, model, scenario_id)
     if archetype == "delivery":
-        return _delivery_result(claim, evidence, model, event, scenario_id)
+        return _delivery_result(claim, evidence, event, scenario_id)
     if archetype == "sequence":
         return _behavior_result(claim, evidence, model, event, scenario_id)
     if archetype == "safety":
@@ -2410,7 +2703,7 @@ def _apply_live_plan_gap(
 ) -> dict[str, Any]:
     """Keep live-discovered enum values honest without calling them an implementation PASS."""
     predicate = claim.get("predicate", {})
-    if row.get("status") != "FAIL" or predicate.get("operator") != "one_of":
+    if row.get("status") not in {"PASS", "FAIL"} or predicate.get("operator") != "one_of":
         return row
     path = str(claim.get("target", {}).get("path") or "")
     values = scenario.get("values", {})
@@ -2529,7 +2822,38 @@ def _claim_inspection(
             check_next="Scenario applicability value",
             scenario_id=scenario_id,
         )
-    row = _evaluate_claim(claim, evidence, model, event, scenario_id)
+    effective_claim = claim
+    predicate = claim.get("predicate", {})
+    path = str(claim.get("target", {}).get("path") or "")
+    values = group.get("values", {})
+    contextual = MISSING
+    if isinstance(values, dict) and path:
+        contextual = path_value(values, path)
+        if contextual is MISSING:
+            contextual = values.get(path.rsplit(".", 1)[-1].replace("[]", ""), MISSING)
+    if (
+        contextual is not MISSING
+        and predicate.get("operator") in {"present", "one_of"}
+        and claim.get("archetype") in {"source", "gtm", "delivery"}
+    ):
+        effective_claim = {
+            **claim,
+            "predicate": {
+                "operator": "equals",
+                "expected": contextual,
+                **(
+                    {"expected_type": predicate["expected_type"]}
+                    if predicate.get("expected_type")
+                    else {}
+                ),
+                **(
+                    {"wire_coercion": True}
+                    if claim.get("target", {}).get("surface") == "network"
+                    else {}
+                ),
+            },
+        }
+    row = _evaluate_claim(effective_claim, evidence, model, event, scenario_id)
     return _apply_live_plan_gap(row, claim, group)
 
 
@@ -2634,10 +2958,12 @@ def judge_event(
     plan: dict[str, Any],
     records: list[dict[str, Any]],
     event_id: str,
+    *,
+    model: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     event = event_by_id(plan, event_id)
     coverage = coverage_result(plan, records, event_id)
-    model = build_model(run_dir, plan, records)
+    model = model if model is not None else build_model(run_dir, plan, records)
     model["plan_events"] = plan.get("events", [])
     groups = _scenario_groups(model, event, coverage)
     if event.get("compile_errors"):
@@ -2692,8 +3018,11 @@ def _run_finished(records: list[dict[str, Any]]) -> bool:
 
 
 def judge_run(run_dir: Any, plan: dict[str, Any], records: list[dict[str, Any]]) -> dict[str, Any]:
+    model = build_model(run_dir, plan, records)
+    model["plan_events"] = plan.get("events", [])
     events = [
-        judge_event(run_dir, plan, records, event["event_id"]) for event in plan.get("events", [])
+        judge_event(run_dir, plan, records, event["event_id"], model=model)
+        for event in plan.get("events", [])
     ]
     status = worst_status((event["status"] for event in events), default="PENDING")
     return {

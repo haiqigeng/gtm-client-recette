@@ -35,7 +35,16 @@ def _rows(request: dict[str, Any]) -> list[dict[str, Any]]:
     body = request.get("body") if isinstance(request.get("body"), dict) else {}
     records = body.get("records")
     if isinstance(records, list) and records:
-        return [{**query, **row} for row in records if isinstance(row, dict)]
+        output = []
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            value = record.get("value")
+            if isinstance(value, dict):
+                output.append({**query, **value})
+            else:
+                output.append({**query, **record})
+        return output
     decoded = body.get("decoded")
     if isinstance(decoded, dict):
         return [{**query, **decoded}]
@@ -133,6 +142,7 @@ def decode_ga4_sends(request: dict[str, Any]) -> list[dict[str, Any]]:
                 "correlation_id": request.get("correlation_id"),
                 "endpoint": endpoint,
                 "outcome": request.get("outcome"),
+                "collection_complete": request.get("collection_complete") is True,
             }
         )
     return output

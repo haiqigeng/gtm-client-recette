@@ -59,6 +59,23 @@ tag cannot substitute for its request; agreement between empty surfaces cannot p
 populated business state. Use `PASS`, `FAIL`, `BLOCKED`, `REVIEW`, `NOT_APPLICABLE`, and
 `PENDING`; final reports display `PASS`/`FAIL` as `OK`/`KO`.
 
+For an ordinary planned dataLayer event with a browser-sending tag, inspect these
+applicable operational surfaces from the same action: page/action reality; call-time
+dataLayer API Call; Tag Assistant event and accumulated Data Layer state; Tag Assistant
+Variables; complete concerned fired/not-fired tags; concerned tag configuration and
+effective mapping; tag runtime parameters; decoded browser request/destination; and the
+continuous surrounding stream. Safety, confidence, and coverage are always reported.
+Consent, acquisition, forms, trigger/sequence detail, media, and protected gates activate
+only when relevant. This is an applicability rule, not a serial layer ceremony.
+
+The source authority is document-start capture or a fully expanded Tag Assistant API Call.
+The Tag Assistant **Data Layer** tab is post-message
+accumulated state: inspect it separately, but never use it to prove what one push sent.
+For every destination-applicable planned field, compare the plan predicate independently
+with source, accumulated GTM state, resolved Variables, effective tag mapping, tag runtime,
+and decoded request. A tag exposing one of twelve required fields fails the eleven missing
+applicable mappings/values when those surfaces were completely captured.
+
 Read [verdict and output](references/verdict-and-output.md) before judging the first
 event.
 
@@ -68,15 +85,17 @@ Resolve `<skill-root>` as this file's directory. Use
 `python -B "<skill-root>/scripts/recette.py" --help` for the authoritative nine-command
 interface.
 
-1. Run `init` once. It compiles accepted requirements but does not prebuild future
-   scenarios, event ledgers, layer rows, or reports. Reconcile its tabular row counts and
-   review every ignored or event-local compile error before interaction. Contiguous
-   merged/fill-down event rows are retained; orphan or ambiguous rows stop intake rather
-   than disappearing silently.
+1. Run `init` once. It directly compiles accepted JSON/YAML/delimited plans and supported
+   XLSX layouts, including common event-metadata plus variable-table sheets. It does not
+   prebuild future scenarios, event ledgers, layer rows, or reports. Reconcile row counts
+   and ignored rows; code examples are not requirements. An orphan/ambiguous row stops
+   intake, while a malformed later event is localized and cannot delay the first valid
+   event.
 2. Attach to the existing target and Preview session while compiling. Install continuous
    source and network capture at the earliest document boundary. Perform one bounded
-   capability/identity handshake; fail dependent claims quickly if a required surface is
-   unavailable.
+   capability/identity handshake; if document-start capture is unavailable, use fully
+   expanded Preview API Call arguments as the source fallback. Fail only dependent claims
+   quickly when a required surface is unavailable.
 3. Select the earliest safe, high-information event. Discover only its material scenario
    branches just in time.
 4. Run `begin` with one before-state/identity bundle, perform the real interaction, then
@@ -86,8 +105,10 @@ interface.
    hit identities remain unambiguous. Inspect every intervening source message, including
    messages not named in the plan.
 6. Run `sync-preview` once for all new Preview indexes in the cluster. Capture complete
-   event and concerned-tag summaries; deep-read only relevant or suspicious tag details.
-   Synchronize earlier if navigation, ambiguity, or risk could lose evidence.
+   event and concerned-tag summaries; deep-read the Variables, configuration, effective
+   mapping and runtime needed by current planned fields, plus suspicious details. Never
+   scan unrelated historical domains or the whole container. Synchronize earlier if
+   navigation, ambiguity, or risk could lose evidence.
 7. Emit canonical feedback as soon as all known material scenarios for an event close.
    Choose the next branch by information value and transition cost, not by creating the
    whole run up front.
@@ -99,6 +120,10 @@ interface.
 Corrections invalidate only dependent proof. Distinguish website defects, plan
 ambiguity, control-tool failures, evidence limitations, and protected gates. Never use
 alternate state files or command routes to manufacture progress.
+
+After navigation or reload, retain the old page as the before-state but rebind the new
+document before attributing post-navigation evidence. A proved old-to-new transition is
+normal; mixed post-action documents or an unproved new binding remain blocked.
 
 Read [browser and Preview](references/browser-and-preview.md) before attaching or
 recovering the session.
@@ -139,9 +164,10 @@ acquisition, authentication, CAPTCHA, or payment is involved.
 After each completed event, provide:
 
 - a compact scenario matrix and six-domain summary;
-- one operational row per applicable check, including page/API, dataLayer, GTM event and
-  variables, each concerned tag's configuration/firing/runtime, browser request and
-  destination, anomaly, safety, confidence, and coverage checks;
+- one operational row and status for every applicable layer/check, including page/API,
+  call-time dataLayer/API Call, Tag Assistant Data Layer state, Variables, fired/not-fired
+  inventory, each concerned tag's configuration/effective mapping/firing/runtime, browser
+  request/destination, anomaly, safety, confidence, and coverage;
 - status, simple observed-versus-expected detail, exact `Check next` target, and stable
   evidence reference for every row;
 - concerned tags, anomalies, tested values/signatures, plan gaps, limitations, and exact

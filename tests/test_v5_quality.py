@@ -59,6 +59,45 @@ class QualityAndAnomalyTests(unittest.TestCase):
             )
         )
 
+    def test_preview_api_fallback_still_detects_unexpected_interjected_events(self) -> None:
+        events = [
+            default_event("E-list", "view_item_list"),
+            default_event("E-cart", "add_to_cart"),
+        ]
+        harness = V5Harness(self.root, events=events)
+        action = harness.begin(["E-list"])
+        expected = {"event": "view_item_list"}
+        unexpected = {"event": "add_to_cart"}
+        commit_action(
+            harness.run,
+            {
+                "health": harness._health("after"),
+                "page": {"states": [harness._page("after")]},
+                "datalayer": harness.datalayer(
+                    [],
+                    action_id=action,
+                    capture_mode="late_snapshot",
+                    document_start=False,
+                ),
+                "network": harness.network(["view_item_list"], action_id=action),
+            },
+            action_id=action,
+        )
+        result = harness.sync(
+            ["E-list"],
+            [expected, unexpected],
+            action_id=action,
+            coverage=harness.coverage("E-list", [action]),
+        )["events"][0]
+        self.assertEqual(result["domains"]["source"]["status"], "PASS")
+        self.assertEqual(result["domains"]["behavior"]["status"], "FAIL")
+        self.assertTrue(
+            any(
+                row["reason_code"] == "behavior.unexpected_event" and "add_to_cart" in row["reason"]
+                for row in result["inspections"]
+            )
+        )
+
     def test_material_state_update_between_interactions_is_reported_for_review(self) -> None:
         events = [default_event("E-list", "view_item_list"), default_event("E-item", "view_item")]
         harness = V5Harness(self.root, events=events)
@@ -306,7 +345,7 @@ class QualityAndAnomalyTests(unittest.TestCase):
         )
         self.assertEqual(purchase_result["domains"]["behavior"]["status"], "FAIL")
 
-    def test_late_snapshot_cannot_replace_document_start_call_time_evidence(self) -> None:
+    def test_late_snapshot_and_accumulated_state_cannot_replace_authoritative_source(self) -> None:
         harness = V5Harness(self.root)
         action = harness.begin()
         payload = {"event": "view_item"}
@@ -322,14 +361,49 @@ class QualityAndAnomalyTests(unittest.TestCase):
             "network": harness.network(["view_item"], action_id=action),
         }
         commit_action(harness.run, bundle, action_id=action)
+        preview = harness.preview([payload], action_id=action)
+        preview["events"][0]["api_call"] = None
+        preview["events"][0]["completeness"]["api_call"] = False
+        result = sync_preview(
+            harness.run,
+            {
+                "preview": preview,
+                "coverage": harness.coverage("E-view_item", [action]),
+            },
+            event_ids=["E-view_item"],
+        )["events"][0]
+        self.assertEqual(result["domains"]["source"]["status"], "BLOCKED")
+        self.assertEqual(result["domains"]["behavior"]["status"], "BLOCKED")
+
+    def test_fully_expanded_preview_api_call_is_an_authoritative_source_fallback(self) -> None:
+        harness = V5Harness(self.root)
+        action = harness.begin()
+        payload = {"event": "view_item"}
+        commit_action(
+            harness.run,
+            {
+                "health": harness._health("after"),
+                "page": {"states": [harness._page("after")]},
+                "datalayer": harness.datalayer(
+                    [payload],
+                    action_id=action,
+                    capture_mode="late_snapshot",
+                    document_start=False,
+                ),
+                "network": harness.network(["view_item"], action_id=action),
+            },
+            action_id=action,
+        )
         result = harness.sync(
             ["E-view_item"],
             [payload],
             action_id=action,
             coverage=harness.coverage("E-view_item", [action]),
         )["events"][0]
-        self.assertEqual(result["domains"]["source"]["status"], "BLOCKED")
-        self.assertEqual(result["domains"]["behavior"]["status"], "BLOCKED")
+        self.assertEqual(result["domains"]["source"]["status"], "PASS")
+        self.assertEqual(result["domains"]["behavior"]["status"], "PASS")
+        source_rows = [row for row in result["inspections"] if row["domain"] == "source"]
+        self.assertTrue(all(row["status"] == "PASS" for row in source_rows))
 
     def test_failed_browser_transport_is_delivery_failure(self) -> None:
         harness = V5Harness(self.root)
@@ -386,11 +460,44 @@ class QualityAndAnomalyTests(unittest.TestCase):
             event_ids=["E-view_item"],
         )["events"][0]
         self.assertEqual(result["domains"]["source"]["status"], "PASS")
-        self.assertEqual(result["domains"]["gtm"]["status"], "PASS")
+        self.assertEqual(result["domains"]["gtm"]["status"], "FAIL")
         self.assertEqual(result["domains"]["delivery"]["status"], "FAIL")
         codes = {row["reason_code"] for row in result["inspections"]}
         self.assertIn("delivery.runtime_parameter_absent", codes)
         self.assertIn("delivery.request_parameter.value.absent", codes)
+        self.assertIn("gtm.effective_mapping_absent", codes)
+
+    def test_wildcard_item_requirements_validate_every_cart_item(self) -> None:
+        event = default_event("E-cart", "view_cart")
+        event["requirements"].extend(
+            [
+                {
+                    "field_path": "ecommerce.items[].item_id",
+                    "match_rule": "present",
+                    "expected_type": "string",
+                },
+                {
+                    "field_path": "ecommerce.items[].price",
+                    "match_rule": "present",
+                    "expected_type": "number",
+                },
+            ]
+        )
+        harness = V5Harness(self.root, events=[event])
+        payload = {
+            "event": "view_cart",
+            "ecommerce": {
+                "items": [
+                    {"item_id": "SKU-1", "price": 10.0},
+                    {"item_id": "SKU-2", "price": 20.0},
+                ]
+            },
+        }
+        _, result = harness.execute_pass(event_id="E-cart", payload=payload)
+        self.assertEqual(result["status"], "PASS")
+        item_rows = [row for row in result["inspections"] if "items[]" in row["inspection_target"]]
+        self.assertTrue(item_rows)
+        self.assertTrue(all(row["status"] == "PASS" for row in item_rows))
 
     def test_consent_override_only_blocks_and_denied_send_fails(self) -> None:
         event = default_event()

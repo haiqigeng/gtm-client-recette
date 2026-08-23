@@ -18,6 +18,12 @@ reports, or create per-event setup records. After a stable navigation, use a che
 delta. Repeat the full handshake only when target, document, container, Preview epoch,
 recorder, or network identity changes.
 
+A navigation/reload may legitimately replace the document. Preserve the old page only
+as the `before` business/reality state, capture a new binding for the new document, and
+attribute source/Preview/request evidence to that new document. Do not block solely
+because before and after page IDs differ; do block mixed post-action documents or a new
+document that was never rebound.
+
 A browser/control failure blocks only dependent proof. Do not label it as a website
 failure, open replacement tabs, or construct alternate evidence. Historical "found
 containers" in Tag Assistant do not prove the current runtime container. Prefer the
@@ -41,10 +47,15 @@ than later mutable references and preserves:
 - array/object/arguments payload shape and explicit unserializable/truncated markers;
 - lifecycle coverage and collector integrity.
 
-Do not infer a raw push by reading the final dataLayer array or the Preview Data Layer
-panel. If the recorder starts late, mark pre-install source completeness unavailable.
-Before the first consequential/protected action, require a complete cheap source
-self-test; do not discover recorder failure after an irreversible step.
+Do not infer a raw push by reading the final dataLayer array or the Tag Assistant Data
+Layer panel. If document-start interception is unavailable, a fully expanded Tag
+Assistant event **API Call** argument is the source fallback because it exposes the
+message GTM processed at that event. It is authoritative only when the argument and its
+completeness are captured; a collapsed, partial, or inferred panel remains `BLOCKED`.
+The separate **Data Layer** tab is accumulated post-message state and must be captured as
+GTM-state evidence, never relabelled as the API Call. Before the first
+consequential/protected action, require a complete cheap source self-test; do not discover
+source failure after an irreversible step.
 
 Keep the observer lightweight: no polling, DOM mutation, arbitrary getter execution,
 network access, storage writes, or unbounded deep serialization. Capture deltas by cursor
@@ -79,16 +90,20 @@ correlation, or suspected anomaly.
 
 On one Preview visit:
 
-1. ingest all new event indexes and complete fired-tag summaries;
-2. include relevant expected-not-fired tags, not an unlimited container inventory;
-3. deep-read only in-scope or suspicious tag configuration, resolved variables, firing
-   detail, runtime payload and consent state;
-4. reuse static configuration only under exact container/workspace/environment identity;
-5. never cache runtime values, occurrence, consent state, page outcome or requests.
+1. ingest all new event indexes and each expanded API Call needed as source fallback;
+2. capture the Data Layer tab and Variables tab for current planned fields;
+3. ingest complete fired-tag summaries and relevant expected-not-fired tags, not an
+   unlimited container or historical-domain inventory;
+4. deep-read each concerned tag's configuration, effective object/settings mapping,
+   firing detail and runtime payload needed by the plan, plus suspicious details;
+5. compare those observations with the independently captured browser request;
+6. reuse static configuration only under exact container/workspace/environment identity;
+7. never cache runtime values, occurrence, consent state, page outcome or requests.
 
-Keep a Preview summary/deep batch, including at most one immediate retry, within a
-five-second controlled-fixture budget. A partial panel blocks only Preview-dependent
-claims and must not trigger an indefinite wait or browser restart.
+Use at most one immediate retry for a transient panel failure. The five-second budget in
+the controlled fixture is a regression target, not a universal live-site timeout. A
+partial panel blocks only its dependent claims and must not trigger an indefinite wait,
+whole-container rescan, or browser restart.
 
 ## Acquisition context
 

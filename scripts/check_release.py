@@ -134,6 +134,8 @@ def check_skill(errors: list[str]) -> None:
         "Evidence confidence and scenario completeness",
         "call-time dataLayer",
         "state-only dataLayer",
+        "fully expanded Tag Assistant",
+        "every destination-applicable planned field",
         "provisional and can never certify `PASS`",
         "inspect every intervening source message",
         "high-cardinality",

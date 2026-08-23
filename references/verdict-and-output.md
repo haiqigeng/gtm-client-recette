@@ -19,8 +19,11 @@ rows stop intake before browser work. Malformed predicates become event-local co
 failures with source coordinates, so a later unsupported rule cannot block the first
 valid event. Do not silently reinterpret a rule or invent missing tag scope. A
 source-only/state-only claim remains source-oriented. For ordinary GA4 claims, the same
-semantic parameter is automatically checked at source, resolved GTM, runtime payload and
-decoded browser request without additional browser actions.
+destination-applicable plan predicate is automatically checked at call-time source,
+Tag Assistant accumulated Data Layer state, resolved Variables, effective tag mapping,
+runtime payload, and decoded browser request without additional browser actions. The
+comparison is per field, not a variable-count heuristic: object/settings or automatic
+mappings count only when their effective runtime value is proved.
 
 Machine evidence enters through typed capture adapters and receives stable identity.
 Agent-authored notes may explain coverage or add an evidence-backed semantic `FAIL` or
@@ -36,9 +39,11 @@ workflow. Operational rows remain distinct inside them.
 1. `reality`: page/API status, soft 404, route/context, visible state, before/after change,
    independent action/form/purchase/business outcome.
 2. `source`: call-time source occurrence, value/state/type and chronology, including
-   state-only and unplanned messages.
+   state-only and unplanned messages. Authority is a document-start recorder call or a
+   fully expanded Tag Assistant API Call, never the accumulated Data Layer tab.
 3. `gtm`: current Preview/container identity, matching event, resolved state, concerned
-   tag inventory/configuration/controls and firing count.
+   Data Layer tab, Variables tab, tag inventory/configuration/effective mapping/controls
+   and firing count.
 4. `delivery`: runtime parameter and logical-hit identity, decoded destination request,
    redirect/retry lifecycle and outcome, or complete-window non-send.
 5. `behavior`: duplicate, missing, premature, delayed or interjected events; stale or
@@ -58,6 +63,9 @@ claims that depend on it.
 - Attribute observations by browser target, frame/document, route, action, Preview epoch,
   event, tag, logical hit and transport attempt. Never assign an unbound row merely
   because an action is currently open.
+- For a proved navigation/reload, the before page may belong to the old document while
+  occurrence evidence belongs to the explicitly rebound new document. Mixed post-action
+  documents or an unbound transition remain `BLOCKED`.
 - Merge retries/redirects for one logical hit but keep duplicate logical hits separate.
 - A settled complete empty source window proves a required event missing (`FAIL`); a late,
   partial or truncated recorder window is `BLOCKED`.
@@ -95,10 +103,13 @@ When an event closes, render two levels from the same canonical result:
 2. operational rows for every applicable proof target.
 
 Each operational row contains scenario, domain, target (for example DataLayer API, GTM
-Preview event, resolved variable, named tag configuration/firing/runtime, browser
-request/destination, reality anchor, anomaly, safety or gate), status, observed and
-expected detail, `Check next`, and stable evidence IDs. Identical passing rows may be
-grouped; all differing and non-pass rows remain scenario-specific.
+Preview event, accumulated Data Layer state, resolved variable, named tag
+configuration/effective mapping/firing/runtime, browser request/destination, reality
+anchor, anomaly, safety or gate), status, observed and expected detail, `Check next`, and
+stable evidence IDs. Identical passing rows may be grouped; all differing and non-pass
+rows remain scenario-specific. No event may move on without making every applicable
+layer status visible; conditional layers remain explicit through applicability or
+`NOT_APPLICABLE` reasoning rather than silent omission.
 
 Feedback lists concerned tags, occurrence/count, tested values/signatures, plan gaps,
 limitations and exact retest actions. Late journey anomalies may amend an earlier event.
@@ -114,7 +125,7 @@ unobtainable evidence cannot become pass.
 Deliver:
 
 - plan-ordered `conclusion.md` and canonical `results.json`;
-- validated `gtm-client-recette.xlsx` with conclusion, event/domain/operational details,
+- validated `results.xlsx` with conclusion, event/domain/operational details,
   requirements, scenarios/coverage, anomalies, tags/delivery, defects/retests,
   limitations and telemetry;
 - concise CSV/sidecar views where generated.
