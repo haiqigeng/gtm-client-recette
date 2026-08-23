@@ -9,6 +9,7 @@ build/
 *.egg-info/
 
 # Client and run artifacts
+runs/
 *.xlsx
 *-results.json
 normalized-results.json

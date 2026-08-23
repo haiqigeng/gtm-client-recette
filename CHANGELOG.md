@@ -1,5 +1,105 @@
 # Changelog
 
+## [v5.0.0](https://github.com/haiqigeng/gtm-client-recette/releases/tag/v5.0.0) (2026-08-23)
+
+- Replace inherited event/layer workflow assumptions with typed measurement
+  claims in material scenarios, six causal diagnostic domains, and explicit
+  evidence-confidence and scenario-completeness gates.
+- Add one lossless staged compiler for JSON, YAML, delimited files, XLSX and
+  supported handoffs; preserve source coordinates, isolate malformed rows to
+  their affected event, and keep state-only/source-only requirements from
+  inheriting fabricated tags or browser sends.
+- Preserve contiguous merged/fill-down event identities in XLSX and delimited
+  plans; expose intake row accounting and reject orphan or ambiguous rows before
+  browser work instead of silently dropping requirements.
+- Add one canonical occurrence model joining browser target, frame/document,
+  action, source message, Preview event, tag execution, logical vendor hit and
+  transport attempts without current-action guessing or cross-document reuse.
+- Make source and browser-network capture continuous and delta-based; preserve
+  call-time dataLayer values, unplanned/state-only messages, request lifecycle,
+  retries, redirects, workers, destinations and completeness metadata.
+- Decode GA4 and Google Ads logical sends, including GA4 batched/query/body and
+  item parameter wire formats, while retaining raw evidence and strict typed
+  comparison semantics.
+- Add deterministic business and journey checks for dead/soft-404 pages,
+  populated-cart empty tracking, stale product/list/cart state, incoherent
+  cart deltas, cart/order item and transaction continuity, duplicate purchase
+  identifiers, media-player state/progress, form/purchase outcomes, language,
+  shipping/payment and acquisition contexts.
+- Add chronological anomaly judgement for duplicates, missing, interjected,
+  premature and delayed events, contaminating state updates, and
+  source/Preview/tag/request discrepancies around and between actions.
+- Reuse static tag configuration only under exact container/workspace identity;
+  keep runtime values, consent, firing and requests action-specific, and expose
+  lightweight browser-operation counters through existing health telemetry.
+- Replace the v4 public lifecycle with nine non-bypassable commands: `init`,
+  `begin`, `commit`, `sync-preview`, `status`, `handoff`, `finish`, `report`
+  and `reopen`; emit a provisional action pulse before Preview synchronization
+  and canonical detailed feedback as soon as an event's material scenarios
+  close.
+- Add JIT finite/dependent scenario coverage, behavior-signature sampling for
+  high-cardinality populations, live plan-gap expansion, consent/acquisition
+  dimensions and same-session protected handoffs without a global Cartesian
+  matrix or future-event scaffold.
+- Add detailed scenario/domain summaries and per-target operational rows for
+  source, GTM variables/tags, runtime, requests, reality, anomalies, safety and
+  closure gates, all owned by the deterministic renderer.
+- Remove obsolete operator, ledger, schema migration, layer-contract and
+  duplicate reporting routes; remove run residue and keep four focused runtime
+  references.
+- Add executable generalized stress contracts and representative metamorphic
+  tests for historical false-pass, correlation, evidence-integrity, scenario,
+  reporting, privacy, scale and startup regressions. Record the unavailable real
+  existing-browser pilot as an explicit deployment limitation rather than
+  substituting a synthetic pass.
+- Correct absent-state predicate dispatch and distinguish unextracted static tag
+  configuration (`BLOCKED`) from an observed configuration mismatch (`FAIL`).
+
+## v4.0.0 (unreleased redesign baseline, 2026-08-23)
+
+- Replace the four-authority results/session/coverage/runtime architecture with
+  an immutable normalized plan, append-only evidence stream, typed evidence
+  files, and fully replay-derived status, verdicts, and reports.
+- Remove front-loaded whole-plan case/layer preparation and the operator/ledger
+  contract stack; prepare material scenarios only for the current event and
+  emit its feedback before touching future-event detail.
+- Restrict machine-observed records to typed capture code paths, enforce one
+  pre-persistence privacy gate, make capture bundles transactional, and prevent
+  analyst or AI annotations from upgrading objective failures.
+- Preserve continuous all-argument dataLayer capture, action-window occurrence,
+  strict value/type/state semantics, declared wire coercion, GA4 request
+  decoding, cross-surface non-substitution, Preview epochs, sensitive-data
+  safeguards, and formula-safe validated output.
+- Add behavior-based scenario sampling, finite and dependent-value coverage,
+  live plan-gap discovery, baseline/warm-session controls, lazy Preview
+  extraction, exact static configuration caching, extraction self-test,
+  protected same-session handoffs, and labelled acquisition simulation.
+- Add deterministic nine-layer judgement with page and business truth,
+  continuous-stream anomaly detection, raw/Preview discrepancy handling,
+  consent and container activation derived from evidence, optional
+  first-party server-transport handoff, stable post-finish freezing, and pace
+  telemetry.
+- Preserve genuine non-dataLayer sources without fabricated pushes, correlate
+  them independently to Preview and browser delivery, require every declared
+  destination, support local-only delivery, and keep raw/resolved paths
+  independent.
+- Recompute declared cross-field and client checks from captured evidence,
+  compare declared trigger/exception/sequence configuration, distinguish
+  premature, delayed, wrong-order and wrong-context activity, and require
+  event-level consent evidence separately for every executed scenario.
+- Replace the 29-sheet legacy report with one immediate/final renderer and ten
+  focused XLSX sheets, plus Markdown, JSON, defect, retest, limitation,
+  telemetry, and optional transport sidecars.
+- Split oversized workbook values into lossless continuation rows, remove an
+  unused image dependency, and delete duplicate or schema-v3-only compatibility
+  utilities that had no v4 runtime caller.
+- Preserve numeric dataLayer/Preview order and original page/source/request
+  capture order when timestamps tie, and allow a fully classified `BLOCKED` or
+  `REVIEW` run to deliver an honest frozen report without weakening PASS rules.
+- Add a v4 adversarial matrix covering historical defect classes and a generic
+  large-plan no-front-load regression, while retaining the hardened
+  recorder, request decoder, comparison, privacy, and browser-census helpers.
+
 ## [v3.2.0](https://github.com/haiqigeng/gtm-client-recette/releases/tag/v3.2.0) (2026-08-22)
 
 - Let each event prepare and freeze its scenarios just in time, while retaining

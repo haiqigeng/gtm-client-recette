@@ -1,275 +1,157 @@
 ---
 name: gtm-client-recette
-description: Execute expert client-side GTM Preview and Tag Assistant acceptance recette against an existing tracking plan or explicit acceptance rule. Use for plan-ordered analytics and media-tag QA that must cover every applicable interaction and material behavior variant, complete safe gated flows, account for the continuous dataLayer stream, compare raw, resolved, tag, runtime, and browser-send evidence, detect journey and business-semantic anomalies, and deliver one evidence-backed verdict per event plus a validated XLSX. Excludes tracking-plan design, container configuration, implementation fixes, publishing, server-side GTM, and legal consent decisions.
+description: Execute expert client-side GTM Preview and Tag Assistant acceptance recette against an existing tracking plan or explicit acceptance rules. Use for plan-ordered analytics and media-tag QA in the user's already-open Chromium session, with material-scenario coverage, continuous dataLayer anomaly detection, GTM and browser-delivery reconciliation, business-reality checks, per-event feedback, and a validated XLSX. Excludes tracking-plan design, GTM mutation or publication, server-side certification, implementation fixes, and legal consent decisions.
 ---
 
 # GTM Client Recette
 
-## Objective
+## North star
 
-Test the actual website like an expert human analyst, not like a tag-fire
-checker. Follow the accepted plan in source order, execute every material
-scenario class, inspect what happens before, during, and between interactions,
-and judge whether the page, business state, dataLayer, GTM, tag runtime, and
-browser request tell one truthful story.
+Maximize trustworthy findings per expensive browser interaction. Judge whether one
+measurement claim is true in one material real-world scenario; do not merely prove that
+an event exists or a tag fired.
 
-Keep two results distinct:
-
-- `technical_delivery`: whether the declared tracking chain behaved correctly;
-- overall event verdict: the worst result across technical delivery, page/action
-  validity, journey/business semantics, continuous-stream anomalies, coverage,
-  and execution.
-
-A tag may therefore be technically `PASS` while the event is overall `FAIL`,
-for example on a dead URL or when a populated cart produces empty tracking.
+A coherent technical chain still fails when reality is wrong: the page is dead, the
+wrong container is active, the action did not succeed, a populated cart becomes empty
+ecommerce data, a form event precedes failure, or an unrelated event appears between
+interactions.
 
 ## Scope and authority
 
-Require an existing tracking plan or explicit acceptance rule and an approved
-test origin. Inspect or infer supporting URLs, journeys, selectors, containers,
-and scenarios when safe; ask only when missing information changes authority,
-scope, or a verdict. Preserve requirement provenance and original event order.
+Require an existing plan or explicit acceptance rules, an approved origin/environment,
+the client tag scope, and a run directory outside this skill. Summarize that boundary
+once and proceed only when it is approved. Use ordinary reversible interactions and
+synthetic test data within scope.
 
-Before opening client files or executing the site, present one concise
-preflight: accepted inputs, origins/environment, browser/session to reuse,
-planned ordinary actions, protected gates, evidence location, and outputs.
-Continue only after the analyst explicitly replies `READY` for that scope. A
-later scope/origin or consequential-action change needs renewed approval.
+Reuse the user's already-open Chromium target and GTM Preview/Tag Assistant tabs. Do not
+replace a usable signed-in session, open an authentication loop, or create another
+browser as normal recovery. Re-prove live target, document, container, Preview epoch,
+recorder, and network identity after any correction.
 
-Execute ordinary reversible website journeys with safe synthetic data. Redact
-sensitive values at capture time, before they enter chat, normalized results,
-session ledgers, decoded requests, logs, screenshots, or reports. Never retain
-credentials, cookies, tokens, form personal data, or raw sensitive values.
-Raw-body inspection, if explicitly needed, stays in a separate named local
-quarantine and is never imported as result evidence. Pause only for a
-protected gate: credentials, federated sign-in, MFA, CAPTCHA, email/SMS
-verification, magic link, real payment, external approval, or an irreversible
-or consequential action. Resume in the same browser context, tab, and Preview
-session.
+Pause at credentials, MFA, CAPTCHA, magic links, external approval, real payment, or
+another protected/consequential gate. Never bypass it. Do not design the plan, change or
+publish GTM, fix the site, certify server processing/vendor receipt, or make a legal
+consent judgement.
 
-Do not design the plan, mutate or publish GTM, fix the site, certify server-side
-GTM or vendor receipt, or make legal/privacy-compliance decisions. Audit and
-configuration artifacts are supporting context, never current-runtime proof.
+## Inspection model
 
-Read [scope and inputs](references/01-orientation/scope-and-inputs.md) before
-normalization.
+Compile plan rows losslessly into typed proof obligations: occurrence, value/state,
+relationship, ordering, transport, and negative claims. A state-only dataLayer update or
+source-only field must not inherit invented event, tag, or request requirements.
 
-## Non-negotiable controls
+Group applicable checks into six diagnostic domains, not six sequential browser stages:
 
-1. Reuse the approved in-app browser and its existing authenticated GTM, Tag
-   Assistant, and site surfaces. Do not replace a broken Preview with a new
-   unauthenticated window.
-2. Certify one expected client web container per run. Capture the containers
-   actually loaded on the page. A wrong container blocks positive
-   certification until the opened Preview is corrected.
-3. Capture page health before interaction. A 404, soft 404, wrong page, or
-   absent target is an executed failed case, even if tags fire coherently.
-4. Bind every action to captured before/after browser, tab, Preview, network,
-   and dataLayer cursors. Never type inferred action boundaries.
-5. Account for every dataLayer push argument from recorder installation to
-   final closure, including events between planned interactions.
-6. Use direct current-run evidence. Reject previous-run recorder data,
-   fabricated cursors, stale coverage revisions, and any missing or changed
-   final evidence artifact.
-7. Never infer correctness from internal coherence alone. Empty dataLayer and
-   empty runtime configuration cannot pass when visible business state is
-   populated.
+1. **Reality** — reachable/live page, correct scenario, visible state, action outcome,
+   and independent business anchors.
+2. **Source signal** — exact call-time dataLayer/direct-source values, JSON types and
+   absent/null/empty states, occurrence, order, and all unplanned pushes.
+3. **GTM decision** — active container/Preview identity, matching GTM event, resolved
+   variables, relevant tag configuration, consent/trigger controls, and firing count.
+4. **Destination delivery** — runtime payload, logical vendor hit, destination and tag
+   identity, browser transport, redirects/retries, response outcome, and non-send proof.
+5. **Surrounding behavior** — duplicates, missing/premature/delayed/interjected events,
+   contaminating state, stale item/cart values, and cross-surface disagreement.
+6. **Data safety** — sensitive values in persisted evidence and reports.
 
-Read [browser and Preview control](references/02-execution/browser-preview-runtime.md)
-immediately before connecting or executing.
+Evidence confidence and scenario completeness are closure gates, not extra layers. Each
+surface proves only itself. Missing source cannot be laundered through Preview; a fired
+tag cannot substitute for its request; agreement between empty surfaces cannot prove a
+populated business state. Use `PASS`, `FAIL`, `BLOCKED`, `REVIEW`, `NOT_APPLICABLE`, and
+`PENDING`; final reports display `PASS`/`FAIL` as `OK`/`KO`.
 
-## Scenario discovery and sampling
+Read [verdict and output](references/verdict-and-output.md) before judging the first
+event.
 
-At run setup, map the full event order, known journeys, and protected gates.
-Then, immediately before each event's first action, build and freeze that
-event's explainable coverage decision:
+## Fast vertical workflow
 
-1. Discover candidate interactions from the plan, supplied assets, journeys,
-   and live site.
-2. Record material dimensions: route/template, component/placement, locale,
-   responsive state, user state, content/product shape, quantity/value
-   boundary, consent, acquisition, and journey state.
-3. Group candidates only when their behavior signatures match: action path,
-   page/component, data source, payload contract, tag contract, consent,
-   acquisition, and journey precondition.
-4. Use `EXHAUSTIVE` for finite material branches, `PARTITIONED` for known
-   behavioral partitions, `SAMPLED` only inside a large homogeneous class,
-   `SINGLETON` for one member, and `BLOCKED` for an unacquired class.
-5. For a sampled class select at least an `ORDINARY` and `CONTRAST` member,
-   plus applicable `BOUNDARY` and `EXCEPTION` members.
+Resolve `<skill-root>` as this file's directory. Use
+`python -B "<skill-root>/scripts/recette.py" --help` for the authoritative nine-command
+interface.
 
-Bind every registered case to explicit values for every material dimension.
-At finalization, review all four adaptive triggers—new signature,
-anomaly/failure, unseen material value, and conditional runtime branch—even
-when current-run evidence says that a trigger did not occur.
+1. Run `init` once. It compiles accepted requirements but does not prebuild future
+   scenarios, event ledgers, layer rows, or reports. Reconcile its tabular row counts and
+   review every ignored or event-local compile error before interaction. Contiguous
+   merged/fill-down event rows are retained; orphan or ambiguous rows stop intake rather
+   than disappearing silently.
+2. Attach to the existing target and Preview session while compiling. Install continuous
+   source and network capture at the earliest document boundary. Perform one bounded
+   capability/identity handshake; fail dependent claims quickly if a required surface is
+   unavailable.
+3. Select the earliest safe, high-information event. Discover only its material scenario
+   branches just in time.
+4. Run `begin` with one before-state/identity bundle, perform the real interaction, then
+   `commit` one after-state plus continuous source/network/lifecycle deltas. Emit the
+   immediate pulse; it is provisional and can never certify `PASS`.
+5. Continue a short natural action cluster only while document, action, tag and logical
+   hit identities remain unambiguous. Inspect every intervening source message, including
+   messages not named in the plan.
+6. Run `sync-preview` once for all new Preview indexes in the cluster. Capture complete
+   event and concerned-tag summaries; deep-read only relevant or suspicious tag details.
+   Synchronize earlier if navigation, ambiguity, or risk could lose evidence.
+7. Emit canonical feedback as soon as all known material scenarios for an event close.
+   Choose the next branch by information value and transition cost, not by creating the
+   whole run up front.
+8. `finish` only after global reconciliation. It refuses open actions, unresolved
+   protected handoffs, incomplete material coverage, unclassified material observations,
+   evidence-confidence gaps, or privacy blockers. `report` rebuilds only a frozen run;
+   `reopen` requires explicit authorization.
 
-Test all distinct finite semantic branches and parameter-value scenarios. Do
-not test hundreds of interchangeable products. Never sample across different
-behavior signatures.
+Corrections invalidate only dependent proof. Distinguish website defects, plan
+ambiguity, control-tool failures, evidence limitations, and protected gates. Never use
+alternate state files or command routes to manufacture progress.
 
-Reopen coverage when a case reveals a new behavior signature, anomaly/failure,
-unseen material value, or conditional runtime branch. Record whether the
-coverage expanded, the population was exhausted, or expansion was blocked.
-Changing a frozen coverage revision invalidates affected closures.
+Read [browser and Preview](references/browser-and-preview.md) before attaching or
+recovering the session.
 
-Read [scenario coverage and sampling](references/02-execution/scenario-coverage-and-sampling.md)
-before registering cases.
+## Material scenario coverage
 
-## Evidence layers
+The plan is an acceptance oracle, not a complete catalogue of live values. Discover
+dimensions from the plan, visible UI, current journey state, captured evidence, and
+known platform semantics.
 
-Always record the 19 canonical rows in order, but do not treat all 19 as
-substantive by default. For a normal planned dataLayer event with a
-browser-sending tag, the default mandatory chain is:
+- Exhaust every manageable finite material value, including live values omitted by the
+  plan.
+- Test reachable dependent combinations such as country-specific shipping methods; do
+  not build an irrelevant global Cartesian product.
+- For high-cardinality populations such as products, partition by behavior signature
+  and test ordinary, contrasting, boundary, and exception representatives. Never
+  brute-force every member or compare dynamic labels to one global literal.
+- Keep strict contextual expectations: `page_language` may be `en` in one scenario and
+  `fr` in another; fixed enums and per-scenario product/cart identities remain strict.
+- Record plan gaps and expand coverage after a new signature, material value, anomaly,
+  conditional branch, or failure. Unknown material branches stay `BLOCKED`/`REVIEW`.
 
-1. action boundary;
-2. exact raw API Call/dataLayer payload;
-3. resolved Data Layer state;
-4. complete concerned-tag inventory;
-5. GTM variables consumed or positively unused;
-6. tag configuration;
-7. firing/non-firing and count;
-8. runtime parameters and JSON types;
-9. matching browser destination request;
-10. sensitive-data scan.
+Read [scenario coverage](references/scenario-coverage.md) just before selecting the
+current event's branches.
 
-The remaining canonical rows activate only when their predicates are true:
-consent, non-dataLayer source signal, trigger logic, tag sequence, declared
-business rules, client checks, supplied regression baseline, multi-container
-context, and conditional scenarios. Record a false predicate as
-`NOT_APPLICABLE` with reason and proof; never omit the row.
+## Special journeys
 
-For every in-scope tag, record the eight tag-bound rows for variable,
-configuration, firing, runtime parameter, destination, consent, trigger, and
-sequence. A non-dataLayer source replaces raw/resolved proof with direct source
-proof but does not remove applicable downstream tag checks.
+Complete ordinary forms with synthetic data and independently prove validation,
+submission, and visible success/failure. Treat consent and acquisition as scenario
+dimensions when applicable. A simulated fresh/referral visit tests the tracking response
+and must state its method; it does not prove SEO ranking or a real search impression.
 
-Read [evidence and layers](references/03-judgement/evidence-and-layers.md) before
-comparison.
+Read [protected journeys](references/protected-journeys.md) when forms, consent,
+acquisition, authentication, CAPTCHA, or payment is involved.
 
-## Continuous stream
+## Required feedback
 
-Install `scripts/datalayer_recorder.js` at document start with the current run
-ID. Review one gapless sequence of `INITIAL_LOAD`, `ACTION`, `INTER_ACTION`, and
-`FINAL` segments. Every settled action has exactly one action segment; segment
-Preview and dataLayer cursors must be adjacent without gaps or overlaps.
+After each completed event, provide:
 
-Classify every argument of every recorded dataLayer call as
-`BUSINESS_EVENT`, `TECHNICAL_EVENT`, `STATE_UPDATE`, or `NON_EVENT`. A custom
-event cannot be hidden as state or noise. Map each business event to one push
-and judge it as expected, companion, duplicate, premature, delayed, wrong
-order, wrong context, or unplanned relevant. Anomalies between two planned
-events affect the relevant event verdict and appear in feedback.
+- a compact scenario matrix and six-domain summary;
+- one operational row per applicable check, including page/API, dataLayer, GTM event and
+  variables, each concerned tag's configuration/firing/runtime, browser request and
+  destination, anomaly, safety, confidence, and coverage checks;
+- status, simple observed-versus-expected detail, exact `Check next` target, and stable
+  evidence reference for every row;
+- concerned tags, anomalies, tested values/signatures, plan gaps, limitations, and exact
+  retest instructions.
 
-Use adaptive quiet windows. If the stream never settles, absence/count/order
-is `BLOCKED`, not guessed. The recorder supplements but never replaces Tag
-Assistant API Call and resolved-event evidence. Call `dispose()` at run end and
-record any safe-cleanup limitation.
+Identical passing rows may be grouped across scenarios, but every differing value and
+every `FAIL`, `BLOCKED`, or `REVIEW` remains scenario-specific. A later cross-event
+anomaly may amend earlier feedback.
 
-Read [continuous stream](references/02-execution/continuous-stream.md) before
-the first capture.
-
-## Forms, consent, acquisition, and gates
-
-Complete ordinary forms and consent choices with synthetic data and prove the
-website outcome independently of tracking. Try normal control recovery before
-declaring a UI blocker. Never bypass CAPTCHA or authentication; create a
-protected handoff and resume the same browser/context/tab/Preview identities.
-
-Do not refuse SEO/acquisition tests. Exercise a fresh referral context with a
-natural referring visit when practical, otherwise a browser-controlled
-`Referer`, otherwise explicit campaign parameters. Label the simulation method
-and limitations. Simulated Google referral proves site/tag response to that
-context, not indexing, ranking, or a real search impression.
-
-Read [forms, consent, CAPTCHA, and acquisition](references/02-execution/forms-consent-acquisition.md)
-when any of these applies.
-
-## Operator-v2 workflow
-
-Resolve `<skill-root>` as the directory containing this file; never assume the
-working directory. Run `python -B "<skill-root>/scripts/<script>.py" --help`
-for exact command fields.
-
-1. Inspect/import the plan and initialize normalized schema-v3 results. New
-   runs must declare `operator_contract_version_required: 2`.
-2. Initialize `preview_session_ledger.py` with operator contract 2 and the
-   normalized `run_id`, current browser instance/context, profile, origins, and
-   container.
-3. Register the existing GTM, Tag Assistant, and site surfaces.
-4. For the current plan-ordered event, discover/register its cases with exact
-   dimension values and tag inventory, then import and freeze its coverage.
-   Do not require future events to be fully prepared before event 1 can close.
-5. Capture a v2 before-runtime snapshot and start that event with
-   `recette_operator.py start-event`.
-6. Execute one exact action. Capture website outcome, all pushes, all canonical
-   and tag rows, before/after journey state, and a v2 after snapshot.
-7. Settle the action, import stream/semantic records and any acquisition,
-   handoff, or gated-flow records, and generate the event patch scaffold from
-   the settled final actions. Replace every scaffold placeholder with current
-   direct proof.
-8. Close through `recette_operator.py close-event`. It atomically commits the
-   event patch, verified event-only evidence catalog, frozen coverage revision,
-   and digest-bound reviewed stream prefix. Safe replay of the identical close
-   is idempotent; a different patch requires explicit reopening.
-9. Emit its immediate event/case/layer feedback before preparing the next
-   event. The continuous stream may remain `OPEN`; the closed event passes that
-   component only when its exact prefix is certified and unchanged.
-10. After the final event, close the stream, verify every evidence-file digest,
-   call `recette_operator.py finish-run`, and build the validated XLSX.
-
-Batch imports are transactional. Preserve interrupted attempts and observed
-pushes; retry only from a new controlled boundary linked to the retained
-attempt. Resume from persisted state plus a fresh snapshot. If a material
-case, tag, or coverage decision changes, reopen and reclose the affected event
-suffix in plan order.
-
-Read [operator and output](references/03-judgement/operator-and-output.md) while
-operating the ledger.
-
-## Semantic judgement
-
-Every action requires direct `PAGE_ACTION_VALIDITY`, before/after journey
-state, and an explicit `BUSINESS_STATE` judgement tied to that journey-state
-evidence. Every positive requirement needs an external anchor: the plan,
-visible page/business state, direct interaction, analyst specification, or
-documented platform semantics. Matching emptiness cannot prove a positive
-requirement.
-
-Judge exact value, JSON type, field state (absent/undefined/null/empty/value),
-occurrence, action window, context, and order. Use:
-
-- `PASS`: the accepted behavior is directly proved;
-- `FAIL`: settled evidence contradicts it;
-- `BLOCKED`: an evidenced blocker prevents a trustworthy decision;
-- `REVIEW`: direct evidence leaves one precise verdict-changing ambiguity;
-- `NOT_TESTED`: explicitly out of executed scope.
-
-`NOT_APPLICABLE` belongs only to false conditional layers. `PENDING` is never
-final. Overall status is the worst of technical, page/journey, business
-semantics, continuous stream, coverage, and execution.
-
-Read [semantic verdict](references/03-judgement/semantic-verdict.md) before
-closing an event.
-
-## Required delivery
-
-After each tested event, return one concise feedback block containing:
-
-- event and case status with human label `OK`/`KO`;
-- every inspected canonical layer and simple reason;
-- per-tag technical layers;
-- technical delivery, page/journey, business semantics, stream anomalies, and
-  scenario coverage;
-- affected cases, direct evidence IDs, and exact retest instruction when not
-  `PASS`.
-
-After all events, return a plan-ordered conclusion listing every event, layers
-inspected and statuses, overall status, and a concise why. Produce the
-validated XLSX with coverage, scenarios, semantic checks, journey state,
-continuous segments, protected handoffs, gated flows, detailed legacy sheets,
-and final conclusion.
-
-Refuse finalization when actions are open, cases/events remain pending,
-coverage is stale, stream calls are unclassified, containers/browser bindings
-disagree, semantic anchors are missing, handoffs are unresolved, or any final
-evidence artifact is missing, external-only, or digest-mismatched.
+At the end, deliver a plan-ordered conclusion plus validated XLSX, Markdown, JSON, defect
+and retest views. The deterministic renderer owns every claim, row, domain, scenario,
+event, and final status. Analyst/AI reasoning may only add an evidence-backed `FAIL` or
+`REVIEW`; it cannot upgrade or suppress an objective result.

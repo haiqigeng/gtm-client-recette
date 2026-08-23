@@ -1,64 +1,47 @@
 # Contributing
 
-Use synthetic fixtures only. Never commit client tracking plans, domains,
-container IDs, screenshots, reports, credentials, emails, or browser traces.
+The source version is **v5.0.0**. Use synthetic fixtures only. Never commit
+client plans, domains, container or destination IDs, browser traces,
+screenshots, reports, credentials, tokens, form data, or run artifacts.
 
-## Versioning
+## Design rules
 
-Use semantic `v` versioning, never calendar-date versioning:
+- Preserve one staged compiler, one canonical occurrence model and one
+  deterministic verdict authority. Do not add alternate ledgers/results or a
+  public provenance/verdict setter.
+- Compile typed occurrence, value/state, relationship, order, transport and
+  negative claims without imposing a fixed layer matrix.
+- Keep scenarios just in time. Do not recreate whole-plan cases, domain rows,
+  tag inventories or reports before the first useful action.
+- Preserve continuous call-time source and request deltas, strict JSON
+  types/states, declared-only wire coercion, document/action/Preview identity,
+  evidence-source non-substitution and independent business outcome.
+- Preserve six diagnostic domains plus confidence and coverage gates. Detailed
+  operational rows must remain applicable and per-target, not fixed stages.
+- Semantic annotations may only add evidence-backed `FAIL` or `REVIEW`; the
+  deterministic renderer owns all statuses.
+- Keep behavior signatures as lean coverage evidence, not a large ontology.
+- Optimize measured browser/navigation/Preview work, not by skipping proof.
+- Keep server-side certification outside this skill.
 
-- Store `MAJOR.MINOR.PATCH` in `pyproject.toml`; the current release is
-  `3.2.0`.
-- Prefix Git tags and release archives with `v`, for example `v3.0.0` and
-  `gtm-client-recette-v3.2.0.zip`.
-- Increment PATCH for compatible fixes, MINOR for compatible functionality,
-  and MAJOR for incompatible changes.
+Every verdict or workflow change needs a focused synthetic regression that
+fails without the change. Changes to `datalayer_recorder.js` or
+`dom_interaction_census.js` also require the real-browser helper suite.
 
-Before opening a pull request, run:
+## Validation
 
 ```powershell
 python -m pip install -e ".[dev]"
-python -m ruff check --no-cache .
-python -m ruff format --check .
+python -m ruff check --no-cache scripts tests
+python -m ruff format --check scripts tests
 python -m unittest discover -s tests -v
-python -B scripts/check_release.py --tag v3.2.0
+python -B tests/run_browser_helpers.py
+python -B scripts/check_release.py --tag v5.0.0
 ```
 
-Changes to verdict logic require a regression fixture that fails before the
-change and passes after it. Keep the skill limited to recette execution; do not
-add GTM audit, implementation, debugging, or publishing behaviour.
+## Versioning
 
-Keep one acceptance workflow. Derive applicable evidence layers from confirmed
-requirements and preserve independent verdicts for raw API Call, resolved Data
-Layer, GTM variable, tag configuration, firing, runtime parameter, and browser
-request. Do not reintroduce named full/scoped run types or allow one layer to
-substitute for another.
-
-Changes to interaction coverage, event-stream reconciliation, or gated-journey
-behaviour also require an anonymized regression in
-`tests/test_v310_optimizations.py` or the current versioned lifecycle regression
-module. Keep coverage proportional:
-exhaust practical finite sets, document risk-based large-space coverage, and
-do not add speculative negative crawling.
-
-Changes to final certification must test the normalized result together with a
-schema-v3 session ledger. Cover case closure, retained retries, explicit
-business-push counts/classifications, per-case applicable layers, direct
-evidence linkage, and workbook case/push sheets. Do not weaken strict
-certification to preserve an incomplete legacy run.
-
-Changes to action execution or absence judgement must keep interaction outcome
-independent from tracking, retain failed attempts and retry lineage, and test
-adaptive settlement. A supplemental recorder observation may expose a Preview
-gap but cannot pass a required Tag Assistant layer.
-
-Changes to the dataLayer recorder or DOM census require a synthetic browser
-check with `python -B tests/run_browser_helpers.py`; install the optional
-`browser-test` dependencies and Chromium first. Changes to plan inspection,
-request decoding, or incremental event handling require focused unit tests.
-
-Preserve schema-v3 normalization where possible. If stricter certification
-requires new fields, update the fixtures and document the legacy-row upgrade in
-the README and changelog. Add strict negative tests for every new
-component-level PASS rule. Server-side GTM remains a separate scope and must
-not be introduced here.
+Use semantic tags and archive names. Store `5.0.0` in `pyproject.toml`, tag it
+as `v5.0.0`, and package it as `gtm-client-recette-v5.0.0.zip`. Increment major
+for incompatible architecture/contracts, minor for compatible capability, and
+patch for compatible corrections.

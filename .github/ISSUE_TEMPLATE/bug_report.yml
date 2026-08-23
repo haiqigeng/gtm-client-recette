@@ -10,7 +10,7 @@ body:
     id: behaviour
     attributes:
       label: Observed behaviour
-      description: Identify the affected layer (plan ingestion, browser/Preview connection, interaction completion/retry, adaptive settlement, recorder/Preview discrepancy, interaction coverage, occurrence/context, raw or resolved dataLayer, GTM variable, tag configuration/firing/runtime value, destination request, gated journey, consent, incremental validation, or workbook).
+      description: Identify the affected area (plan/claim compilation, browser or Preview identity, reality, source signal, GTM decision, destination delivery, surrounding behavior, data safety, evidence confidence, scenario coverage, protected journey, event feedback, or final report).
     validations:
       required: true
   - type: textarea
@@ -23,8 +23,8 @@ body:
     id: skill-version
     attributes:
       label: Skill release
-      description: Report the exact release or tag used, for example v3.2.0.
-      placeholder: v3.2.0
+      description: Report the exact release or source revision used, for example v5.0.0.
+      placeholder: v5.0.0
     validations:
       required: true
   - type: textarea

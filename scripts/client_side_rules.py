@@ -12,7 +12,6 @@ from datetime import datetime
 from typing import Any
 from urllib.parse import parse_qsl, urlsplit
 
-from acceptance_contract import expects_absence
 from safe_regex import finditer as safe_finditer
 from safe_regex import fullmatch as safe_fullmatch
 from value_semantics import is_json_number, strict_equal
@@ -401,6 +400,195 @@ def format_matches(value: Any, format_name: str) -> bool:
     return False
 
 
+def _rule_path_errors(operator: str, rule: dict[str, Any]) -> list[str]:
+    fields = {
+        "equals_path": ("left_path", "right_path"),
+        "sum_product_equals": ("target_path", "items_path"),
+        "all_items_equal": ("items_path", "expected_path"),
+        "unique_across_requirements": ("path",),
+        "range": ("path",),
+        "format": ("path",),
+        "regex": ("path",),
+    }.get(operator, ())
+    errors = [field for field in fields if not valid_path(rule.get(field))]
+    if operator == "implies":
+        errors.extend(
+            f"{branch}.path"
+            for branch in ("if", "then")
+            if not isinstance(rule.get(branch), dict) or not valid_path(rule[branch].get("path"))
+        )
+    return errors
+
+
+def _rule_equals_path(
+    rule: dict[str, Any], payload: Any, _all_payloads: Iterable[Any]
+) -> dict[str, Any]:
+    left_path = str(rule.get("left_path", ""))
+    right_path = str(rule.get("right_path", ""))
+    left = path_value(payload, left_path)
+    right = path_value(payload, right_path)
+    return {
+        "passed": left is not MISSING and right is not MISSING and strict_equal(left, right),
+        "actual": left,
+        "expected": right,
+        "actual_path_hint": left_path,
+        "expected_path_hint": right_path,
+    }
+
+
+def _rule_sum_product(
+    rule: dict[str, Any], payload: Any, _all_payloads: Iterable[Any]
+) -> dict[str, Any]:
+    target_path = str(rule.get("target_path", ""))
+    target = path_value(payload, target_path)
+    items = path_value(payload, str(rule.get("items_path", "")))
+    price_field = str(rule.get("price_field", "price"))
+    quantity_field = str(rule.get("quantity_field", "quantity"))
+    tolerance = rule.get("tolerance", 0)
+    if not _is_number(tolerance) or tolerance < 0:
+        return {"error": "tolerance must be a non-negative number."}
+    computed = 0.0
+    valid_items = isinstance(items, list) and bool(items)
+    if valid_items:
+        for item in items:
+            if not isinstance(item, dict):
+                valid_items = False
+                break
+            price = item.get(price_field)
+            quantity = item.get(quantity_field, 1)
+            if not _is_number(price) or not _is_number(quantity):
+                valid_items = False
+                break
+            computed += float(price) * float(quantity)
+    passed = (
+        valid_items
+        and _is_number(target)
+        and math.isclose(float(target), computed, rel_tol=0.0, abs_tol=float(tolerance))
+    )
+    return {
+        "passed": passed,
+        "actual": target,
+        "expected": computed,
+        "actual_path_hint": target_path,
+    }
+
+
+def _rule_all_items_equal(
+    rule: dict[str, Any], payload: Any, _all_payloads: Iterable[Any]
+) -> dict[str, Any]:
+    items = path_value(payload, str(rule.get("items_path", "")))
+    item_field = str(rule.get("item_field", ""))
+    expected_path = str(rule.get("expected_path", ""))
+    expected = path_value(payload, expected_path)
+    valid = (
+        isinstance(items, list) and bool(items) and all(isinstance(item, dict) for item in items)
+    )
+    values = [item.get(item_field, MISSING) for item in items] if valid else []
+    return {
+        "passed": valid
+        and expected is not MISSING
+        and all(value is not MISSING and strict_equal(value, expected) for value in values),
+        "actual": values,
+        "expected": expected,
+        "actual_path_hint": item_field,
+        "expected_path_hint": expected_path,
+    }
+
+
+def _rule_implies(
+    rule: dict[str, Any], payload: Any, _all_payloads: Iterable[Any]
+) -> dict[str, Any]:
+    antecedent = rule.get("if")
+    consequent = rule.get("then")
+    if not isinstance(antecedent, dict) or not isinstance(consequent, dict):
+        return {"error": "implies requires object-valued 'if' and 'then' conditions."}
+    if_result = _condition(payload, antecedent)
+    then_result = _condition(payload, consequent)
+    return {
+        "passed": None
+        if if_result is None or then_result is None
+        else (not if_result or then_result),
+        "actual": {"if": if_result, "then": then_result},
+        "expected": {"if_true_requires_then": True},
+    }
+
+
+def _rule_unique(rule: dict[str, Any], payload: Any, all_payloads: Iterable[Any]) -> dict[str, Any]:
+    path = str(rule.get("path", ""))
+    values = [
+        candidate for item in all_payloads if (candidate := path_value(item, path)) is not MISSING
+    ]
+    unique_count = len(set(map(_stable_key, values)))
+    current = path_value(payload, path)
+    return {
+        "passed": current is not MISSING and len(values) == unique_count,
+        "actual": {"value_count": len(values), "unique_count": unique_count},
+        "expected": {"all_values_unique": True},
+    }
+
+
+def _rule_range(rule: dict[str, Any], payload: Any, _all_payloads: Iterable[Any]) -> dict[str, Any]:
+    path = str(rule.get("path", ""))
+    actual = path_value(payload, path)
+    minimum = rule.get("min")
+    maximum = rule.get("max")
+    passed = False
+    if actual is not MISSING and _is_number(actual):
+        passed = (minimum is None or (_is_number(minimum) and actual >= minimum)) and (
+            maximum is None or (_is_number(maximum) and actual <= maximum)
+        )
+    return {
+        "passed": passed,
+        "actual": actual,
+        "expected": {"min": minimum, "max": maximum},
+        "actual_path_hint": path,
+    }
+
+
+def _rule_format(
+    rule: dict[str, Any], payload: Any, _all_payloads: Iterable[Any]
+) -> dict[str, Any]:
+    path = str(rule.get("path", ""))
+    actual = path_value(payload, path)
+    format_name = str(rule.get("format", ""))
+    return {
+        "passed": format_name in FORMATS and format_matches(actual, format_name),
+        "actual": actual,
+        "expected": format_name,
+        "actual_path_hint": path,
+    }
+
+
+def _rule_regex(rule: dict[str, Any], payload: Any, _all_payloads: Iterable[Any]) -> dict[str, Any]:
+    path = str(rule.get("path", ""))
+    actual = path_value(payload, path)
+    pattern = rule.get("pattern")
+    try:
+        passed = (
+            isinstance(actual, str) and isinstance(pattern, str) and safe_fullmatch(pattern, actual)
+        )
+    except ValueError:
+        return {"error": "Invalid regular expression."}
+    return {
+        "passed": passed,
+        "actual": actual,
+        "expected": pattern,
+        "actual_path_hint": path,
+    }
+
+
+BUSINESS_RULE_EVALUATORS = {
+    "equals_path": _rule_equals_path,
+    "sum_product_equals": _rule_sum_product,
+    "all_items_equal": _rule_all_items_equal,
+    "implies": _rule_implies,
+    "unique_across_requirements": _rule_unique,
+    "range": _rule_range,
+    "format": _rule_format,
+    "regex": _rule_regex,
+}
+
+
 def evaluate_business_rule(
     rule: dict[str, Any],
     payload: Any,
@@ -418,172 +606,34 @@ def evaluate_business_rule(
     if not rule_id:
         result["reason"] = "Missing rule_id."
         return result
-    if operator not in BUSINESS_RULE_OPERATORS:
+    evaluator = BUSINESS_RULE_EVALUATORS.get(operator)
+    if evaluator is None or operator not in BUSINESS_RULE_OPERATORS:
         result["reason"] = f"Unsupported operator '{operator}'."
         return result
-
-    path_fields = {
-        "equals_path": ("left_path", "right_path"),
-        "sum_product_equals": ("target_path", "items_path"),
-        "all_items_equal": ("items_path", "expected_path"),
-        "unique_across_requirements": ("path",),
-        "range": ("path",),
-        "format": ("path",),
-        "regex": ("path",),
-    }.get(operator, ())
-    invalid_paths = [field for field in path_fields if not valid_path(rule.get(field))]
-    if operator == "implies":
-        invalid_paths.extend(
-            f"{branch}.path"
-            for branch in ("if", "then")
-            if not isinstance(rule.get(branch), dict) or not valid_path(rule[branch].get("path"))
-        )
+    invalid_paths = _rule_path_errors(operator, rule)
     if invalid_paths:
         result["reason"] = "Invalid configured path syntax: " + ", ".join(invalid_paths) + "."
         return result
 
-    passed: bool | None = None
-    actual: Any = MISSING
-    expected: Any = MISSING
-    actual_path_hint: str | None = None
-    expected_path_hint: str | None = None
-
-    if operator == "equals_path":
-        left_path = str(rule.get("left_path", ""))
-        right_path = str(rule.get("right_path", ""))
-        left = path_value(payload, left_path)
-        right = path_value(payload, right_path)
-        actual, expected = left, right
-        actual_path_hint, expected_path_hint = left_path, right_path
-        passed = left is not MISSING and right is not MISSING and strict_equal(left, right)
-
-    elif operator == "sum_product_equals":
-        target_path = str(rule.get("target_path", ""))
-        target = path_value(payload, target_path)
-        items = path_value(payload, str(rule.get("items_path", "")))
-        price_field = str(rule.get("price_field", "price"))
-        quantity_field = str(rule.get("quantity_field", "quantity"))
-        tolerance = rule.get("tolerance", 0)
-        if not _is_number(tolerance) or tolerance < 0:
-            result["reason"] = "tolerance must be a non-negative number."
-            return result
-        computed = 0.0
-        valid_items = isinstance(items, list) and bool(items)
-        if valid_items:
-            for item in items:
-                if not isinstance(item, dict):
-                    valid_items = False
-                    break
-                price = item.get(price_field)
-                quantity = item.get(quantity_field, 1)
-                if not _is_number(price) or not _is_number(quantity):
-                    valid_items = False
-                    break
-                computed += float(price) * float(quantity)
-        actual, expected = target, computed
-        actual_path_hint = target_path
-        passed = (
-            valid_items
-            and _is_number(target)
-            and math.isclose(
-                float(target),
-                computed,
-                rel_tol=0.0,
-                abs_tol=float(tolerance),
-            )
-        )
-
-    elif operator == "all_items_equal":
-        items = path_value(payload, str(rule.get("items_path", "")))
-        item_field = str(rule.get("item_field", ""))
-        expected = path_value(payload, str(rule.get("expected_path", "")))
-        valid_items = (
-            isinstance(items, list)
-            and bool(items)
-            and all(isinstance(item, dict) for item in items)
-        )
-        values = [item.get(item_field, MISSING) for item in items] if valid_items else []
-        actual = values
-        actual_path_hint = str(rule.get("item_field", ""))
-        expected_path_hint = str(rule.get("expected_path", ""))
-        passed = (
-            valid_items
-            and expected is not MISSING
-            and all(value is not MISSING and strict_equal(value, expected) for value in values)
-        )
-
-    elif operator == "implies":
-        antecedent = rule.get("if")
-        consequent = rule.get("then")
-        if not isinstance(antecedent, dict) or not isinstance(consequent, dict):
-            result["reason"] = "implies requires object-valued 'if' and 'then' conditions."
-            return result
-        if_result = _condition(payload, antecedent)
-        then_result = _condition(payload, consequent)
-        actual = {"if": if_result, "then": then_result}
-        expected = {"if_true_requires_then": True}
-        passed = (
-            None if if_result is None or then_result is None else (not if_result or then_result)
-        )
-
-    elif operator == "unique_across_requirements":
-        path = str(rule.get("path", ""))
-        values = [
-            candidate
-            for item in all_payloads
-            if (candidate := path_value(item, path)) is not MISSING
-        ]
-        actual = {"value_count": len(values), "unique_count": len(set(map(_stable_key, values)))}
-        expected = {"all_values_unique": True}
-        current = path_value(payload, path)
-        passed = current is not MISSING and len(values) == len(set(map(_stable_key, values)))
-
-    elif operator == "range":
-        actual_path_hint = str(rule.get("path", ""))
-        actual = path_value(payload, actual_path_hint)
-        minimum = rule.get("min")
-        maximum = rule.get("max")
-        expected = {"min": minimum, "max": maximum}
-        if actual is MISSING or not _is_number(actual):
-            passed = False
-        else:
-            passed = (minimum is None or (_is_number(minimum) and actual >= minimum)) and (
-                maximum is None or (_is_number(maximum) and actual <= maximum)
-            )
-
-    elif operator == "format":
-        actual_path_hint = str(rule.get("path", ""))
-        actual = path_value(payload, actual_path_hint)
-        format_name = str(rule.get("format", ""))
-        expected = format_name
-        passed = format_name in FORMATS and format_matches(actual, format_name)
-
-    elif operator == "regex":
-        actual_path_hint = str(rule.get("path", ""))
-        actual = path_value(payload, actual_path_hint)
-        pattern = rule.get("pattern")
-        expected = pattern
-        try:
-            passed = (
-                isinstance(actual, str)
-                and isinstance(pattern, str)
-                and safe_fullmatch(pattern, actual)
-            )
-        except ValueError:
-            result["reason"] = "Invalid regular expression."
-            return result
-
+    evaluation = evaluator(rule, payload, all_payloads)
+    if evaluation.get("error"):
+        result["reason"] = evaluation["error"]
+        return result
+    passed = evaluation.get("passed")
     result["status"] = "PASS" if passed is True else "FAIL" if passed is False else "REVIEW"
-    result["actual"] = _compact(actual, actual_path_hint)
-    result["expected"] = _compact(expected, expected_path_hint)
-    if not result["reason"]:
-        result["reason"] = (
-            "Rule satisfied."
-            if passed is True
-            else "Rule not satisfied."
-            if passed is False
-            else "Rule could not be evaluated deterministically."
-        )
+    result["actual"] = _compact(
+        evaluation.get("actual", MISSING), evaluation.get("actual_path_hint")
+    )
+    result["expected"] = _compact(
+        evaluation.get("expected", MISSING), evaluation.get("expected_path_hint")
+    )
+    result["reason"] = (
+        "Rule satisfied."
+        if passed is True
+        else "Rule not satisfied."
+        if passed is False
+        else "Rule could not be evaluated deterministically."
+    )
     return result
 
 
@@ -592,146 +642,6 @@ def _stable_key(value: Any) -> str:
         return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     except TypeError:
         return repr(value)
-
-
-def _rule_surface(requirement: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
-    expectation = requirement.get("expectation")
-    mechanism = (
-        expectation.get("source_mechanism", "data_layer_push")
-        if isinstance(expectation, dict)
-        else "data_layer_push"
-    )
-    raw = requirement.get("raw_api_call")
-    signal = requirement.get("source_signal")
-    resolved = requirement.get("resolved_data_layer")
-    candidates: list[tuple[Any, str]] = []
-    if mechanism == "data_layer_push":
-        candidates.append(
-            (raw.get("payload") if isinstance(raw, dict) else None, "raw_api_call.payload")
-        )
-    else:
-        if isinstance(signal, dict):
-            candidates.extend(
-                (
-                    (signal.get("payload"), "source_signal.payload"),
-                    (
-                        signal.get("value", MISSING),
-                        "source_signal.value",
-                    ),
-                )
-            )
-    candidates.append(
-        (
-            resolved.get("snapshot") if isinstance(resolved, dict) else None,
-            "resolved_data_layer.snapshot",
-        )
-    )
-    for payload, source in candidates:
-        if isinstance(payload, dict):
-            return payload, source
-        if source == "source_signal.value" and payload is not MISSING:
-            return {"value": payload}, source
-    return None, None
-
-
-def _surface_occurrence_id(requirement: dict[str, Any], source: str | None) -> tuple[Any, ...]:
-    """Identify one observed occurrence without counting one row per checked field."""
-    if source == "raw_api_call.payload":
-        raw = requirement.get("raw_api_call")
-        if isinstance(raw, dict) and isinstance(raw.get("event_index"), int):
-            return (
-                "event_index",
-                raw.get("stream_id", "tag_assistant"),
-                raw.get("connection_epoch", 1),
-                raw["event_index"],
-            )
-        if isinstance(raw, dict) and raw.get("evidence_id"):
-            return ("evidence", raw["evidence_id"])
-    if source and source.startswith("source_signal"):
-        signal = requirement.get("source_signal")
-        if isinstance(signal, dict) and isinstance(signal.get("event_index"), int):
-            return (
-                "event_index",
-                signal.get("stream_id", "tag_assistant"),
-                signal.get("connection_epoch", 1),
-                signal["event_index"],
-            )
-        if isinstance(signal, dict) and signal.get("evidence_id"):
-            return ("evidence", signal["evidence_id"])
-    if source == "resolved_data_layer.snapshot":
-        resolved = requirement.get("resolved_data_layer")
-        if isinstance(resolved, dict) and resolved.get("evidence_id"):
-            return ("evidence", resolved["evidence_id"])
-    boundary = requirement.get("action_boundary")
-    if isinstance(boundary, dict) and boundary.get("action_id"):
-        return ("action", boundary["action_id"])
-    return ("requirement", requirement.get("requirement_id"))
-
-
-def evaluate_report_business_rules(data: dict[str, Any]) -> list[dict[str, Any]]:
-    """Evaluate declared business rules for every normalized requirement."""
-    requirements = data.get("requirements")
-    if not isinstance(requirements, list):
-        return []
-    surface_entries: list[dict[str, Any]] = []
-    seen_occurrences: set[tuple[str, str | None, tuple[Any, ...]]] = set()
-    for requirement in requirements:
-        if not isinstance(requirement, dict):
-            continue
-        expectation = requirement.get("expectation")
-        if isinstance(expectation, dict) and expects_absence(expectation):
-            continue
-        payload, source = _rule_surface(requirement)
-        if payload is None:
-            continue
-        occurrence_key = (
-            str(requirement.get("event_group_id", "")),
-            source,
-            _surface_occurrence_id(requirement, source),
-        )
-        if occurrence_key in seen_occurrences:
-            continue
-        seen_occurrences.add(occurrence_key)
-        surface_entries.append({"payload": payload, "source": source})
-    output: list[dict[str, Any]] = []
-    for requirement in requirements:
-        if not isinstance(requirement, dict):
-            continue
-        expectation = requirement.get("expectation")
-        if not isinstance(expectation, dict):
-            continue
-        if expects_absence(expectation):
-            continue
-        payload, evaluation_source = _rule_surface(requirement)
-        rules = expectation.get("business_rules")
-        if not isinstance(payload, dict) or not isinstance(rules, list):
-            continue
-        for rule in rules:
-            if not isinstance(rule, dict):
-                continue
-            comparable_payloads = [
-                entry["payload"]
-                for entry in surface_entries
-                if entry["source"] == evaluation_source
-            ]
-            result = evaluate_business_rule(rule, payload, comparable_payloads)
-            if rule.get("operator") == "unique_across_requirements":
-                path = str(rule.get("path", ""))
-                relevant_sources = {
-                    str(entry["source"])
-                    for entry in surface_entries
-                    if path_value(entry["payload"], path) is not MISSING
-                }
-                if len(relevant_sources) > 1 and result["status"] == "PASS":
-                    result["status"] = "REVIEW"
-                    result["reason"] = (
-                        "Uniqueness cannot be certified across heterogeneous evidence "
-                        "surfaces: " + ", ".join(sorted(relevant_sources)) + "."
-                    )
-            result["requirement_id"] = requirement.get("requirement_id")
-            result["evaluation_source"] = evaluation_source
-            output.append(result)
-    return output
 
 
 def _normalize_path(path: str) -> str:
@@ -930,55 +840,3 @@ def scan_sensitive_value(
 
     walk(value, root_path)
     return sorted(findings, key=lambda item: (item["path"], item["category"], item["basis"]))
-
-
-def requirement_sensitive_targets(requirement: dict[str, Any]) -> dict[str, Any]:
-    """Return the client-side values that are relevant to leakage checks."""
-    targets: dict[str, Any] = {}
-    raw = requirement.get("raw_api_call")
-    if isinstance(raw, dict) and "payload" in raw:
-        targets["raw_api_call.payload"] = raw["payload"]
-    resolved = requirement.get("resolved_data_layer")
-    if isinstance(resolved, dict) and "snapshot" in resolved:
-        targets["resolved_data_layer.snapshot"] = resolved["snapshot"]
-    tag = requirement.get("tag")
-    if isinstance(tag, dict) and "runtime_value" in tag:
-        targets["tag.runtime_value"] = tag["runtime_value"]
-    request = requirement.get("destination_request")
-    if isinstance(request, dict):
-        for field in (
-            "request_url",
-            "query_parameters",
-            "request_body",
-            "request_headers",
-            "field_value",
-        ):
-            if field in request:
-                targets[f"destination_request.{field}"] = request[field]
-    journey = requirement.get("journey")
-    if isinstance(journey, dict):
-        for field in ("url", "page_title", "action_value"):
-            if field in journey:
-                targets[f"journey.{field}"] = journey[field]
-    signal = requirement.get("source_signal")
-    if isinstance(signal, dict):
-        for field in ("payload", "value"):
-            if field in signal:
-                targets[f"source_signal.{field}"] = signal[field]
-    checks = requirement.get("client_checks")
-    if isinstance(checks, list):
-        for index, check in enumerate(checks):
-            if isinstance(check, dict) and "actual" in check:
-                targets[f"client_checks[{index}].actual"] = check["actual"]
-    return targets
-
-
-def scan_requirement_sensitive_data(
-    requirement: dict[str, Any],
-    policy: dict[str, Any] | None = None,
-) -> list[dict[str, Any]]:
-    """Scan the normalized client-side surfaces for one requirement."""
-    output: list[dict[str, Any]] = []
-    for path, value in requirement_sensitive_targets(requirement).items():
-        output.extend(scan_sensitive_value(value, root_path=path, policy=policy))
-    return sorted(output, key=lambda item: (item["path"], item["category"], item["basis"]))
