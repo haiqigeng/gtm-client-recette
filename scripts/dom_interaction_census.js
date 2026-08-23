@@ -86,12 +86,28 @@
     if (includeOffscreen) {
       return true;
     }
-    return (
+    const inViewport =
       rect.bottom >= 0 &&
       rect.right >= 0 &&
       rect.top <= window.innerHeight &&
-      rect.left <= window.innerWidth
+      rect.left <= window.innerWidth;
+    if (!inViewport) {
+      return false;
+    }
+    const x = Math.min(
+      Math.max(rect.left + rect.width / 2, 0),
+      Math.max(window.innerWidth - 1, 0)
     );
+    const y = Math.min(
+      Math.max(rect.top + rect.height / 2, 0),
+      Math.max(window.innerHeight - 1, 0)
+    );
+    const root = element.getRootNode();
+    const hit =
+      root && typeof root.elementFromPoint === "function"
+        ? root.elementFromPoint(x, y)
+        : document.elementFromPoint(x, y);
+    return Boolean(hit && (hit === element || element.contains(hit)));
   }
 
   function cssString(value) {

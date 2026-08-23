@@ -313,6 +313,10 @@ def main() -> int:
             <span id="preferred-label">Labelled name</span>
             <button aria-label="Wrong fallback" aria-labelledby="preferred-label">Fallback</button>
             <div class="hidden-parent"><button>Hidden action</button></div>
+            <div style="position:relative;width:180px;height:40px">
+              <button id="covered" style="width:180px;height:40px">Covered action</button>
+              <div style="position:absolute;inset:0;z-index:2;background:white"></div>
+            </div>
             <div id="shadow-host"></div>
             """
         )
@@ -352,6 +356,15 @@ def main() -> int:
             and len(shadow["selectorChain"]) == 2,
             "Open-shadow-root interaction discovery is incomplete.",
             shadow,
+        )
+        viewport_census = census_page.evaluate(
+            "window.__gtmRecetteCensus({includeOffscreen: false, maxItems: 20})"
+        )
+        viewport_names = {item["accessibleName"] for item in viewport_census["items"]}
+        require(
+            "Covered action" not in viewport_names,
+            "A control covered at its interaction point was treated as visible.",
+            viewport_census,
         )
 
         run_context = browser.new_context()

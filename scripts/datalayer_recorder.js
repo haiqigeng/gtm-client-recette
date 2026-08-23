@@ -29,6 +29,10 @@
         ? window.__gtmRecetteRunId.trim()
         : null,
     installedAt: new Date().toISOString(),
+    installedAtDocumentStart:
+      window.__gtmRecetteInstalledAtDocumentStart === true,
+    documentId: null,
+    frameId: null,
     currentActionId: null,
     nextCallIndex: 1,
     acknowledgedThrough: 0,
@@ -376,6 +380,8 @@
             title: safeTitle(),
             layerName,
             actionId: state.currentActionId,
+            documentId: state.documentId,
+            frameId: state.frameId,
             arguments: argumentSnapshot,
             argumentCount: args.length,
             gtmUniqueEventIds: eventIdsSnapshot,
@@ -624,6 +630,15 @@
         state.installedAt = new Date().toISOString();
       }
       state.runId = normalized;
+      if (Object.prototype.hasOwnProperty.call(options, "installedAtDocumentStart")) {
+        state.installedAtDocumentStart = options.installedAtDocumentStart === true;
+      }
+      if (Object.prototype.hasOwnProperty.call(options, "documentId")) {
+        state.documentId = options.documentId === null ? null : String(options.documentId);
+      }
+      if (Object.prototype.hasOwnProperty.call(options, "frameId")) {
+        state.frameId = options.frameId === null ? null : String(options.frameId);
+      }
       return state.runId;
     },
     markAction(actionId) {
@@ -640,6 +655,11 @@
         runId: state.runId,
         disposed: state.disposed,
         installedAt: state.installedAt,
+        installedAtDocumentStart: state.installedAtDocumentStart,
+        captureMode: "call_time",
+        complete: checkIntegrity("dataLayer").recorderAttached,
+        document_id: state.documentId,
+        frame_id: state.frameId,
         currentActionId: state.currentActionId,
         nextCallIndex: state.nextCallIndex,
         acknowledgedThrough: state.acknowledgedThrough,
@@ -660,6 +680,23 @@
         .map((record, index) =>
           safeSnapshot(record, `$.recordsSince[${index}]`)
         );
+    },
+    captureSince(callIndex = 0) {
+      const cursor = Number(callIndex || 0);
+      const integrity = checkIntegrity("dataLayer");
+      return {
+        version: state.version,
+        runId: state.runId,
+        captureMode: "call_time",
+        installedAtDocumentStart: state.installedAtDocumentStart,
+        complete: integrity.recorderAttached,
+        document_id: state.documentId,
+        frame_id: state.frameId,
+        cursor_start: cursor,
+        cursor_end: state.nextCallIndex - 1,
+        records: api.recordsSince(cursor),
+        integrity: [integrity],
+      };
     },
     acknowledgeThrough(callIndex) {
       const numeric = Number(callIndex);

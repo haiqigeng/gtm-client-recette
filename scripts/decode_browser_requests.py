@@ -238,6 +238,19 @@ def decode_request(
         "request_id": str(row.get("request_id") or f"REQ-{index:04d}"),
         "action_id": row.get("action_id"),
         "timestamp": row.get("timestamp"),
+        "browser_context_id": row.get("browser_context_id"),
+        "tab_id": row.get("tab_id"),
+        "document_id": row.get("document_id", row.get("loader_id")),
+        "loader_id": row.get("loader_id"),
+        "frame_id": row.get("frame_id"),
+        "worker_id": row.get("worker_id"),
+        "initiator": row.get("initiator"),
+        "redirect_from": row.get("redirect_from"),
+        "retry_of": row.get("retry_of"),
+        "tag_ids": list(row.get("tag_ids", []))
+        if isinstance(row.get("tag_ids"), list)
+        else ([str(row["tag_id"])] if row.get("tag_id") else []),
+        "correlation_id": row.get("correlation_id"),
         "resource_type": row.get("resource_type"),
         "method": str(row.get("method") or "GET").upper(),
         "request_url": _safe_url(parsed, query),
@@ -246,6 +259,9 @@ def decode_request(
         "headers": retained_headers,
         "excluded_header_names": sorted(key for key in headers if key not in retained_headers),
         "body": body,
+        "outcome": row.get("outcome", row.get("status", "initiated")),
+        "response_status": row.get("response_status"),
+        "failure_reason": row.get("failure_reason"),
     }
 
 

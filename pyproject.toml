@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gtm-client-recette"
-version = "3.2.0"
-description = "Expert client-side GTM recette with semantic, scenario, and continuous-stream validation"
+version = "5.0.0"
+description = "Claim-driven expert client-side GTM Preview recette"
 license = "MIT"
 requires-python = ">=3.11"
-dependencies = ["openpyxl>=3.1.2", "pillow>=10.0.0"]
+dependencies = ["openpyxl>=3.1.2", "PyYAML>=6.0.2"]
 
 [project.optional-dependencies]
 dev = ["ruff>=0.12.0", "vulture>=2.14", "radon>=6.0"]
@@ -24,3 +24,6 @@ src = ["scripts"]
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "I", "B", "UP", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*.py" = ["E402"]

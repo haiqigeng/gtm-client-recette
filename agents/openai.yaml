@@ -1,4 +1,4 @@
 interface:
   display_name: "GTM Client Recette"
-  short_description: "Run expert semantic GTM Preview recette"
-  default_prompt: "Use $gtm-client-recette to run plan-ordered client-side GTM Preview recette in the existing approved browser, prepare each event's material scenarios just in time, certify its reviewed dataLayer-stream prefix, judge technical delivery separately from page and business truth, and return immediate per-event layer verdicts plus a final validated workbook."
+  short_description: "Run fast, expert GTM Preview acceptance QA"
+  default_prompt: "Use $gtm-client-recette to run claim-driven client-side GTM Preview recette in my existing approved Chromium session. Start the first safe vertical slice after one bounded live identity handshake, discover material scenarios just in time, continuously inspect dataLayer and browser-request deltas including weird behavior between interactions, reconcile source, GTM and delivery evidence, and return detailed deterministic feedback per event before the final validated reports."
