@@ -1,6 +1,6 @@
 ---
 name: gtm-client-recette
-description: Execute expert client-side GTM Preview and Tag Assistant acceptance recette against an existing tracking plan or explicit acceptance rules. Use for plan-ordered analytics and media-tag QA in the user's already-open Chromium session, with material-scenario coverage, continuous dataLayer anomaly detection, GTM and browser-delivery reconciliation, business-reality checks, per-event feedback, and a validated XLSX. Excludes tracking-plan design, GTM mutation or publication, server-side certification, implementation fixes, and legal consent decisions.
+description: Execute expert client-side GTM Preview and Tag Assistant acceptance recette against an existing tracking plan or explicit acceptance rules. Use for plan-ordered analytics and media-tag QA in a Playwright MCP-managed headed Microsoft Edge session, with material-scenario coverage, continuous dataLayer anomaly detection, GTM and browser-delivery reconciliation, business-reality checks, per-event feedback, and a validated XLSX. Excludes tracking-plan design, GTM mutation or publication, server-side certification, implementation fixes, and legal consent decisions.
 ---
 
 # GTM Client Recette
@@ -28,10 +28,12 @@ the exact event tags/destinations actually declared in the plan; if none exist, 
 must fail quickly and request a concise accepted category such as GA4/Google Ads and any
 destination that must be certified. Never use broad prose as a literal runtime identity.
 
-Reuse the user's already-open Chromium target and GTM Preview/Tag Assistant tabs. Do not
-replace a usable signed-in session, open an authentication loop, or create another
-browser as normal recovery. Re-prove only the live identity or capture surface affected
-by a correction. A repeated full handshake needs an explicit correction/retest reason.
+Playwright MCP `0.0.79` is the default browser contract. Launch one headed managed Edge
+window with its persistent workspace profile; open and reuse one target tab and one GTM
+Preview/Tag Assistant tab there. The default path needs no browser extension. Existing-
+window attachment is an explicit scope fallback only, never an automatic recovery path.
+If the configured Playwright runtime, version, channel, profile, or self-check is wrong,
+stop before opening an action rather than trying guessed methods or another browser.
 
 Pause at credentials, MFA, CAPTCHA, magic links, external approval, real payment, or
 another protected/consequential gate. Never bypass it. Do not design the plan, change or
@@ -90,8 +92,9 @@ event.
 ## Fast vertical workflow
 
 Resolve `<skill-root>` as this file's directory. Use
-`python -B "<skill-root>/scripts/recette.py" --help` for the authoritative nine-command
-interface.
+`python -B "<skill-root>/scripts/recette.py" --help` for the authoritative command
+interface. The browser loop is only `init -> next -> complete -> finish`; internal
+capture stages are not public agent choices.
 
 1. Run `init` once. It directly compiles accepted JSON/YAML/delimited plans and supported
    XLSX layouts, including common event-metadata plus variable-table sheets. It does not
@@ -99,30 +102,36 @@ interface.
    and ignored rows; code examples are not requirements. An orphan/ambiguous row stops
    intake, while a malformed later event is localized and cannot delay the first valid
    event.
-2. Attach to the existing target and Preview session while compiling. Start continuous
-   lightweight network/event observation and perform one bounded capability/identity
-   handshake. Use fully expanded Preview API Call arguments as the normal source path;
-   attempt a document-start recorder only when that path is insufficient. Reuse a valid
-   current Core/page load; create at most one initial load when one is actually needed.
-   Never generate a second clean repeat without a named evidence defect and retest reason.
+2. While compilation runs, start the configured Playwright MCP server with headed Edge,
+   its persistent profile, core tools plus config self-check, and no extension/vision
+   coordinates. Verify the pinned version and callable tools once. The first `next`
+   persists only that cheap runtime/operation baseline and returns a frozen action card
+   before the site/Preview connection creates the first measured page load. Thus the
+   Preview connection's page load is the Core action; do not generate two cleanup loads.
 3. Select the earliest safe, high-information event. Discover only its material scenario
-   branches just in time.
-4. The first `begin` carries the single capability/binding/health handshake and page
-   before-state. Later `begin` calls carry only the page before-state plus any unbound
-   continuous deltas between interactions. Perform the real interaction once, then
-   `commit` current after-health/page and source/network/lifecycle deltas. Stale captures
-   cannot be relabelled as current. Emit the immediate per-layer pulse; it is
-   provisional and can never certify `PASS`.
-5. Continue a short natural action cluster only while document, action, tag and logical
-   hit identities remain unambiguous. Inspect every intervening source message, including
-   messages not named in the plan.
-6. Run `sync-preview` with Preview evidence only, once for all new indexes in the cluster.
-   Capture complete
-   event and concerned-tag summaries; deep-read the Variables, configuration, effective
+   branches just in time. `next` freezes `OBSERVE_CURRENT`, `NAVIGATE_ONCE`, or
+   `INTERACT_ONCE`, plus whether document change is forbidden, naturally allowed, or one
+   explicitly authorized reload.
+4. Perform exactly the action card once. Then call `complete` once with the returned
+   action ID and current
+   binding/health/page, continuous source/network/lifecycle deltas since the previous
+   committed boundary, the complete bounded
+   Preview event-list delta, concerned deep details, and coverage annotations. It commits
+   and synchronizes Preview together, emits canonical per-layer feedback, and checkpoints
+   the run. A browser/control violation preserves useful evidence but blocks confidence;
+   it never launches a clean repeat or becomes a client defect.
+5. Complete after every real interaction. One interaction may legitimately create
+   several Preview indexes or satisfy several causally co-occurring planned claims; it
+   must not contain a second user interaction. Inspect every intervening source message,
+   including messages not named in the plan.
+6. On that `complete`, capture Preview once for all new indexes caused by the action. Capture
+   complete event and concerned-tag summaries; deep-read the Variables, configuration, effective
    mapping and runtime needed by current planned fields, plus suspicious details. Never
    scan unrelated historical domains or the whole container. Synchronize earlier if
    navigation, ambiguity, or risk could lose evidence.
 7. Emit canonical feedback as soon as all known material scenarios for an event close.
+   If the next completion contains a timestamped between-action anomaly, revise the
+   affected prior event in the same model pass; do not add a pre-action capture phase.
    Choose the next branch by information value and transition cost, not by creating the
    whole run up front.
 8. `finish` only after global reconciliation. It refuses open actions, unresolved
@@ -134,10 +143,10 @@ Corrections invalidate only dependent proof. Distinguish website defects, plan
 ambiguity, control-tool failures, evidence limitations, and protected gates. Never use
 alternate state files or command routes to manufacture progress.
 
-The same event/scenario may run again only with a concise `--retest-reason`; a distinct
-material scenario remains a distinct action. This prevents automatic clean repeats
-without limiting language, shipping, payment, product-signature, or other scenario
-coverage.
+The same event/scenario may run again only with a structured retest basis: a known
+evidence-defect record or explicit user authorization. Free text alone is not authority.
+A distinct material scenario remains a distinct action, so this guard does not limit
+language, shipping, payment, product-signature, or other scenario coverage.
 
 After navigation or reload, retain the old page as the before-state but rebind the new
 document before attributing post-navigation evidence. A proved old-to-new transition is

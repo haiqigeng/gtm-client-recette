@@ -1,6 +1,7 @@
 # Scenario coverage
 
-Build the decision tree just in time for the current event or natural journey cluster.
+Build the decision tree just in time for the current event and any causally co-occurring
+claims from the same real interaction.
 The tracking plan defines accepted requirements, but it may not list every material live
 value.
 

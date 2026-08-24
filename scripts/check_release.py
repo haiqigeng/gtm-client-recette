@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""Validate the zero-based v5 skill tree before packaging."""
+"""Validate the lean Playwright-first skill tree before packaging or release."""
 
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import tomllib
 from pathlib import Path
+
+from core.constants import PLAYWRIGHT_MCP_VERSION
 
 ROOT = Path(__file__).resolve().parents[1]
 SEMVER = re.compile(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)")
@@ -53,9 +56,8 @@ PACKAGING_SCRIPTS = {
 }
 PUBLIC_COMMANDS = {
     "init",
-    "begin",
-    "commit",
-    "sync-preview",
+    "next",
+    "complete",
     "status",
     "handoff",
     "finish",
@@ -94,7 +96,67 @@ IGNORED_PARTS = {".git", "dist", ".venv", "__pycache__", ".pytest_cache", ".ruff
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tag")
+    parser.add_argument(
+        "--live-pilot",
+        type=Path,
+        help="Required with --tag: sanitized Playwright MCP live-pilot result JSON.",
+    )
     return parser.parse_args()
+
+
+def validate_live_pilot(path: Path) -> list[str]:
+    errors: list[str] = []
+    try:
+        value = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError) as error:
+        return [f"cannot read live pilot: {error}"]
+    if not isinstance(value, dict):
+        return ["live pilot root must be an object"]
+    runtime = value.get("runtime", {})
+    expected_runtime = {
+        "provider": "playwright_mcp",
+        "browser_channel": "msedge",
+        "profile_mode": "persistent",
+        "headed": True,
+        "self_check": "PASS",
+    }
+    for key, expected in expected_runtime.items():
+        if runtime.get(key) != expected:
+            errors.append(f"live pilot runtime {key} must be {expected!r}")
+    if runtime.get("mcp_version") != PLAYWRIGHT_MCP_VERSION:
+        errors.append(f"live pilot Playwright MCP version must be {PLAYWRIGHT_MCP_VERSION!r}")
+    latency = value.get("latency_seconds", {})
+    for key, limit in (("first_action", 120), ("first_feedback", 300)):
+        observed = latency.get(key)
+        if not isinstance(observed, (int, float)) or isinstance(observed, bool):
+            errors.append(f"live pilot latency {key} is missing")
+        elif observed > limit:
+            errors.append(f"live pilot latency {key} exceeds {limit} seconds")
+    operations = value.get("operations", {})
+    zero_counters = (
+        "unsupported_method_errors",
+        "coordinate_actions",
+        "ad_hoc_evidence_files",
+        "unauthorized_reloads",
+        "scope_restarts",
+    )
+    for key in zero_counters:
+        if operations.get(key) != 0:
+            errors.append(f"live pilot operations {key} must be zero")
+    if operations.get("preview_passes_first_event") != 1:
+        errors.append("live pilot must complete the first event in one Preview pass")
+    quality = value.get("quality", {})
+    required_quality = (
+        "core_event_completed",
+        "ordinary_event_completed",
+        "mandatory_layers_complete",
+        "continuous_anomaly_stream_complete",
+        "per_event_feedback_emitted",
+    )
+    for key in required_quality:
+        if quality.get(key) is not True:
+            errors.append(f"live pilot quality {key} must be true")
+    return errors
 
 
 def check_metadata(requested_tag: str | None, errors: list[str]) -> str:
@@ -129,17 +191,18 @@ def check_skill(errors: list[str]) -> None:
     required_doctrine = (
         "measurement claim",
         "material real-world scenario",
-        "already-open Chromium",
+        "Playwright MCP",
+        "managed Edge",
         "six diagnostic domains",
         "Evidence confidence and scenario completeness",
         "call-time dataLayer",
         "state-only dataLayer",
         "fully expanded Tag Assistant",
         "normal source authority",
-        "--retest-reason",
-        "Stale captures",
+        "structured retest basis",
+        "capture Preview once",
         "every destination-applicable planned field",
-        "provisional and can never certify `PASS`",
+        "browser/control violation",
         "inspect every intervening source message",
         "high-cardinality",
         "deterministic renderer owns every",
@@ -147,7 +210,7 @@ def check_skill(errors: list[str]) -> None:
     lower_skill = skill.lower()
     for required in required_doctrine:
         if required.lower() not in lower_skill:
-            errors.append(f"SKILL.md is missing required v5 doctrine {required!r}")
+            errors.append(f"SKILL.md is missing required doctrine {required!r}")
     linked = set(REFERENCE_LINK.findall(skill))
     if linked != REQUIRED_REFERENCES:
         errors.append("SKILL.md reference routing differs from the exact four-guide set")
@@ -200,7 +263,7 @@ def check_public_cli(errors: list[str]) -> None:
     actual = set(ADD_PARSER.findall(source))
     if actual != PUBLIC_COMMANDS:
         errors.append(
-            "public CLI command set differs from v5: "
+            "public CLI command set differs from the Playwright-first contract: "
             f"missing={sorted(PUBLIC_COMMANDS - actual)}, extra={sorted(actual - PUBLIC_COMMANDS)}"
         )
     for forbidden in (
@@ -242,9 +305,13 @@ def main() -> int:
     check_active_docs(errors)
     check_public_cli(errors)
     check_source_residue(errors)
+    if args.tag and args.live_pilot is None:
+        errors.append("--tag requires --live-pilot; synthetic tests cannot certify live control")
+    elif args.live_pilot is not None:
+        errors.extend(validate_live_pilot(args.live_pilot))
     if errors:
         raise SystemExit("\n".join(errors))
-    print(f"Zero-based v5 release checks passed for {tag}")
+    print(f"Playwright-first release checks passed for {tag}")
     return 0
 
 

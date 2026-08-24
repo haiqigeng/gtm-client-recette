@@ -51,6 +51,8 @@ def action_windows(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     "commit_record_id": record.get("record_id"),
                     "committed_at": data.get("committed_at", record.get("recorded_at")),
                     "outcome_may_have_occurred": data.get("outcome_may_have_occurred"),
+                    "operation_deltas": data.get("operation_deltas", {}),
+                    "execution_violations": data.get("execution_violations", []),
                     "status": "COMMITTED",
                 }
             )
@@ -358,7 +360,7 @@ def _ingest_source(
         identity = str(signal.get("signal_id") or f"SOURCE:{evidence_ref}:{position}")
         action_id = _attributed_action(
             model,
-            signal.get("action_id") or payload.get("action_id"),
+            signal.get("action_id"),
             signal.get("timestamp", signal.get("observed_at")),
             identity=identity,
         )
@@ -536,7 +538,6 @@ def _ingest_network(
 def _ingest_lifecycle(
     model: dict[str, Any], payload: dict[str, Any], evidence_ref: Any, _record: dict[str, Any]
 ) -> None:
-    action_id = payload.get("action_id")
     groups = (
         ("events", "lifecycle_events", "LIFE"),
         ("errors", "runtime_errors", "ERR"),
@@ -547,7 +548,7 @@ def _ingest_lifecycle(
             identity = f"{prefix}:{evidence_ref}:{position}"
             attributed = _attributed_action(
                 model,
-                value.get("action_id", action_id),
+                value.get("action_id"),
                 value.get("timestamp", value.get("observed_at")),
                 identity=identity,
             )

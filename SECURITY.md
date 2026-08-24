@@ -1,7 +1,8 @@
 # Security Policy
 
-The current supported release is **v5.2.0**. Only the latest published release
-receives security fixes.
+The current source candidate is **v6.0.0**, published as a prerelease while its live
+Playwright/Tag Assistant pilot remains pending. v5.2.0 remains the latest supported
+stable release; after v6.0.0 is promoted, only the latest stable release receives fixes.
 
 Report vulnerabilities privately through GitHub security advisories. Do not
 open a public issue containing credentials, personal data, client domains,

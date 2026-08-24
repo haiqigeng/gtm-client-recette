@@ -6,7 +6,8 @@ from collections.abc import Iterable
 from datetime import UTC, datetime
 from typing import Any
 
-SCHEMA_VERSION = "5.0"
+SCHEMA_VERSION = "6.0"
+PLAYWRIGHT_MCP_VERSION = "0.0.79"
 
 STATUSES = frozenset({"PASS", "FAIL", "BLOCKED", "REVIEW", "NOT_APPLICABLE", "PENDING"})
 STATUS_PRIORITY = {
@@ -72,7 +73,6 @@ MACHINE_RECORD_KINDS = frozenset(
 )
 DERIVED_RECORD_KINDS = frozenset(
     {
-        "ACTION_PULSE",
         "PREVIEW_SYNC",
         "EVENT_FEEDBACK_ISSUED",
         "RUN_FINISHED",
