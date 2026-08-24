@@ -9,7 +9,7 @@ from .constants import MATERIALITY_DEFINITION
 from .correlate import action_windows
 from .state import StateError, stream_record_by_id
 
-COVERAGE_MODES = {"EXHAUSTIVE", "PARTITIONED", "SAMPLED", "BLOCKED"}
+COVERAGE_MODES = {"EXHAUSTIVE", "PARTITIONED", "SAMPLED", "SINGLETON", "BLOCKED"}
 DIMENSION_KINDS = {
     "manageable_finite",
     "high_cardinality",
@@ -81,6 +81,8 @@ def _validate_scenarios(
             action = actions.get(str(action_id))
             if action is None:
                 errors.append(f"Scenario {label} references unknown action {action_id}.")
+            elif action.get("status") == "SUPERSEDED":
+                errors.append(f"Scenario {label} references superseded action {action_id}.")
             elif event_id not in {str(value) for value in action.get("event_ids", [])}:
                 errors.append(f"Action {action_id} is not bound to event {event_id}.")
         for reference in scenario.get("evidence_refs", []):
@@ -133,11 +135,12 @@ def _validate_dimensions(
     scenario_values: dict[str, set[str]],
     roles: set[str],
     records: list[dict[str, Any]],
-) -> tuple[list[str], bool, bool]:
+) -> tuple[list[str], bool, bool, bool]:
     errors: list[str] = []
     record_ids = stream_record_by_id(records)
     high_cardinality = False
     blocked_dimension = False
+    singleton_possible = True
     for index, dimension in enumerate(dimensions, start=1):
         if not isinstance(dimension, dict):
             errors.append(f"Dimension {index} is not an object.")
@@ -155,6 +158,8 @@ def _validate_dimensions(
             continue
         live_errors, reachable = _live_value_errors(name, values, record_ids)
         errors.extend(live_errors)
+        if len({_value_key(value) for value in reachable}) > 1:
+            singleton_possible = False
         if kind == "manageable_finite":
             missing = [
                 value for value in reachable if _value_key(value) not in scenario_values[name]
@@ -166,9 +171,25 @@ def _validate_dimensions(
                 )
         elif kind == "high_cardinality":
             high_cardinality = True
-            if len(reachable) > 1 and not {"ORDINARY", "CONTRAST"}.issubset(roles):
+            if dimension.get("population_size") != 1:
+                singleton_possible = False
+            declared_signatures = {
+                str(value)
+                for value in dimension.get("behavior_signatures", [])
+                if str(value).strip()
+            }
+            observed_signatures = {
+                str(scenario.get("behavior_signature"))
+                for scenario in scenarios
+                if isinstance(scenario, dict) and scenario.get("behavior_signature")
+            }
+            if len(declared_signatures | observed_signatures) > 1 and not {
+                "ORDINARY",
+                "CONTRAST",
+            }.issubset(roles):
                 errors.append(
-                    f"High-cardinality dimension {name} needs ordinary and contrast representatives."
+                    f"High-cardinality dimension {name} has distinct behavior signatures and "
+                    "needs ordinary and contrast representatives."
                 )
             for special, role in (
                 ("boundary_applicable", "BOUNDARY"),
@@ -178,6 +199,7 @@ def _validate_dimensions(
                     errors.append(f"Dimension {name} requires a {role.lower()} representative.")
         elif kind in {"unknown", "unreachable"}:
             blocked_dimension = True
+            singleton_possible = False
         elif kind == "dependent":
             combinations = dimension.get("required_combinations", [])
             for combination in combinations if isinstance(combinations, list) else []:
@@ -185,11 +207,15 @@ def _validate_dimensions(
                     errors.append(
                         f"Dependent combination is untested for dimension {name}: {combination}"
                     )
-    return errors, high_cardinality, blocked_dimension
+    return errors, high_cardinality, blocked_dimension, singleton_possible
 
 
 def _coverage_closure_errors(
-    data: dict[str, Any], mode: str, high_cardinality: bool, blocked_dimension: bool
+    data: dict[str, Any],
+    mode: str,
+    high_cardinality: bool,
+    blocked_dimension: bool,
+    singleton_possible: bool,
 ) -> list[str]:
     errors: list[str] = []
     if mode == "EXHAUSTIVE" and (high_cardinality or blocked_dimension):
@@ -198,12 +224,50 @@ def _coverage_closure_errors(
         )
     if mode == "SAMPLED" and not high_cardinality:
         errors.append("SAMPLED coverage needs a high-cardinality material class.")
+    if mode == "SINGLETON" and (not singleton_possible or len(data.get("scenarios", [])) != 1):
+        errors.append("SINGLETON coverage needs exactly one scenario and no known second member.")
     if blocked_dimension and mode != "BLOCKED":
         errors.append("Unknown or unreachable material dimensions require BLOCKED coverage.")
     unresolved = data.get("unresolved_material", [])
     if data.get("complete") is True and isinstance(unresolved, list) and unresolved:
         errors.append("Coverage cannot be complete with unresolved material discoveries/anomalies.")
     return errors
+
+
+def _merged_dimensions(event: dict[str, Any], supplied: list[Any]) -> list[dict[str, Any]]:
+    """Keep compiler-known constraints while adding live-discovered coverage evidence."""
+    merged: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
+    for raw in [*event.get("known_dimensions", []), *supplied]:
+        if not isinstance(raw, dict) or not str(raw.get("name") or "").strip():
+            continue
+        name = str(raw["name"])
+        raw_values = raw.get("values", []) if isinstance(raw.get("values", []), list) else []
+        if name not in merged:
+            merged[name] = {**raw, "values": list(raw_values)}
+            order.append(name)
+            continue
+        prior = merged[name]
+        values = []
+        seen = set()
+        for value in [*prior.get("values", []), *raw_values]:
+            key = _value_key(value)
+            if key not in seen:
+                seen.add(key)
+                values.append(value)
+        combined = {**raw, **prior, "values": values}
+        for key in ("behavior_signatures", "required_combinations"):
+            rows = []
+            row_keys = set()
+            for item in [*prior.get(key, []), *raw.get(key, [])]:
+                item_key = _value_key(item)
+                if item_key not in row_keys:
+                    row_keys.add(item_key)
+                    rows.append(item)
+            if rows:
+                combined[key] = rows
+        merged[name] = combined
+    return [merged[name] for name in order]
 
 
 def validate_coverage_annotation(
@@ -220,7 +284,9 @@ def validate_coverage_annotation(
 
     mode = str(data.get("mode") or "").upper()
     if mode not in COVERAGE_MODES:
-        errors.append("Coverage mode must be EXHAUSTIVE, PARTITIONED, SAMPLED, or BLOCKED.")
+        errors.append(
+            "Coverage mode must be EXHAUSTIVE, PARTITIONED, SAMPLED, SINGLETON, or BLOCKED."
+        )
     if not str(data.get("rationale") or "").strip():
         errors.append("Coverage needs a concise rationale.")
     if not str(data.get("stop_reason") or "").strip():
@@ -242,11 +308,20 @@ def validate_coverage_annotation(
     if missing_explicit:
         errors.append("Explicit plan scenarios are untested: " + ", ".join(missing_explicit))
 
-    dimension_errors, high_cardinality, blocked_dimension = _validate_dimensions(
-        dimensions, scenarios, scenario_values, roles, records
+    dimensions = _merged_dimensions(event, dimensions)
+    dimension_errors, high_cardinality, blocked_dimension, singleton_possible = (
+        _validate_dimensions(dimensions, scenarios, scenario_values, roles, records)
     )
     errors.extend(dimension_errors)
-    errors.extend(_coverage_closure_errors(data, mode, high_cardinality, blocked_dimension))
+    errors.extend(
+        _coverage_closure_errors(
+            {**data, "dimensions": dimensions},
+            mode,
+            high_cardinality,
+            blocked_dimension,
+            singleton_possible,
+        )
+    )
     if data.get("complete") is True and errors:
         errors.append("Coverage cannot be marked complete while material gaps remain.")
     return errors
@@ -280,6 +355,7 @@ def coverage_result(
     relevant_actions = [
         action
         for action in action_windows(records)
+        if action.get("status") != "SUPERSEDED"
         if event_id in {str(value) for value in action.get("event_ids", [])}
     ]
     if review is None:
@@ -308,7 +384,8 @@ def coverage_result(
         else "PENDING"
     )
     plan_gaps = []
-    for dimension in data.get("dimensions", []):
+    dimensions = _merged_dimensions(event_by_id(plan, event_id), data.get("dimensions", []))
+    for dimension in dimensions:
         if not isinstance(dimension, dict):
             continue
         for value in dimension.get("values", []):
@@ -328,7 +405,7 @@ def coverage_result(
         "rationale": data.get("rationale"),
         "stop_reason": data.get("stop_reason"),
         "scenarios": data.get("scenarios", []),
-        "dimensions": data.get("dimensions", []),
+        "dimensions": dimensions,
         "errors": errors,
         "actions_seen": len(relevant_actions),
         "plan_gaps": plan_gaps,

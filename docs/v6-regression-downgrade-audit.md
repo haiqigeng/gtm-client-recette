@@ -1,6 +1,6 @@
 # v6 Regression and Downgrade Audit
 
-Status: pre-release audit, 2026-08-24.
+Status: v6.0.1 release audit, 2026-08-24.
 
 ## Executive result
 
@@ -29,20 +29,24 @@ The tagged historical suites are rerun separately during final validation. They 
 their own contracts; current adversarial tests prove that v6 retains the intended
 behavior while replacing the slow control path.
 
+Runtime size below uses one reproducible metric for every version: physical lines in all
+`.py` and `.js` files under `scripts/`.
+
 | Version | Runtime files/lines | Own tagged test result |
 | --- | ---: | ---: |
-| v3.0.0 | 32 / 16,472 | 189 pass |
-| v3.1.0 | 41 / 21,712 | 255 pass |
-| v5.0.0 | 28 / 10,164 | 76 pass |
-| v5.1.0 | 28 / 11,512 | 88 pass |
-| v5.2.0 | 28 / 12,004 | 95 pass |
-| v6.0.0 working tree | 28 / 12,785 | 112 pass |
+| v3.0.0 | 32 / 17,596 | 189 pass |
+| v3.1.0 | 41 / 23,187 | 255 pass |
+| v5.0.0 | 28 / 11,150 | 76 pass |
+| v5.1.0 | 28 / 12,541 | 88 pass |
+| v5.2.0 | 28 / 13,063 | 95 pass |
+| v6.0.1 working tree | 28 / 14,643 | 128 pass |
 
-v6 remains about 22% smaller than v3.0 and 41% smaller than v3.1 by this
-repository-level runtime line count. The 781-line increase over v5.2 is concentrated in
-the enforceable Playwright/action contract, dynamic scope correction, compact output and
-generalized regressions. No runtime file, Python dependency, browser family, service or
-ledger was added. The obsolete pre-Preview pulse and duplicate model build were removed.
+The optimized v6 tree remains about 17% smaller than v3.0 and 37% smaller than v3.1 by
+this repository-level runtime line count. The increase over v5.2 is concentrated in the
+enforceable Playwright/action contract, loss-aware intake, deterministic cross-layer
+judgement, compact output and generalized regressions. No runtime file, Python
+dependency, browser family, service or ledger was added. The obsolete pre-Preview pulse
+and duplicate model build remain removed.
 
 ## Regression matrix
 
@@ -54,7 +58,7 @@ ledger was added. The obsolete pre-Preview pulse and duplicate model build were 
 | Runtime and request | Preserved | Tag runtime and decoded logical request/destination remain required when applicable. |
 | Tag inventory/firing | Preserved | Only concerned fired and relevant not-fired tags are read, but completeness is still required. |
 | Intervening weird events | Preserved | Continuous deltas start at the prior committed boundary. Between-action rows remain timestamp-unbound, amend the prior event immediately and cannot be replaced with stale session history. |
-| Duplicates and missing sends | Preserved | Complete occurrence and logical-hit windows retain exact counts and non-send proof. |
+| Duplicates and missing sends | Preserved | Complete occurrence and logical-hit windows retain exact counts and non-send proof; direct/Preview reconciliation is one to one so surplus identical calls remain visible. |
 | Dead page/business mismatch | Preserved | Reality remains an independent domain and can fail a coherent technical chain. |
 | Language and finite enums | Preserved | Values are strict within each selected scenario and every reachable material finite value is required. |
 | Shipping/payment dependencies | Preserved | Reachable dependent combinations remain exhaustive without a global Cartesian product. |
@@ -98,11 +102,14 @@ Only target navigation, reload and approved context reset affect the protocol ve
 Other counters are optional diagnostics. A violation preserves evidence, blocks
 confidence and never starts an automatic clean repeat.
 
-### Exact version pin
+### Capability contract instead of an exact version pin
 
-The pin avoids silent MCP behavior drift during this personal release. An incompatible
-runtime fails before an action, making the correction visible instead of entering a slow
-fallback search. Updating the MCP version is a deliberate tested skill release change.
+The runtime is accepted from observed capabilities: provider, managed profile, headed
+Edge channel and the required action/network/Preview surfaces. Package version and
+self-check metadata are diagnostic, not ordinary startup gates; an explicitly failed
+self-check still blocks. If Preview is unavailable, one already-authorized action can be
+completed with the dependent layers marked `BLOCKED`, without an automatic reload or a
+slow fallback search. This avoids both version churn and false client failures.
 
 ## Downgrades deliberately accepted
 

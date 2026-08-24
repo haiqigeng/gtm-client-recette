@@ -355,7 +355,8 @@ class V5Harness:
         plan = load_plan(self.run)
         by_name = {event.get("event_name"): event for event in plan["events"]}
         events = []
-        for payload in payloads:
+        cursor_start = self.preview_index - 1
+        for payload_position, payload in enumerate(payloads):
             name = str(payload.get("event") or "")
             planned = by_name.get(name, {})
             tags = planned.get("tags", [])
@@ -387,7 +388,7 @@ class V5Harness:
                     "event_name": name,
                     "page_url": "https://shop.example.test/product",
                     "gtm_unique_event_id": self.preview_index,
-                    "bookmarked": True,
+                    "bookmarked": payload_position == 0,
                     "history_stable": complete,
                     "full_tag_summary": full_details,
                     "completeness": {
@@ -419,6 +420,7 @@ class V5Harness:
             "complete": complete,
             "action_id": action_id,
             "epoch": "EPOCH-1",
+            "cursor_start": cursor_start,
             "preview_session_id": "PREVIEW-1",
             "container_ids": ["GTM-EXPECTED"],
             "workspace_version": "42",

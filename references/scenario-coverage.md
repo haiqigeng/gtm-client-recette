@@ -23,7 +23,7 @@ Cosmetic variation is not a scenario.
 - `EXHAUSTIVE`: every known reachable finite material branch was tested.
 - `PARTITIONED`: every known distinct behavior signature was tested.
 - `SAMPLED`: representatives cover a justified high-cardinality signature class.
-- `SINGLETON`: only one real member exists.
+- `SINGLETON`: exactly one real material member is known and no second member exists.
 - `BLOCKED`: one or more material branches could not be acquired or classified.
 
 Unknown population size, an unexplored visible option, or an unreachable material branch
@@ -49,15 +49,16 @@ For products, content, search terms or list members:
 
 1. define a behavior signature from component/action path, payload shape and source,
    tag/configuration set, consent gate, destination and journey precondition;
-2. select one ordinary and one contrasting member, plus applicable boundaries and known
-   exceptions;
+2. select one representative for each known distinct signature; add a contrasting member
+   only when a second signature is known, plus applicable boundaries and exceptions;
 3. compare dynamic identity fields strictly to the chosen member's real visible/business
    state, never to one global literal;
 4. record why untested members are equivalent.
 
 Two members are equivalent only when captured context supports the same behavior
-signature. New signatures, anomalies, failures or conditional branches expand the
-sample. Do not test hundreds of equivalent items or impose an arbitrary scenario cap.
+signature. Different product names or IDs alone do not require a contrast. New signatures,
+anomalies, failures or conditional branches expand the sample. Do not test hundreds of
+equivalent items or impose an arbitrary scenario cap.
 
 ## Live values and plan gaps
 
@@ -72,9 +73,12 @@ apply; scenario-specific values and state still need their own evidence.
 
 ## Closure and scheduling
 
-After each action, update only the affected event's decision tree. Prefer the next branch
-with the most new information for the least safe state transition. Reopen an earlier
-event when a later observation exposes a new material branch or cross-event anomaly.
+After each action, update only the affected event's decision tree. Compiler-known
+dimensions cannot be removed by an incomplete coverage annotation. Coverage errors are
+reported in the event verdict; they never prevent capture or delay the first layer
+feedback. Prefer the next branch with the most new information for the least safe state
+transition. Reopen an earlier event when a later observation exposes a new material
+branch or cross-event anomaly.
 
 Scenario completeness closes only when every known material branch is tested, proven
 equivalent, or explicitly `BLOCKED`/`REVIEW` with an exact acquisition/retest step. It is

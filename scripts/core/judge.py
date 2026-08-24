@@ -109,6 +109,7 @@ def _actions_for_event(model: dict[str, Any], event_id: str) -> list[dict[str, A
     return [
         action
         for action in model["actions"]
+        if action.get("status") != "SUPERSEDED"
         if event_id in {str(value) for value in action.get("event_ids", [])}
     ]
 
@@ -321,7 +322,7 @@ def _container_binding(
         allowed = plan.get("scope", {}).get("allow_container_override") is True
         if not (allowed and expected.issubset(active) and expected.issubset(overrides)):
             return (
-                "FAIL",
+                "BLOCKED",
                 "binding.natural_container_mismatch",
                 "The active runtime does not prove the expected container under the approved binding mode.",
                 {
@@ -376,6 +377,16 @@ def _binding_result(
         urlsplit(value).netloc.casefold() for value in plan.get("scope", {}).get("origins", [])
     }
     observed_host = urlsplit(str(binding.get("origin") or "")).netloc.casefold()
+    if not approved:
+        prepared_origin = next(
+            (
+                urlsplit(str(row.get("origin") or "")).netloc.casefold()
+                for row in model.get("bindings", [])
+                if urlsplit(str(row.get("origin") or "")).netloc
+            ),
+            "",
+        )
+        approved = {prepared_origin} if prepared_origin else set()
     if observed_host not in approved:
         return _inspection(
             claim,
@@ -383,7 +394,7 @@ def _binding_result(
             "binding.origin_unapproved",
             "The bound document is not on an approved origin.",
             observed=binding.get("origin"),
-            expected=plan.get("scope", {}).get("origins", []),
+            expected=sorted(approved) or "Prepared managed target origin",
             evidence=[binding.get("evidence_ref")],
             check_next="Current target tab/origin",
             scenario_id=scenario_id,
@@ -606,10 +617,11 @@ def _settlement_inspection(
 
 def _source_payloads(
     evidence: dict[str, list[dict[str, Any]]], event_name: str | None
-) -> tuple[list[Any], list[str], bool]:
+) -> tuple[list[Any], list[str], bool, bool]:
     payloads: list[Any] = []
     refs: list[str] = []
     direct_complete = _source_windows_complete(evidence)
+    source_rows = []
     for row in evidence["source_calls"]:
         call_time = row.get("capture_mode") == "call_time" and row.get("document_start") is True
         preview_api = (
@@ -617,6 +629,33 @@ def _source_payloads(
         )
         if not (call_time or preview_api):
             continue
+        source_rows.append(row)
+    direct_rows = [
+        signal for signal in evidence["direct_signals"] if signal.get("authoritative") is True
+    ]
+    exact_anchor = True
+    if event_name is None:
+        call_time = [
+            row
+            for row in source_rows
+            if row.get("capture_mode") == "call_time" and row.get("document_start") is True
+        ]
+        bookmarked = [row for row in source_rows if row.get("bookmarked") is True]
+        candidates = [*source_rows, *direct_rows]
+        if len(call_time) == 1:
+            source_rows = call_time
+            direct_rows = []
+        elif len(bookmarked) == 1:
+            source_rows = bookmarked
+            direct_rows = []
+        elif not bookmarked and len(candidates) == 1:
+            source_rows = [candidates[0]] if candidates[0] in source_rows else []
+            direct_rows = [candidates[0]] if candidates[0] in direct_rows else []
+        else:
+            exact_anchor = False
+            source_rows = []
+            direct_rows = []
+    for row in source_rows:
         for argument in row.get("arguments", []):
             if not isinstance(argument, dict):
                 continue
@@ -624,9 +663,7 @@ def _source_payloads(
                 payloads.append(argument)
                 refs.append(row.get("evidence_ref"))
         direct_complete = direct_complete or row.get("collection_complete") is True
-    for signal in evidence["direct_signals"]:
-        if signal.get("authoritative") is not True:
-            continue
+    for signal in direct_rows:
         if event_name is None or signal.get("event_name") == event_name:
             payloads.append(signal.get("payload", signal.get("value")))
             refs.append(signal.get("evidence_ref"))
@@ -637,7 +674,7 @@ def _source_payloads(
                 or signal.get("event_list_complete") is True
             )
         )
-    return payloads, list(dict.fromkeys(refs)), direct_complete
+    return payloads, list(dict.fromkeys(refs)), direct_complete, exact_anchor
 
 
 def _source_windows_complete(evidence: dict[str, list[dict[str, Any]]]) -> bool:
@@ -716,7 +753,17 @@ def _source_result(
 ) -> dict[str, Any]:
     target = claim.get("target", {})
     event_name = target.get("event_name")
-    payloads, refs, complete = _source_payloads(evidence, event_name)
+    payloads, refs, complete, exact_anchor = _source_payloads(evidence, event_name)
+    if event_name is None and not exact_anchor:
+        return _inspection(
+            claim,
+            "BLOCKED",
+            "source.state_anchor_ambiguous",
+            "State-only requirements are not anchored to one exact API Call/source occurrence.",
+            expected="One bookmarked Preview API Call or one unambiguous call-time source",
+            check_next="Exact Core/state API Call row",
+            scenario_id=scenario_id,
+        )
     truncated = any(row.get("truncated") is True for row in evidence["source_calls"])
     if target.get("check") == "event_occurrence":
         actual: Any = len(payloads)
@@ -762,7 +809,16 @@ def _preview_matches(
     evidence: dict[str, list[dict[str, Any]]], event_name: str | None
 ) -> list[dict[str, Any]]:
     if event_name is None:
-        return evidence["preview_events"]
+        bookmarked = [row for row in evidence["preview_events"] if row.get("bookmarked") is True]
+        if len(bookmarked) == 1:
+            return bookmarked
+        api_rows = [
+            row
+            for row in evidence["preview_events"]
+            if isinstance(row.get("api_call"), dict)
+            and row.get("api_call", {}).get("complete") is True
+        ]
+        return api_rows if not bookmarked and len(api_rows) == 1 else []
     return [
         row
         for row in evidence["preview_events"]
@@ -1344,6 +1400,16 @@ def _gtm_result(
     exact_rows = _preview_matches(evidence, target.get("event_name"))
     check = target.get("check")
     if not exact_rows:
+        if target.get("event_name") is None:
+            return _inspection(
+                claim,
+                "BLOCKED",
+                "gtm.state_anchor_ambiguous",
+                "State-only GTM evidence is not anchored to one exact Preview API Call row.",
+                expected="One bookmarked Core/state Preview row",
+                check_next="Exact Tag Assistant API Call row for the Core/state push",
+                scenario_id=scenario_id,
+            )
         return _gtm_missing_result(claim, model, evidence, check, scenario_id)
 
     rows = (
@@ -1783,7 +1849,7 @@ def _delivery_result(
 def _event_payloads(
     evidence: dict[str, list[dict[str, Any]]], event_name: str | None
 ) -> list[dict[str, Any]]:
-    payloads, _, _ = _source_payloads(evidence, event_name)
+    payloads, _, _, _ = _source_payloads(evidence, event_name)
     return [payload for payload in payloads if isinstance(payload, dict)]
 
 
@@ -2570,11 +2636,7 @@ def _safety_result(
             or (item.get("request_id") is not None and str(item.get("request_id")) in request_ids)
         )
     ]
-    confirmed = [
-        item
-        for item in findings
-        if item.get("status") == "FAIL" or item.get("confidence") == "confirmed"
-    ]
+    confirmed = [item for item in findings if item.get("status") == "FAIL"]
     if confirmed:
         return _inspection(
             claim,
@@ -2776,6 +2838,135 @@ def _consent_inspections(
         )
         if result is not None:
             output.append(result)
+    return output
+
+
+def _scenario_explicitly_denies_consent(group: dict[str, Any], signals: set[str]) -> bool:
+    values = group.get("values", {})
+    if not isinstance(values, dict):
+        return False
+
+    def denied(value: Any) -> bool:
+        return str(value or "").casefold() in {"denied", "reject", "rejected", "false", "0"}
+
+    for key, value in values.items():
+        normalized = str(key).casefold()
+        if isinstance(value, dict):
+            if any(denied(child) for child in value.values()):
+                return True
+        elif ("consent" in normalized or str(key) in signals) and denied(value):
+            return True
+    return False
+
+
+def _apply_consent_expectation(
+    rows: list[dict[str, Any]],
+    event: dict[str, Any],
+    evidence: dict[str, list[dict[str, Any]]],
+    group: dict[str, Any],
+) -> list[dict[str, Any]]:
+    _, tag_requirements, preview_rows, transitions = _consent_context(event, evidence)
+    state, refs = _consent_state(preview_rows, transitions)
+    denied_tags = {
+        tag_id
+        for tag_id, signals in tag_requirements.items()
+        if any(
+            str(state.get(signal) or "").casefold() in {"denied", "false", "0"}
+            for signal in signals
+        )
+    }
+    if not denied_tags:
+        return rows
+    explicit_denial = _scenario_explicitly_denies_consent(
+        group, {signal for values in tag_requirements.values() for signal in values}
+    )
+    violation_tags = {
+        str(row.get("target", {}).get("tag_id") or "")
+        for row in rows
+        if row.get("reason_code") == "consent.denied_tag_or_send"
+    }
+    affected_checks = {
+        "tag_firing",
+        "tag_request",
+        "destination_request",
+        "runtime_parameter",
+        "request_parameter",
+    }
+    output = []
+    for row in rows:
+        target = row.get("target", {})
+        check = target.get("check")
+        tag_id = str(target.get("tag_id") or "")
+        affected = tag_id in denied_tags or (not tag_id and len(denied_tags) == 1)
+        if not explicit_denial and check == "event_time_consent":
+            output.append(
+                {
+                    **row,
+                    "status": "BLOCKED",
+                    "reason_code": "consent.ordinary_context_denied",
+                    "reason": "The ordinary scenario is still in a denied consent state.",
+                    "check_next": "Accept the CMP choice, then perform the measured action once",
+                }
+            )
+            continue
+        if not affected or check not in affected_checks:
+            output.append(row)
+            continue
+        if not explicit_denial:
+            output.append(
+                {
+                    **row,
+                    "status": "BLOCKED",
+                    "reason_code": "consent.ordinary_context_denied",
+                    "reason": "Delivery cannot be judged in an accidentally denied ordinary context.",
+                    "check_next": "Accept the CMP choice, then perform the measured action once",
+                    "evidence": list(dict.fromkeys([*row.get("evidence", []), *refs])),
+                }
+            )
+            continue
+        violated = bool(violation_tags.intersection(denied_tags))
+        if violated:
+            output.append(
+                {
+                    **row,
+                    "status": "FAIL",
+                    "reason_code": "consent.denied_tag_or_send",
+                    "reason": "The consent-dependent tag or request occurred under denied consent.",
+                    "check_next": "Consent settings and concerned tag trigger",
+                }
+            )
+        elif check in {"runtime_parameter", "request_parameter"}:
+            output.append(
+                {
+                    **row,
+                    "status": "NOT_APPLICABLE",
+                    "reason_code": "consent.runtime_suppressed",
+                    "reason": "Runtime/request parameters are not applicable because delivery was correctly suppressed.",
+                    "check_next": None,
+                }
+            )
+        elif row.get("status") == "BLOCKED":
+            output.append(
+                {
+                    **row,
+                    "reason_code": "consent.suppression_unproven",
+                    "reason": (
+                        "Denied consent applies, but this surface is incomplete and cannot prove "
+                        "that the tag or request was suppressed."
+                    ),
+                    "check_next": "Complete fired/non-fired and browser-request evidence",
+                }
+            )
+        else:
+            output.append(
+                {
+                    **row,
+                    "status": "PASS",
+                    "reason_code": "consent.expected_suppression",
+                    "reason": "The consent-dependent tag and browser send were correctly suppressed.",
+                    "check_next": None,
+                }
+            )
     return output
 
 
@@ -3076,12 +3267,43 @@ def _execution_protocol_inspection(
         claim,
         "PASS",
         "execution.protocol_observed",
-        "The browser action stayed within its target navigation/reload/reset budget.",
-        observed=action.get("operation_deltas", {}),
+        "The observable browser/document transition stayed within the frozen action card.",
+        observed=action.get("operation_deltas", {}) or "No optional operation counters supplied",
         expected=action.get("action_card"),
         evidence=[action.get("commit_record_id")],
         scenario_id=scenario_id,
     )
+
+
+def _block_binding_dependent_rows(
+    rows: list[dict[str, Any]], binding: dict[str, Any]
+) -> list[dict[str, Any]]:
+    if binding.get("status") == "PASS":
+        return rows
+    output = []
+    for row in rows:
+        if row is binding or row.get("domain") not in {"source", "gtm", "delivery", "behavior"}:
+            output.append(row)
+            continue
+        if row.get("target", {}).get("check") == "execution_protocol":
+            output.append(row)
+            continue
+        output.append(
+            {
+                **row,
+                "status": "BLOCKED",
+                "reason_code": "binding.dependent_check_blocked",
+                "reason": (
+                    "This layer cannot be attributed to the approved target while the live "
+                    "browser/Preview binding is invalid."
+                ),
+                "check_next": "Correct target origin/container/Preview binding, then retest once",
+                "evidence": list(
+                    dict.fromkeys([*binding.get("evidence", []), *row.get("evidence", [])])
+                ),
+            }
+        )
+    return output
 
 
 def _inspect_action(
@@ -3094,8 +3316,9 @@ def _inspect_action(
     scenario_id = group["scenario_id"]
     action_id = action["action_id"]
     evidence = _evidence_with_neighbors(model, action)
+    binding = _binding_result(event, plan, model, scenario_id, evidence=evidence, action=action)
     rows = [
-        _binding_result(event, plan, model, scenario_id, evidence=evidence, action=action),
+        binding,
         _settlement_inspection(event, evidence, scenario_id),
         _execution_protocol_inspection(event, action, scenario_id),
     ]
@@ -3106,6 +3329,8 @@ def _inspect_action(
         _claim_inspection(claim, group, evidence, model, event) for claim in event.get("claims", [])
     )
     rows.extend(_consent_inspections(event, evidence, scenario_id))
+    rows = _apply_consent_expectation(rows, event, evidence, group)
+    rows = _block_binding_dependent_rows(rows, binding)
     for row in rows:
         row["action_id"] = action_id
     return rows
@@ -3160,16 +3385,7 @@ def _event_rollup(
 ) -> tuple[str, dict[str, Any], dict[str, dict[str, Any]]]:
     domains = _domain_rollup(inspections)
     functional = worst_status((row["status"] for row in inspections), default="PENDING")
-    if functional == "FAIL":
-        status = "FAIL"
-    elif coverage.get("status") == "PENDING":
-        status = "PENDING"
-    elif functional == "BLOCKED" or coverage.get("status") == "BLOCKED":
-        status = "BLOCKED"
-    elif functional == "REVIEW":
-        status = "REVIEW"
-    else:
-        status = "PASS"
+    status = worst_status((functional, str(coverage.get("status") or "PENDING")))
     blockers = [row for row in inspections if row["status"] == "BLOCKED"]
     confidence = {
         "status": "BLOCKED" if blockers else "PASS",
@@ -3220,9 +3436,15 @@ def judge_event(
         "label": event.get("label"),
         "status": status,
         "final": coverage.get("complete") is True and status != "PENDING",
-        "reason": reason_row["reason"]
-        if reason_row
-        else "All applicable proof obligations passed.",
+        "reason": (
+            reason_row["reason"]
+            if reason_row
+            else str(coverage.get("errors", [None])[0])
+            if coverage.get("errors")
+            else str(coverage.get("rationale") or "Scenario coverage is still pending")
+            if status in {"PENDING", "BLOCKED"}
+            else "All applicable proof obligations passed."
+        ),
         "domains": domains,
         "gates": {
             "evidence_confidence": confidence,

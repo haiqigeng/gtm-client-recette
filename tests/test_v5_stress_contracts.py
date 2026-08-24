@@ -450,7 +450,8 @@ class StressContractTests(unittest.TestCase):
         self.assertEqual(result["domains"]["source"]["status"], "PASS")
         self.assertEqual(result["domains"]["gtm"]["status"], "NOT_APPLICABLE")
         self.assertEqual(result["domains"]["delivery"]["status"], "NOT_APPLICABLE")
-        self.assertEqual(result["status"], "PASS")
+        self.assertEqual(result["status"], "BLOCKED")
+        self.assertEqual(result["coverage"]["status"], "BLOCKED")
 
     def test_metamorphic_order_and_batch_changes_preserve_or_change_only_expected_claims(
         self,

@@ -1,6 +1,42 @@
 # Changelog
 
-## [v6.0.0](https://github.com/haiqigeng/gtm-client-recette/releases/tag/v6.0.0) (2026-08-24, prerelease)
+## [v6.0.1](https://github.com/haiqigeng/gtm-client-recette/releases/tag/v6.0.1) (2026-08-24)
+
+- Reorder startup around progressive discovery: one minimal intake, immediate blank
+  managed Edge launch after `ready`, concurrent user Preview preparation and plan
+  compilation, then one frozen first action before final Connect/target navigation.
+  Runtime URL/environment/container are derived from the plan and prepared session;
+  ordinary synthetic interactions/submissions no longer trigger redundant permission
+  questions.
+- Replace the exact Playwright MCP version pin and mandatory manual operation baseline
+  with a capability profile. Wrong runtime identity still stops early; an unavailable
+  evidence surface blocks only dependent layers and completes without fallback probing,
+  another browser, or an automatic repeat.
+- Add Preview epoch/index cursors and top-level action inheritance so each completion
+  ingests only new Preview rows. Reconcile API Call and direct-source evidence one to one,
+  preserving surplus identical duplicates and every other interjected message.
+- Strengthen workbook normalization without custom run patches: sectioned variable tables
+  continue across blank rows, valid machine identifiers retain case, Core state can be
+  identified by sheet title, every sheet is classified, and index/detail mismatches are
+  reconciled as localized plan issues.
+- Preserve compiler-known scenario dimensions and constraints against weaker annotations,
+  add truthful singleton closure, and
+  require a high-cardinality contrast only when a distinct behavior signature exists.
+  Incomplete coverage is now reported by the verdict instead of blocking evidence capture
+  or first feedback.
+- Treat wrong live binding and accidentally denied ordinary consent as setup blocks, not
+  client defects. Explicit denied-consent suppression passes only with complete tag and
+  request evidence. Evidence-defect retests supersede only their exact affected
+  event/scenario action rather than leaving stale failures in the roll-up.
+- Emit immediate compact operational-layer feedback with non-pass exceptions, exact
+  check-next targets, and evidence IDs while retaining every detailed claim row in
+  canonical JSON/XLSX. Correct status precedence prevents `PENDING` coverage from hiding
+  a known `REVIEW`, `BLOCKED`, or `FAIL`.
+- Extend generalized regression coverage for intake reconciliation, cursor boundaries,
+  capability degradation, exact API Call preservation, retest supersession, consent,
+  binding, sampling, privacy-safe browser headers, scheduler progression, and output.
+
+## [v6.0.0](https://github.com/haiqigeng/gtm-client-recette/releases/tag/v6.0.0) (2026-08-24)
 
 - Make pinned Microsoft Playwright MCP `0.0.79` the default runtime: one headed
   persistent Edge profile, semantic accessibility targets, documented network tools and

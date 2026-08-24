@@ -12,199 +12,183 @@ measurement claim is true in one material real-world scenario; do not merely pro
 an event exists or a tag fired.
 
 A coherent technical chain still fails when reality is wrong: the page is dead, the
-wrong container is active, the action did not succeed, a populated cart becomes empty
-ecommerce data, a form event precedes failure, or an unrelated event appears between
-interactions.
+wrong container is active, the interaction failed, a populated cart becomes empty
+ecommerce data, a form event precedes submission failure, or an unrelated event appears
+between interactions.
 
-## Scope and authority
+## Authority and boundaries
 
-Require an existing plan or explicit acceptance rules, an approved origin/environment,
-the client tag scope, and a run directory outside this skill. Summarize that boundary
-once and proceed only when it is approved. Use ordinary reversible interactions and
-synthetic test data within scope.
+Require an existing tracking plan or explicit acceptance rules and a client-side tag
+scope. Invocation authorizes ordinary reversible navigation, interaction, synthetic test
+data, and ordinary form submission inside that test scope. Do not ask separately for
+those permissions. Pause only at credentials, MFA, CAPTCHA, magic links, external
+approval, real payment, or another protected/consequential gate.
 
-Resolve scope before browser work. A phrase such as "all planned client-side tags" means
-the exact event tags/destinations actually declared in the plan; if none exist, `init`
-must fail quickly and request a concise accepted category such as GA4/Google Ads and any
-destination that must be certified. Never use broad prose as a literal runtime identity.
-
-Playwright MCP `0.0.79` is the default browser contract. Launch one headed managed Edge
-window with its persistent workspace profile; open and reuse one target tab and one GTM
-Preview/Tag Assistant tab there. The default path needs no browser extension. Existing-
-window attachment is an explicit scope fallback only, never an automatic recovery path.
-If the configured Playwright runtime, version, channel, profile, or self-check is wrong,
-stop before opening an action rather than trying guessed methods or another browser.
-
-Pause at credentials, MFA, CAPTCHA, magic links, external approval, real payment, or
-another protected/consequential gate. Never bypass it. Do not design the plan, change or
-publish GTM, fix the site, certify server processing/vendor receipt, or make a legal
-consent judgement.
+Do not design the plan, change or publish GTM, fix the site, certify server-side
+processing/vendor receipt, or make a legal consent judgement. Keep the run directory
+outside this skill. Distinguish client defects, plan gaps, setup/binding problems,
+evidence limitations, protected gates, and agent execution errors.
 
 ## Inspection model
 
-Compile plan rows losslessly into typed proof obligations: occurrence, value/state,
-relationship, ordering, transport, and negative claims. A state-only dataLayer update or
-source-only field must not inherit invented event, tag, or request requirements.
+Compile accepted plan rows into typed occurrence, value/state, relationship, ordering,
+transport, and negative proof obligations. A state-only dataLayer update or source-only
+field must not inherit an invented source event, tag, or browser send.
 
-Group applicable checks into six diagnostic domains, not six sequential browser stages:
+Use six diagnostic domains, not six serial browser stages:
 
-1. **Reality** - reachable/live page, correct scenario, visible state, action outcome,
+1. **Reality** - live/reachable page, intended scenario, visible state, successful action,
    and independent business anchors.
-2. **Source signal** - the exact fully expanded Tag Assistant API Call or a proven
-   call-time dataLayer/direct-source observation, including JSON types,
-   absent/null/empty states, occurrence, order, and unplanned pushes.
-3. **GTM decision** - active container/Preview identity, matching GTM event, resolved
-   variables, relevant tag configuration, consent/trigger controls, and firing count.
-4. **Destination delivery** - runtime payload, logical vendor hit, destination and tag
-   identity, browser transport, redirects/retries, response outcome, and non-send proof.
-5. **Surrounding behavior** - duplicates, missing/premature/delayed/interjected events,
-   contaminating state, stale item/cart values, and cross-surface disagreement.
-6. **Data safety** - sensitive values in persisted evidence and reports.
+2. **Source signal** - exact fully expanded Tag Assistant API Call or proven call-time
+   dataLayer/direct-source observation, with JSON type, state, count, order, and unplanned
+   pushes.
+3. **GTM decision** - current container/Preview identity, GTM event, accumulated Data
+   Layer state, Variables, concerned tag configuration/effective mapping, consent/control,
+   and firing count.
+4. **Destination delivery** - tag runtime values, logical hit, destination/tag identity,
+   decoded browser request, retries/redirects, outcome, and complete-window non-send.
+5. **Surrounding behavior** - duplicate, missing, premature, delayed, interjected, stale,
+   contaminating, or cross-surface behavior.
+6. **Data safety** - sensitive values retained in evidence or output.
 
-Evidence confidence and scenario completeness are closure gates, not extra layers. Each
-surface proves only itself. Missing source cannot be laundered through Preview; a fired
-tag cannot substitute for its request; agreement between empty surfaces cannot prove a
-populated business state. Use `PASS`, `FAIL`, `BLOCKED`, `REVIEW`, `NOT_APPLICABLE`, and
-`PENDING`; final reports display `PASS`/`FAIL` as `OK`/`KO`.
+Evidence confidence and scenario completeness are closure gates. Each surface proves
+only itself: accumulated state cannot prove one API call; tag firing cannot prove its
+request; matching empty technical surfaces cannot prove an empty real cart. Use `PASS`,
+`FAIL`, `BLOCKED`, `REVIEW`, `NOT_APPLICABLE`, and `PENDING`.
 
-For an ordinary planned dataLayer event with a browser-sending tag, inspect these
-applicable operational surfaces from the same action: page/action reality; call-time
-dataLayer API Call; Tag Assistant event and accumulated Data Layer state; Tag Assistant
-Variables; complete concerned fired/not-fired tags; concerned tag configuration and
-effective mapping; tag runtime parameters; decoded browser request/destination; and the
-continuous surrounding stream. Safety, confidence, and coverage are always reported.
-Consent, acquisition, forms, trigger/sequence detail, media, and protected gates activate
-only when relevant. This is an applicability rule, not a serial layer ceremony.
+For an ordinary planned browser-delivered event, inspect from the same action:
 
-The normal source authority is a fully expanded Tag Assistant API Call. A proven
-call-time/document-start capture is conditional stronger evidence when the API Call is
-unavailable, incomplete, or exact pre-GTM invocation behavior matters.
-The Tag Assistant **Data Layer** tab is post-message
-accumulated state: inspect it separately, but never use it to prove what one push sent.
-For every destination-applicable planned field, compare the plan predicate independently
-with source, accumulated GTM state, resolved Variables, effective tag mapping, tag runtime,
-and decoded request. A tag exposing one of twelve required fields fails the eleven missing
-applicable mappings/values when those surfaces were completely captured.
+- page/action reality and current binding;
+- the exact Data Layer API Call;
+- the matching Tag Assistant event and accumulated Data Layer state;
+- GTM Variables;
+- complete concerned fired/non-fired inventory;
+- each concerned tag's configuration, effective field mapping, firing, and runtime;
+- decoded browser request, destination, and outcome;
+- every intervening source/Preview message and surrounding anomaly;
+- safety, evidence confidence, and scenario coverage.
 
-Read [verdict and output](references/verdict-and-output.md) before judging the first
-event.
+Consent, acquisition, form, media, trigger/sequence, and protected-gate checks activate
+only when applicable. For every destination-applicable planned field, compare the plan
+predicate independently on every applicable source, GTM, runtime, and request surface.
+A tag exposing one of twelve required fields fails the eleven missing mappings/values
+when those surfaces are complete.
 
-## Fast vertical workflow
+The normal source authority is the fully expanded Tag Assistant **API Call** on the exact
+Preview occurrence. A proven document-start recorder is conditional stronger evidence
+only when that API Call is unavailable/incomplete or exact pre-GTM invocation behavior
+matters. The Tag Assistant **Data Layer** tab is accumulated post-message state and stays
+a separate check.
+The call-time dataLayer observation and accumulated state must never be conflated.
 
-Resolve `<skill-root>` as this file's directory. Use
-`python -B "<skill-root>/scripts/recette.py" --help` for the authoritative command
-interface. The browser loop is only `init -> next -> complete -> finish`; internal
-capture stages are not public agent choices.
+## Ordered operating workflow
 
-1. Run `init` once. It directly compiles accepted JSON/YAML/delimited plans and supported
-   XLSX layouts, including common event-metadata plus variable-table sheets. It does not
-   prebuild future scenarios, event ledgers, layer rows, or reports. Reconcile row counts
-   and ignored rows; code examples are not requirements. An orphan/ambiguous row stops
-   intake, while a malformed later event is localized and cannot delay the first valid
-   event.
-2. While compilation runs, start the configured Playwright MCP server with headed Edge,
-   its persistent profile, core tools plus config self-check, and no extension/vision
-   coordinates. Verify the pinned version and callable tools once. The first `next`
-   persists only that cheap runtime/operation baseline and returns a frozen action card
-   before the site/Preview connection creates the first measured page load. Thus the
-   Preview connection's page load is the Core action; do not generate two cleanup loads.
-3. Select the earliest safe, high-information event. Discover only its material scenario
-   branches just in time. `next` freezes `OBSERVE_CURRENT`, `NAVIGATE_ONCE`, or
-   `INTERACT_ONCE`, plus whether document change is forbidden, naturally allowed, or one
-   explicitly authorized reload.
-4. Perform exactly the action card once. Then call `complete` once with the returned
-   action ID and current
-   binding/health/page, continuous source/network/lifecycle deltas since the previous
-   committed boundary, the complete bounded
-   Preview event-list delta, concerned deep details, and coverage annotations. It commits
-   and synchronizes Preview together, emits canonical per-layer feedback, and checkpoints
-   the run. A browser/control violation preserves useful evidence but blocks confidence;
-   it never launches a clean repeat or becomes a client defect.
-5. Complete after every real interaction. One interaction may legitimately create
-   several Preview indexes or satisfy several causally co-occurring planned claims; it
-   must not contain a second user interaction. Inspect every intervening source message,
-   including messages not named in the plan.
-6. On that `complete`, capture Preview once for all new indexes caused by the action. Capture
-   complete event and concerned-tag summaries; deep-read the Variables, configuration, effective
-   mapping and runtime needed by current planned fields, plus suspicious details. Never
-   scan unrelated historical domains or the whole container. Synchronize earlier if
-   navigation, ambiguity, or risk could lose evidence.
-7. Emit canonical feedback as soon as all known material scenarios for an event close.
-   If the next completion contains a timestamped between-action anomaly, revise the
-   affected prior event in the same model pass; do not add a pre-action capture phase.
-   Choose the next branch by information value and transition cost, not by creating the
-   whole run up front.
-8. `finish` only after global reconciliation. It refuses open actions, unresolved
-   protected handoffs, incomplete material coverage, unclassified material observations,
-   evidence-confidence gaps, or privacy blockers. `report` rebuilds only a frozen run;
-   `reopen` requires explicit authorization.
+Resolve `<skill-root>` as this file's directory. The public loop is only
+`init -> next -> complete -> finish`; use
+`python -B "<skill-root>/scripts/recette.py" --help` for exact CLI syntax.
 
-Corrections invalidate only dependent proof. Distinguish website defects, plan
-ambiguity, control-tool failures, evidence limitations, and protected gates. Never use
-alternate state files or command routes to manufacture progress.
+### 1. Minimal intake, then browser preparation
 
-The same event/scenario may run again only with a structured retest basis: a known
-evidence-defect record or explicit user authorization. Free text alone is not authority.
-A distinct material scenario remains a distinct action, so this guard does not limit
-language, shipping, payment, product-signature, or other scenario coverage.
+Ask once for the plan/rules, the client tag category only if the plan does not resolve
+it, any known protected prerequisites, and readiness to prepare the managed browser.
+State: after the user replies `ready`, open one blank headed managed Edge window; the user
+can sign in and prepare GTM Preview there, and the target site will be opened in that
+window. Do not ask up front for target URL, environment, GTM container, destination, or
+submission permission when they can be derived from the plan and prepared runtime.
 
-After navigation or reload, retain the old page as the before-state but rebind the new
-document before attributing post-navigation evidence. A proved old-to-new transition is
-normal; mixed post-action documents or an unproved new binding remain blocked.
+When the user is ready, read [browser and Preview](references/browser-and-preview.md),
+open `about:blank` immediately, and let the user prepare authentication, Preview, and the
+site while `init` compiles the plan. A site load used to establish login/consent is setup,
+not Core evidence. If consent is already granted, keep final Connect/target navigation
+until the first action card so that load becomes Core evidence.
 
-Read [browser and Preview](references/browser-and-preview.md) before attaching or
-recovering the session.
+### 2. Compile and reconcile before the first action
 
-## Material scenario coverage
+Run `init` once. Origins may be absent at intake and derived from the plan or prepared
+runtime. Compile JSON/YAML/delimited plans and supported XLSX layouts directly. For XLSX,
+account for every sheet, continue recognized variable tables across blank rows, ignore
+classified code/examples, preserve exact machine identifiers/case, and reconcile index
+events against requirement sheets. An orphan row stops intake; an index-only or malformed
+later event is localized and must not delay the first executable event.
 
-The plan is an acceptance oracle, not a complete catalogue of live values. Discover
-dimensions from the plan, visible UI, current journey state, captured evidence, and
-known platform semantics.
+Do not prebuild all scenarios, layer ledgers, tag inventories, or reports. Resolve broad
+"all planned" scope through actual plan identities or a concise accepted category; never
+use prose as a literal runtime tag/destination.
 
-- Exhaust every manageable finite material value, including live values omitted by the
-  plan.
-- Test reachable dependent combinations such as country-specific shipping methods; do
-  not build an irrelevant global Cartesian product.
-- For high-cardinality populations such as products, partition by behavior signature
-  and test ordinary, contrasting, boundary, and exception representatives. Never
-  brute-force every member or compare dynamic labels to one global literal.
-- Keep strict contextual expectations: `page_language` may be `en` in one scenario and
-  `fr` in another; fixed enums and per-scenario product/cart identities remain strict.
-- Record plan gaps and expand coverage after a new signature, material value, anomaly,
-  conditional branch, or failure. Unknown material branches stay `BLOCKED`/`REVIEW`.
+### 3. Verify the prepared runtime once
 
-Read [scenario coverage](references/scenario-coverage.md) just before selecting the
-current event's branches.
+Record the configured Playwright MCP provider, headed managed Edge channel/profile, and
+available capabilities once; do not require an exact package version or guess absent
+tools. A wrong provider/channel/profile stops before action. An unavailable evidence
+surface blocks only dependent claims and must not trigger minutes of fallback probing,
+another browser, or an automatic repeat.
 
-## Special journeys
+Derive the expected origin, Preview session, natural container, workspace, and observed
+destinations from the prepared tabs. Re-prove the action document and binding after the
+measured navigation. A wrong/unattributable binding is `BLOCKED` setup evidence, not a
+client implementation `FAIL`.
 
-Complete ordinary forms with synthetic data and independently prove validation,
-submission, and visible success/failure. Treat consent and acquisition as scenario
-dimensions when applicable. A simulated fresh/referral visit tests the tracking response
-and must state its method; it does not prove SEO ranking or a real search impression.
+For an ordinary run, accept the CMP banner during preparation when consent is not already
+granted. Then perform exactly one action-card-authorized Core load. If persistent consent
+was already granted, the first post-`next` target load can be Core directly. Do not add
+two "clean" reloads. Leave consent untouched/denied only when that scenario is explicitly
+requested.
 
-Read [protected journeys](references/protected-journeys.md) when forms, consent,
-acquisition, authentication, CAPTCHA, or payment is involved.
+### 4. Select and freeze one material action
 
-## Required feedback
+Read [scenario coverage](references/scenario-coverage.md) just before choosing the current
+event branch. Discover dimensions from the plan, UI, live evidence, and platform
+semantics. Exhaust manageable finite values and reachable dependent branches. For a
+high-cardinality population, test one representative per materially distinct behavior
+signature, plus applicable boundaries/exceptions; do not brute-force equivalent items.
 
-After each completed event, provide:
+Call `next` for the earliest safe, high-information event/scenario. It freezes one
+`OBSERVE_CURRENT`, `NAVIGATE_ONCE`, or `INTERACT_ONCE` action and its document policy,
+Preview cursor, planned fields, and known scenario dimensions. Perform exactly that
+interaction once.
 
-- a compact scenario matrix and six-domain summary;
-- one operational row and status for every applicable layer/check, including page/API,
-  call-time dataLayer/API Call, Tag Assistant Data Layer state, Variables, fired/not-fired
-  inventory, each concerned tag's configuration/effective mapping/firing/runtime, browser
-  request/destination, anomaly, safety, confidence, and coverage;
-- status, simple observed-versus-expected detail, exact `Check next` target, and stable
-  evidence reference for every row;
-- concerned tags, anomalies, tested values/signatures, plan gaps, limitations, and exact
-  retest instructions.
+Read [protected journeys](references/protected-journeys.md) only when consent,
+acquisition, forms, authentication, CAPTCHA, or payment is involved.
 
-Identical passing rows may be grouped across scenarios, but every differing value and
-every `FAIL`, `BLOCKED`, or `REVIEW` remains scenario-specific. A later cross-event
-anomaly may amend earlier feedback.
+### 5. Capture once and judge immediately
 
-At the end, deliver a plan-ordered conclusion plus validated XLSX, Markdown, JSON, defect
-and retest views. The deterministic renderer owns every claim, row, domain, scenario,
-event, and final status. Analyst/AI reasoning may only add an evidence-backed `FAIL` or
-`REVIEW`; it cannot upgrade or suppress an objective result.
+Read [verdict and output](references/verdict-and-output.md) before the first `complete`.
+After the action settles, call `complete` once with current binding/health/page,
+continuous source/network/lifecycle deltas since the prior boundary, and exactly the new
+Preview indexes after the frozen cursor. Capture Preview once for the action: event list,
+exact API Call, accumulated Data Layer state, Variables, concerned tag details/runtime,
+and every intervening message. Filter network evidence to concerned analytics/media sends,
+failed transports, and suspicious requests; never persist cookies or unrelated traffic.
+
+One interaction may produce several Preview indexes or satisfy causally co-occurring
+planned claims, but it cannot contain a second user interaction. A browser/control violation
+preserves useful evidence and blocks confidence; it never creates a client
+failure or starts a cleanup repeat.
+
+`complete` must emit compact per-event feedback immediately even when coverage is still
+`PENDING` or invalid. Coverage gaps affect closure, not evidence ingestion. Show one row
+per operational layer with status, concise observed-versus-expected exceptions, exact
+`Check next`, and evidence IDs. Keep all detailed claim rows in canonical JSON/XLSX.
+
+### 6. Expand only when evidence requires it
+
+Update the current event's scenario tree after each action. Preserve plan-known dimensions
+and constraints even if an annotation omits or weakens them. Test a second
+high-cardinality member only when it represents another known signature or an
+anomaly/boundary/exception. Inspect every intervening source message; a later
+between-action anomaly may revise prior feedback in the same model pass.
+
+Repeat the same event/scenario only with a structured retest basis: the affected action or
+machine-capture record for an evidence defect, or explicit user authorization. A
+successful evidence-defect retest supersedes only the same event slice and scenario; it
+does not erase real client failures. Distinct language, shipping, payment,
+product-signature, consent, or other material scenarios remain distinct actions.
+
+### 7. Finish once
+
+`finish` only after every event has an honest final confidence and coverage decision and
+no open action/protected handoff remains. `report` renders the frozen run once; `reopen`
+requires explicit authorization. Deliver the plan-ordered conclusion, canonical JSON,
+Markdown, validated XLSX, defects, limitations, and retest targets. The deterministic renderer owns every
+claim, row, domain, scenario, event, and final status; analyst reasoning may only add an
+evidence-backed `FAIL` or `REVIEW`.

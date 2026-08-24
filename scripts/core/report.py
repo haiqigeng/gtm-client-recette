@@ -16,7 +16,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 
 from value_semantics import parse_iso_timestamp
 
-from .constants import DOMAIN_LABELS, DOMAINS, OPERATION_COUNTERS, status_label
+from .constants import DOMAIN_LABELS, DOMAINS, OPERATION_COUNTERS, status_label, worst_status
 from .correlate import action_windows
 from .judge import judge_run
 from .state import RunPaths, StateError, load_plan, read_stream
@@ -70,6 +70,111 @@ def _style_sheet(sheet: Any) -> None:
 
 def _status_text(status: str) -> str:
     return f"{status_label(status)} ({status})" if status in {"PASS", "FAIL"} else status
+
+
+def _operational_layer(row: dict[str, Any]) -> str:
+    check = str(row.get("target", {}).get("check") or "")
+    if not check and row.get("domain") == "source":
+        return "Data Layer API Call"
+    mapping = {
+        "binding": "Page/action reality",
+        "valid_outcome": "Page/action reality",
+        "page_value": "Page/action reality",
+        "relationship": "Page/action reality",
+        "settlement": "Page/action reality",
+        "acquisition": "Page/action reality",
+        "event_occurrence": "Data Layer API Call",
+        "data_layer_state": "Tag Assistant Data Layer state",
+        "resolved_variable": "GTM Variables",
+        "event_match": "GTM Preview event and inventory",
+        "tag_inventory": "GTM Preview event and inventory",
+        "in_scope_tag_discovery": "GTM Preview event and inventory",
+        "tag_configuration": "GTM tag configuration and mapping",
+        "effective_mapping": "GTM tag configuration and mapping",
+        "tag_firing": "GTM firing and consent",
+        "tag_consent": "GTM firing and consent",
+        "event_time_consent": "GTM firing and consent",
+        "runtime_parameter": "Tag runtime parameters",
+        "request_parameter": "Browser request and destination",
+        "destination_request": "Browser request and destination",
+        "tag_request": "Browser request and destination",
+        "shared_send": "Browser request and destination",
+        "transport_failure": "Browser request and destination",
+        "surrounding_behavior": "Surrounding behavior",
+        "execution_protocol": "Surrounding behavior",
+        "semantic_finding": "Surrounding behavior",
+        "sensitive_data": "Data safety",
+    }
+    return mapping.get(
+        check,
+        DOMAIN_LABELS.get(str(row.get("domain")), str(row.get("domain") or "Other")),
+    )
+
+
+def operational_layer_summary(result: dict[str, Any]) -> list[dict[str, Any]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    order: list[str] = []
+    for row in result.get("inspections", []):
+        layer = _operational_layer(row)
+        if layer not in grouped:
+            grouped[layer] = []
+            order.append(layer)
+        grouped[layer].append(row)
+    output = []
+    for layer in order:
+        rows = grouped[layer]
+        status = worst_status((str(row.get("status")) for row in rows), default="NOT_APPLICABLE")
+        exceptions = [
+            {
+                "scenario_id": row.get("scenario_id"),
+                "target": row.get("inspection_target"),
+                "status": row.get("status"),
+                "reason": row.get("reason"),
+                "observed": row.get("observed"),
+                "expected": row.get("expected"),
+            }
+            for row in rows
+            if row.get("status") not in {"PASS", "NOT_APPLICABLE"}
+        ]
+        output.append(
+            {
+                "layer": layer,
+                "status": status,
+                "checks": len(rows),
+                "passed": sum(row.get("status") == "PASS" for row in rows),
+                "detail": exceptions
+                or f"{sum(row.get('status') == 'PASS' for row in rows)}/{len(rows)} checks passed",
+                "check_next": list(
+                    dict.fromkeys(
+                        str(row.get("check_next")) for row in rows if row.get("check_next")
+                    )
+                ),
+                "evidence": list(
+                    dict.fromkeys(
+                        str(reference)
+                        for row in rows
+                        for reference in row.get("evidence", [])
+                        if reference
+                    )
+                ),
+            }
+        )
+    for layer, gate in (
+        ("Evidence confidence", result.get("gates", {}).get("evidence_confidence", {})),
+        ("Scenario coverage", result.get("gates", {}).get("scenario_completeness", {})),
+    ):
+        output.append(
+            {
+                "layer": layer,
+                "status": gate.get("status", "PENDING"),
+                "checks": 1,
+                "passed": int(gate.get("status") == "PASS"),
+                "detail": gate.get("reason") or gate.get("rationale") or gate.get("errors"),
+                "check_next": [],
+                "evidence": [gate["record_id"]] if gate.get("record_id") else [],
+            }
+        )
+    return output
 
 
 def render_event_feedback(result: dict[str, Any], *, compact: bool = False) -> str:
@@ -132,24 +237,21 @@ def render_event_feedback(result: dict[str, Any], *, compact: bool = False) -> s
         return "\n".join(lines).rstrip() + "\n"
     lines.extend(
         [
-            "| Scenario | Inspection target | Domain | Status | Observed | Expected | Reason | Check next | Evidence |",
-            "|---|---|---|---|---|---|---|---|---|",
+            "| Layer | Status | Checks | Detail | Check next | Evidence |",
+            "|---|---|---|---|---|---|",
         ]
     )
-    for row in result.get("inspections", []):
+    for row in operational_layer_summary(result):
         lines.append(
             "| "
             + " | ".join(
                 markdown_safe(value)
                 for value in (
-                    row.get("scenario_label") or row.get("scenario_id") or "ordinary",
-                    row.get("inspection_target"),
-                    DOMAIN_LABELS.get(str(row.get("domain")), row.get("domain")),
+                    row.get("layer"),
                     row.get("status"),
-                    row.get("observed"),
-                    row.get("expected"),
-                    row.get("reason"),
-                    row.get("check_next") or "-",
+                    f"{row.get('passed', 0)}/{row.get('checks', 0)} passed",
+                    row.get("detail"),
+                    "; ".join(row.get("check_next", [])) or "-",
                     ", ".join(row.get("evidence", [])) or "-",
                 )
             )
@@ -332,20 +434,7 @@ def compact_status_view(value: dict[str, Any]) -> dict[str, Any]:
                 }
                 for key, row in value.get("domains", {}).items()
             },
-            "layers": [
-                {
-                    "scenario_id": row.get("scenario_id"),
-                    "domain": row.get("domain"),
-                    "target": row.get("inspection_target"),
-                    "status": row.get("status"),
-                    "reason": row.get("reason"),
-                    "observed": row.get("observed"),
-                    "expected": row.get("expected"),
-                    "check_next": row.get("check_next"),
-                    "evidence": row.get("evidence", []),
-                }
-                for row in value.get("inspections", [])
-            ],
+            "layers": operational_layer_summary(value),
             "gates": value.get("gates", {}),
         }
     return {

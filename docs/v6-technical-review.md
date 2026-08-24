@@ -1,6 +1,6 @@
 # v6 Technical Review
 
-Status: pre-release technical review, 2026-08-24.
+Status: v6.0.1 technical review, 2026-08-24.
 
 ## Verdict
 
@@ -32,19 +32,23 @@ tests and idempotent workflow composition. They are not public alternative route
 | Change | Keep? | Reason |
 | --- | --- | --- |
 | Playwright MCP-managed headed Edge default | Yes | Removes extension/CDP/existing-window ambiguity and standardizes semantic browser control. |
-| Exact runtime self-check | Yes | Fails before a browser action instead of probing unsupported recovery methods. |
+| Capability-based runtime check | Yes | Verifies the managed Edge/action/network contract without coupling startup to one package version; an explicit failed self-check still stops. |
 | Existing-window explicit fallback | Yes | Retains a needed exceptional path without contaminating the normal workflow. |
-| `next` before Preview target load | Yes | Converts Preview's natural first target load into Core evidence and removes routine cleanup loads. |
+| Browser preparation before compilation finishes | Yes | Lets the user complete sign-in, Preview and consent while deterministic plan intake runs. |
+| `next` before the measured target load | Yes | Separates setup browsing from evidence and removes routine cleanup loads. |
 | Frozen action ID, mode, event slice and document policy | Yes | Prevents drift, duplicate interactions and mismatched completion evidence with little runtime cost. |
 | One typed `complete` bundle | Yes | Replaces separate file/commit/Preview/sync handshakes and creates immediate feedback. |
 | Target navigation/reload/reset guard | Yes | Directly addresses repeated page loads; other counters are optional telemetry. |
-| Structured retest basis | Yes | Stops automatic clean repeats without limiting distinct material scenarios. |
+| Exact-scope structured retest basis | Yes | Stops automatic clean repeats and prevents one event/scenario retest from erasing another action. |
 | API-Call-first source | Yes | Avoids routine recorder installation while preserving exact-message authority. |
+| Preview epoch/index cursor | Yes | Reads only rows produced by the frozen action and rejects stale or mixed-history evidence. |
 | Separate Data Layer state and Variables | Yes | Prevents source laundering and exposes GTM state/resolution defects. |
 | Per-plan-field cross-layer projection | Yes | Detects partially mapped tags and coherent-but-empty delivery. |
 | Dynamic concise GA4 category resolution | Yes | Corrects generic scope without client-specific identity patches. |
 | Continuous anomaly stream | Yes | Detects interjected, duplicate, premature, stale and contaminating behavior; one following completion can revise the prior event without another browser phase. |
 | Just-in-time material scenarios | Yes | Preserves finite/dependent depth without whole-plan startup work. |
+| Non-blocking coverage annotations | Yes | Records plan gaps immediately but does not delay the current browser capture. |
+| Compact immediate feedback with full canonical detail | Yes | Gives the operator a useful verdict after each event without discarding field-level evidence. |
 | Live release pilot gate | Yes | Prevents fast synthetic tests from hiding a slow or broken real browser workflow. |
 | Firefox/cross-browser layer | No | Outside the owner's use case. |
 | Automatic fallback/replacement browser | No | Reintroduces ambiguity and long failure searches. |
@@ -80,11 +84,11 @@ for diagnosing real latency and do not block an action.
 
 ## Static health
 
-The runtime remains 28 Python/JavaScript files and 12,785 repository-counted lines; the
-test tree has 10 files and 4,325 lines. The v6 change adds no Python dependency or runtime
-module. Vulture reports no dead-code finding at 80% confidence. Radon reports overall
-grade B (average 8.36); high complexity remains concentrated in the source normalizer,
-plan compiler, deterministic judge and action validator.
+The runtime remains 28 Python/JavaScript files and 14,643 physical lines; the supporting
+Python test/harness tree has 11 files and 5,129 lines. The optimization adds no Python
+dependency or runtime module. Vulture reports no dead-code finding at 80% confidence.
+Radon reports overall grade B (average 8.80); high complexity remains concentrated in
+the source normalizer, plan compiler, deterministic judge, report renderer and action validator.
 
 Those functions are the principal maintainability risk. They should be split only around
 a stable domain boundary when a real change becomes hard to test; moving the same logic
@@ -103,11 +107,11 @@ judgement and had no public consumer.
 - historical tagged-suite comparison;
 - clean Playwright MCP live pilot before a release tag.
 
-Final local result: Ruff lint/format and Python compilation pass; 112 deterministic tests
-pass in 18.630 seconds; browser helper checks, release-tree validation and skill quick
-validation pass; Vulture reports no finding; tagged v3.0.0, v3.1.0, v5.0.0, v5.1.0 and
-v5.2.0 suites pass 189, 255, 76, 88 and 95 tests respectively. These are controlled
-engine results, not a claim that the live Playwright pilot has passed.
+Current local result: Ruff lint/format and Python compilation pass; 128 deterministic
+tests pass; browser helper checks, release-tree validation and skill quick validation
+pass; Vulture reports no finding. The separately audited tagged v3.0.0, v3.1.0, v5.0.0,
+v5.1.0 and v5.2.0 suites passed 189, 255, 76, 88 and 95 tests respectively. These are
+controlled engine results, not a claim that the live Playwright pilot has passed.
 
 ## Remaining risks
 

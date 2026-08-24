@@ -123,7 +123,7 @@ class PlaywrightDefaultFlowTests(unittest.TestCase):
 
         capability = harness.capability()
         capability["runtime"]["self_check"] = "FAIL"
-        with self.assertRaisesRegex(StateError, "self-check"):
+        with self.assertRaisesRegex(StateError, "capability probe"):
             next_action(
                 harness.run,
                 {"capability": capability, "health": harness._health("before")},
@@ -133,7 +133,7 @@ class PlaywrightDefaultFlowTests(unittest.TestCase):
 
     def test_next_rejects_old_preflight_evidence_before_any_action(self) -> None:
         harness = V5Harness(self.root)
-        with self.assertRaisesRegex(StateError, "only capability and health"):
+        with self.assertRaisesRegex(StateError, "capability probe and optional health"):
             next_action(
                 harness.run,
                 {
@@ -591,18 +591,22 @@ class PlaywrightDefaultFlowTests(unittest.TestCase):
         self.assertLess(len(json.dumps(compact)), len(json.dumps(full)))
         self.assertTrue(compact["events"][0]["layers"])
         self.assertTrue(
-            all("status" in row and "target" in row for row in compact["events"][0]["layers"])
+            all("status" in row and "layer" in row for row in compact["events"][0]["layers"])
         )
 
     def test_release_pilot_gate_rejects_slow_or_nonstandard_browser_execution(self) -> None:
         pilot = {
             "runtime": {
                 "provider": "playwright_mcp",
-                "mcp_version": "0.0.79",
                 "browser_channel": "msedge",
                 "profile_mode": "persistent",
                 "headed": True,
                 "self_check": "PASS",
+            },
+            "capabilities": {
+                "stable_target_identity": True,
+                "network_deltas": True,
+                "preview_events": True,
             },
             "latency_seconds": {"first_action": 30, "first_feedback": 90},
             "operations": {
@@ -624,6 +628,13 @@ class PlaywrightDefaultFlowTests(unittest.TestCase):
         path = self.root / "pilot.json"
         path.write_text(json.dumps(pilot), encoding="utf-8")
         self.assertEqual(validate_live_pilot(path), [])
+        pilot["runtime"].pop("self_check")
+        path.write_text(json.dumps(pilot), encoding="utf-8")
+        self.assertEqual(validate_live_pilot(path), [])
+        pilot["runtime"]["self_check"] = "FAIL"
+        path.write_text(json.dumps(pilot), encoding="utf-8")
+        self.assertTrue(any("self_check" in error for error in validate_live_pilot(path)))
+        pilot["runtime"]["self_check"] = "PASS"
         pilot["latency_seconds"]["first_feedback"] = 301
         pilot["operations"]["unsupported_method_errors"] = 1
         path.write_text(json.dumps(pilot), encoding="utf-8")

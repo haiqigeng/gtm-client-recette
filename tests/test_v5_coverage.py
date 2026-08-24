@@ -183,7 +183,8 @@ class ScenarioCoverageTests(unittest.TestCase):
         )
         harness.add_coverage(review)
         result = harness.feedback("E-page")
-        self.assertEqual(result["status"], "REVIEW")
+        self.assertEqual(result["status"], "BLOCKED")
+        self.assertTrue(any("untested values" in error for error in result["coverage"]["errors"]))
         self.assertTrue(result["coverage"]["plan_gaps"])
         self.assertTrue(
             any(row["reason_code"] == "plan.live_value_gap" for row in result["inspections"])
