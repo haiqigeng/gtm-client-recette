@@ -10,16 +10,15 @@ from pathlib import Path
 from typing import Any
 
 from core.plan import initialize_run
-from core.report import build_reports, render_event_feedback, status_view
+from core.report import build_reports, compact_status_view, render_event_feedback, status_view
 from core.state import StateError
 from core.workflow import (
     add_handoff,
-    begin_action,
-    commit_action,
+    complete_action,
     finish_run,
     load_json_object,
+    next_action,
     reopen_run,
-    sync_preview,
 )
 
 
@@ -44,44 +43,52 @@ def parser() -> argparse.ArgumentParser:
     init.add_argument("--tag-scope", action="append", default=[])
     init.add_argument("--source-only", action="store_true")
     init.add_argument("--no-browser-send", action="store_true")
+    init.add_argument(
+        "--browser-runtime",
+        choices=["playwright_mcp", "existing_chromium"],
+    )
+    init.add_argument("--browser-channel")
 
-    begin = commands.add_parser("begin", help="Bind and begin one real browser action.")
-    begin.add_argument("--run-dir", type=Path, required=True)
-    begin.add_argument("--event", action="append", required=True)
-    begin.add_argument("--input", type=Path, required=True, help="Before-state/handshake bundle.")
-    begin.add_argument("--scenario", default="ordinary")
-    begin.add_argument("--scenario-label")
-    begin.add_argument("--scenario-values-json", type=Path)
-    begin.add_argument("--label")
-    begin.add_argument(
+    next_command = commands.add_parser(
+        "next", help="Open one frozen Playwright action card for the next event/scenario."
+    )
+    next_command.add_argument("--run-dir", type=Path, required=True)
+    next_command.add_argument("--event", action="append")
+    next_command.add_argument("--input", type=Path, help="First runtime self-check bundle.")
+    next_command.add_argument("--scenario", default="ordinary")
+    next_command.add_argument("--scenario-label")
+    next_command.add_argument("--scenario-values-json", type=Path)
+    next_command.add_argument("--label")
+    next_command.add_argument(
         "--replay-safety",
         choices=["SAFE_IDEMPOTENT", "SAFE_ONCE", "CONSEQUENTIAL", "PROTECTED"],
         default="SAFE_IDEMPOTENT",
     )
-    begin.add_argument("--fresh-context-required", action="store_true")
-    begin.add_argument(
-        "--retest-reason",
-        help="Required when intentionally repeating an already committed event/scenario.",
+    next_command.add_argument("--fresh-context-required", action="store_true")
+    next_command.add_argument("--retest-basis-json", type=Path)
+    next_command.add_argument(
+        "--mode", choices=["OBSERVE_CURRENT", "NAVIGATE_ONCE", "INTERACT_ONCE"]
+    )
+    next_command.add_argument(
+        "--document-policy",
+        choices=["FORBIDDEN", "NATURAL_ALLOWED", "ONE_RELOAD_AUTHORIZED"],
     )
 
-    commit = commands.add_parser(
-        "commit", help="Commit after-state and continuous collector deltas; emit a pulse."
+    complete = commands.add_parser(
+        "complete", help="Commit action deltas and Preview evidence in one bounded pass."
     )
-    commit.add_argument("--run-dir", type=Path, required=True)
-    commit.add_argument("--input", type=Path, required=True)
-    commit.add_argument("--action")
-    commit.add_argument("--outcome-may-have-occurred", action="store_true")
-
-    sync = commands.add_parser(
-        "sync-preview", help="Ingest one Preview micro-batch and emit canonical feedback."
+    complete.add_argument("--run-dir", type=Path, required=True)
+    complete.add_argument("--input", type=Path, required=True)
+    complete.add_argument(
+        "--action", required=True, help="Exact action_id returned by next; also enables safe retry."
     )
-    sync.add_argument("--run-dir", type=Path, required=True)
-    sync.add_argument("--input", type=Path, required=True)
-    sync.add_argument("--event", action="append")
-    sync.add_argument("--markdown", action="store_true")
+    complete.add_argument("--outcome-may-have-occurred", action="store_true")
+    complete.add_argument("--markdown", action="store_true")
+    complete.add_argument("--full", action="store_true")
 
     status = commands.add_parser("status", help="Replay current status without writing.")
     status.add_argument("--run-dir", type=Path, required=True)
+    status.add_argument("--full", action="store_true")
 
     handoff = commands.add_parser("handoff", help="Record or resume a protected same-session gate.")
     handoff.add_argument("--run-dir", type=Path, required=True)
@@ -121,6 +128,10 @@ def main(argv: list[str] | None = None) -> int:
                 scope["tag_scope"] = args.tag_scope
             scope["certify_tags"] = not args.source_only
             scope["browser_send_required"] = not args.no_browser_send and not args.source_only
+            if args.browser_runtime:
+                scope["browser_runtime"] = args.browser_runtime
+            if args.browser_channel:
+                scope["browser_channel"] = args.browser_channel
             plan = initialize_run(args.plan, args.run_dir, run_id=args.run_id, scope=scope)
             first = next((event for event in plan["events"] if event.get("executable")), None)
             _print(
@@ -139,39 +150,53 @@ def main(argv: list[str] | None = None) -> int:
                     "future_scenario_artifacts": 0,
                 }
             )
-        elif args.command == "begin":
+        elif args.command == "next":
             _print(
-                begin_action(
+                next_action(
                     args.run_dir,
-                    args.event,
-                    load_json_object(args.input),
+                    _json_object(args.input),
+                    event_ids=args.event,
                     scenario_id=args.scenario,
                     scenario_label=args.scenario_label,
                     scenario_values=_json_object(args.scenario_values_json),
                     label=args.label,
                     replay_safety=args.replay_safety,
                     fresh_context_required=args.fresh_context_required,
-                    retest_reason=args.retest_reason,
+                    retest_basis=_json_object(args.retest_basis_json) or None,
+                    mode=args.mode,
+                    document_policy=args.document_policy,
                 )
             )
-        elif args.command == "commit":
-            _print(
-                commit_action(
-                    args.run_dir,
-                    load_json_object(args.input),
-                    action_id=args.action,
-                    outcome_may_have_occurred=(True if args.outcome_may_have_occurred else None),
-                )
+        elif args.command == "complete":
+            result = complete_action(
+                args.run_dir,
+                load_json_object(args.input),
+                action_id=args.action,
+                outcome_may_have_occurred=(True if args.outcome_may_have_occurred else None),
             )
-        elif args.command == "sync-preview":
-            result = sync_preview(args.run_dir, load_json_object(args.input), event_ids=args.event)
             if args.markdown:
-                for event in result["events"]:
+                for event in [*result["events"], *result.get("revised_events", [])]:
                     print(render_event_feedback(event), end="")
-            else:
+            elif args.full:
                 _print(result)
+            else:
+                _print(
+                    {
+                        "action_id": result["action_id"],
+                        "commit_record_id": result["commit_record_id"],
+                        "sync_record_id": result["sync_record_id"],
+                        "events": [compact_status_view(event) for event in result["events"]],
+                        "revised_events": [
+                            compact_status_view(event) for event in result.get("revised_events", [])
+                        ],
+                    }
+                )
         elif args.command == "status":
-            _print(status_view(args.run_dir))
+            _print(
+                status_view(args.run_dir)
+                if args.full
+                else compact_status_view(status_view(args.run_dir))
+            )
         elif args.command == "handoff":
             _print(add_handoff(args.run_dir, load_json_object(args.input)))
         elif args.command == "finish":

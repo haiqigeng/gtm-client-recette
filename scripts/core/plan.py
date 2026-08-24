@@ -22,7 +22,13 @@ from openpyxl import load_workbook
 
 from client_side_rules import valid_path
 
-from .constants import ARCHETYPE_DOMAIN, CLAIM_ARCHETYPES, SCHEMA_VERSION, utc_now
+from .constants import (
+    ARCHETYPE_DOMAIN,
+    CLAIM_ARCHETYPES,
+    PLAYWRIGHT_MCP_VERSION,
+    SCHEMA_VERSION,
+    utc_now,
+)
 from .predicates import PredicateError, compile_predicate
 from .state import StateError, canonical_json, write_immutable_plan
 
@@ -801,10 +807,26 @@ def _normalize_scope(scope: dict[str, Any] | None) -> dict[str, Any]:
 
     scope_aliases = {
         "ga4": "GA4",
+        "ga4only": "GA4",
+        "ga4tag": "GA4",
+        "ga4tags": "GA4",
+        "ga4tagonly": "GA4",
+        "ga4tagsonly": "GA4",
         "googleanalytics": "GA4",
+        "googleanalyticstag": "GA4",
+        "googleanalyticstags": "GA4",
         "googleanalytics4": "GA4",
+        "googleanalytics4only": "GA4",
+        "googleanalytics4tag": "GA4",
+        "googleanalytics4tags": "GA4",
+        "googleanalytics4tagsonly": "GA4",
         "googletag": "GA4",
+        "googletags": "GA4",
         "googleads": "Google Ads",
+        "googleadsonly": "Google Ads",
+        "googleadstag": "Google Ads",
+        "googleadstags": "Google Ads",
+        "googleadstagsonly": "Google Ads",
         "adwords": "Google Ads",
     }
 
@@ -840,10 +862,19 @@ def _normalize_scope(scope: dict[str, Any] | None) -> dict[str, Any]:
     value["tag_scope_declared"] = declared_tag_scope
 
     declared_destinations = False
+    destination_categories: list[str] = []
     normalized_destinations: list[str] = []
     for item in value["destination"]:
         if plan_declared(item):
             declared_destinations = True
+            continue
+        compact = re.sub(r"[^a-z0-9]+", "", item.casefold())
+        category = scope_aliases.get(compact)
+        if category is not None:
+            if category not in normalized_tag_scope:
+                normalized_tag_scope.append(category)
+            if category not in destination_categories:
+                destination_categories.append(category)
             continue
         if any(character.isspace() for character in item):
             raise StateError(
@@ -853,7 +884,17 @@ def _normalize_scope(scope: dict[str, Any] | None) -> dict[str, Any]:
         if item not in normalized_destinations:
             normalized_destinations.append(item)
     value["destination"] = normalized_destinations
-    value["destination_mode"] = "explicit" if normalized_destinations else "plan_declared"
+    value["tag_scope"] = normalized_tag_scope
+    if destination_categories and value.get("tag_scope_mode") == "plan_declared":
+        value["tag_scope_mode"] = "explicit"
+    value["destination_categories"] = destination_categories
+    value["destination_mode"] = (
+        "explicit"
+        if normalized_destinations
+        else "runtime_discovered"
+        if destination_categories
+        else "plan_declared"
+    )
     value["destination_scope_declared"] = declared_destinations
     if not normalized_tag_scope:
         inferred = []
@@ -875,6 +916,24 @@ def _normalize_scope(scope: dict[str, Any] | None) -> dict[str, Any]:
     value.setdefault("certify_tags", True)
     value.setdefault("browser_send_required", bool(value["certify_tags"]))
     value.setdefault("delivery_mode", "gtm_browser" if value["certify_tags"] else "source_only")
+    runtime = str(value.get("browser_runtime") or "playwright_mcp").strip().casefold()
+    runtime_aliases = {
+        "playwright": "playwright_mcp",
+        "playwrightmcp": "playwright_mcp",
+        "managed": "playwright_mcp",
+        "existing": "existing_chromium",
+        "existingbrowser": "existing_chromium",
+        "existingchromium": "existing_chromium",
+    }
+    runtime = runtime_aliases.get(re.sub(r"[^a-z0-9]+", "", runtime), runtime)
+    if runtime not in {"playwright_mcp", "existing_chromium"}:
+        raise StateError("browser_runtime must be playwright_mcp or existing_chromium.")
+    value["browser_runtime"] = runtime
+    value.setdefault("browser_channel", "msedge" if runtime == "playwright_mcp" else "chromium")
+    value.setdefault("browser_profile_mode", "persistent")
+    value.setdefault("browser_headed", True)
+    if runtime == "playwright_mcp":
+        value.setdefault("playwright_mcp_version", PLAYWRIGHT_MCP_VERSION)
     return value
 
 
@@ -922,7 +981,13 @@ def _tag_in_scope(tag: dict[str, Any], scope: dict[str, Any]) -> bool:
         ).casefold(),
     )
     aliases = {
-        "ga4": {"ga4", "googleanalytics4", "googleanalyticsevent", "googletag"},
+        "ga4": {
+            "ga4",
+            "googleanalytics",
+            "googleanalytics4",
+            "googleanalyticsevent",
+            "googletag",
+        },
         "googleads": {"googleads", "ads", "adwords"},
     }
     for item in requested:
@@ -1464,6 +1529,21 @@ def _add_event_tag_claims(
                 ["network"],
                 source,
             )
+        if not destinations and "GA4" in scope.get("tag_scope", []):
+            builder.add(
+                "delivery",
+                {
+                    "surface": "network",
+                    "check": "destination_request",
+                    "destination": None,
+                    "event_name": event_name,
+                    "protocol": "ga4",
+                    "label": "Runtime-discovered GA4 destination routing",
+                },
+                occurrence,
+                ["network"],
+                source,
+            )
 
 
 def _add_state_delivery_claims(
@@ -1528,6 +1608,25 @@ def _add_state_delivery_claims(
                     "event_name": delivery_event_name,
                     "protocol": "ga4",
                     "label": f"Destination routing - {destination}",
+                },
+                _occurrence_predicate(
+                    raw.get("expected_occurrence"),
+                    negative=False,
+                    location=str(source.get("reference") or "state event"),
+                ),
+                ["network"],
+                source,
+            )
+        if not destinations and "GA4" in scope.get("tag_scope", []):
+            builder.add(
+                "delivery",
+                {
+                    "surface": "network",
+                    "check": "destination_request",
+                    "destination": None,
+                    "event_name": delivery_event_name,
+                    "protocol": "ga4",
+                    "label": "Runtime-discovered GA4 page destination routing",
                 },
                 _occurrence_predicate(
                     raw.get("expected_occurrence"),

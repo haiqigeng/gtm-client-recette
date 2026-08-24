@@ -87,6 +87,16 @@ def render_event_feedback(result: dict[str, Any], *, compact: bool = False) -> s
             + str(result.get("coverage", {}).get("mode") or "pending")
             + (" - complete" if result.get("coverage", {}).get("complete") else " - incomplete")
         ),
+        (
+            "Evidence confidence: "
+            + str(result.get("gates", {}).get("evidence_confidence", {}).get("status", "PENDING"))
+            + " - "
+            + str(
+                result.get("gates", {})
+                .get("evidence_confidence", {})
+                .get("reason", "Not evaluated")
+            )
+        ),
         "",
     ]
     scenarios = result.get("scenarios", [])
@@ -232,6 +242,8 @@ def telemetry_view(plan: dict[str, Any], records: list[dict[str, Any]]) -> dict[
         return round((end - created).total_seconds(), 3) if created and end else None
 
     operations: dict[str, int | None] = {key: None for key in OPERATION_COUNTERS}
+    runtime: dict[str, Any] = {}
+    milestones: dict[str, Any] = {}
     preview_events_observed = 0
     network_requests_observed = 0
     preview_deep_read_captures_observed = 0
@@ -239,6 +251,11 @@ def telemetry_view(plan: dict[str, Any], records: list[dict[str, Any]]) -> dict[
     unique_network: set[tuple[str, str]] = set()
     for record in records:
         summary = record.get("data", {}).get("summary", {})
+        if record.get("kind") == "CAPTURE_CAPABILITY" and isinstance(summary, dict):
+            if isinstance(summary.get("runtime"), dict):
+                runtime = summary["runtime"]
+            if isinstance(summary.get("milestones"), dict):
+                milestones = summary["milestones"]
         if record.get("kind") == "CAPTURE_PREVIEW" and isinstance(summary, dict):
             reference = record.get("data", {}).get("evidence_ref", {})
             identity = (str(reference.get("path") or ""), str(reference.get("sha256") or ""))
@@ -277,13 +294,17 @@ def telemetry_view(plan: dict[str, Any], records: list[dict[str, Any]]) -> dict[
     return {
         "first_action_seconds": elapsed(first_action),
         "first_feedback_seconds": elapsed(first_feedback),
+        "browser_ready_seconds": elapsed(parse_iso_timestamp(milestones.get("browser_ready_at"))),
+        "preview_ready_seconds": elapsed(parse_iso_timestamp(milestones.get("preview_ready_at"))),
+        "runtime_provider": runtime.get("provider"),
+        "runtime_version": runtime.get("mcp_version"),
+        "browser_channel": runtime.get("browser_channel"),
         "actions": kinds["ACTION_BEGIN"],
         "commits": kinds["ACTION_COMMIT"],
         "preview_syncs": kinds["PREVIEW_SYNC"],
         "preview_captures": len(unique_preview),
         "network_captures": len(unique_network),
         "capability_probes": kinds["CAPTURE_CAPABILITY"],
-        "pulses": kinds["ACTION_PULSE"],
         "feedbacks": kinds["EVENT_FEEDBACK_ISSUED"],
         "stream_records": len(records),
         "operation_counters_instrumented": any(value is not None for value in operations.values()),
@@ -291,6 +312,52 @@ def telemetry_view(plan: dict[str, Any], records: list[dict[str, Any]]) -> dict[
         "preview_deep_read_captures_observed": preview_deep_read_captures_observed,
         "network_requests_observed": network_requests_observed,
         **operations,
+    }
+
+
+def compact_status_view(value: dict[str, Any]) -> dict[str, Any]:
+    """Return the user-facing event/layer checkpoint without canonical payload bulk."""
+    if "event_id" in value:
+        return {
+            "event_id": value.get("event_id"),
+            "event_name": value.get("event_name"),
+            "status": value.get("status"),
+            "final": value.get("final"),
+            "reason": value.get("reason"),
+            "domains": {
+                key: {
+                    "status": row.get("status"),
+                    "reason": row.get("reason"),
+                    "checks": row.get("checks"),
+                }
+                for key, row in value.get("domains", {}).items()
+            },
+            "layers": [
+                {
+                    "scenario_id": row.get("scenario_id"),
+                    "domain": row.get("domain"),
+                    "target": row.get("inspection_target"),
+                    "status": row.get("status"),
+                    "reason": row.get("reason"),
+                    "observed": row.get("observed"),
+                    "expected": row.get("expected"),
+                    "check_next": row.get("check_next"),
+                    "evidence": row.get("evidence", []),
+                }
+                for row in value.get("inspections", [])
+            ],
+            "gates": value.get("gates", {}),
+        }
+    return {
+        "schema_version": value.get("schema_version"),
+        "run_id": value.get("run_id"),
+        "status": value.get("status"),
+        "finished": value.get("finished"),
+        "counts": value.get("counts", {}),
+        "events": [compact_status_view(event) for event in value.get("events", [])],
+        "open_actions": value.get("open_actions", []),
+        "warnings": value.get("warnings", []),
+        "telemetry": value.get("telemetry", {}),
     }
 
 

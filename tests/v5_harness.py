@@ -11,7 +11,7 @@ SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-from core.constants import utc_now
+from core.constants import OPERATION_COUNTERS, utc_now
 from core.plan import initialize_run
 from core.state import load_plan, read_stream
 from core.workflow import (
@@ -93,6 +93,7 @@ class V5Harness:
         self.call_index = 1
         self.preview_index = 1
         self.request_index = 1
+        self.operations = {key: 0 for key in OPERATION_COUNTERS}
         self.last_begin_result: dict[str, Any] | None = None
 
     def capability(self, **surface_updates: Any) -> dict[str, Any]:
@@ -111,6 +112,18 @@ class V5Harness:
         return {
             "browser_family": "chromium",
             "observed_at": utc_now(),
+            "runtime": {
+                "provider": "playwright_mcp",
+                "mcp_version": "0.0.79",
+                "browser_channel": "msedge",
+                "profile_mode": "persistent",
+                "headed": True,
+                "self_check": "PASS",
+            },
+            "milestones": {
+                "browser_ready_at": utc_now(),
+                "preview_ready_at": utc_now(),
+            },
             "surfaces": surfaces,
         }
 
@@ -141,8 +154,16 @@ class V5Harness:
             "network_active": True,
             "data_layer_cursor": self.call_index - 1,
             "preview_epoch": "EPOCH-1",
+            "preview_event_index": self.preview_index - 1,
             "document_id": "DOC-1",
+            "operations": dict(self.operations),
         }
+
+    def bump_operations(self, **updates: int) -> None:
+        for key, amount in updates.items():
+            if key not in self.operations:
+                raise KeyError(key)
+            self.operations[key] += amount
 
     def _page(self, phase: str, **updates: Any) -> dict[str, Any]:
         return {
@@ -170,7 +191,9 @@ class V5Harness:
         first_bundle_updates: dict[str, Any] | None = None,
         fresh_context_required: bool = False,
         replay_safety: str = "SAFE_IDEMPOTENT",
-        retest_reason: str | None = None,
+        retest_basis: dict[str, Any] | None = None,
+        mode: str | None = None,
+        document_policy: str | None = None,
     ) -> str:
         records, _ = read_stream(self.run)
         bundle: dict[str, Any] = {"page": {"states": [self._page("before")]}}
@@ -192,7 +215,9 @@ class V5Harness:
             label="Test browser interaction",
             fresh_context_required=fresh_context_required,
             replay_safety=replay_safety,
-            retest_reason=retest_reason,
+            retest_basis=retest_basis,
+            mode=mode,
+            document_policy=document_policy,
         )
         self.last_begin_result = result
         return str(result["action"]["data"]["action_id"])

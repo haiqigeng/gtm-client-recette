@@ -368,7 +368,7 @@ def _binding_result(
             "binding.missing",
             "No live browser/document binding was captured.",
             expected="Current approved origin, document, and Preview linkage",
-            check_next="Existing Chromium target and Tag Assistant connection",
+            check_next="Managed Playwright target and Tag Assistant connection",
             scenario_id=scenario_id,
         )
 
@@ -1055,37 +1055,37 @@ def _gtm_discovery_result(
     claim: dict[str, Any], rows: list[dict[str, Any]], refs: list[Any], scenario_id: str
 ) -> dict[str, Any]:
     scopes = claim.get("target", {}).get("tag_scope", [])
-    candidates = []
+    candidates_by_id: dict[str, dict[str, Any]] = {}
     for event_row in rows:
         for tag in event_row.get("tags", []):
             if _tag_matches_scope(tag, scopes):
-                candidates.append(
-                    {
-                        "tag_id": _tag_identity(tag),
-                        "category": tag.get("category") if isinstance(tag, dict) else None,
-                        "fired": tag.get("fired") if isinstance(tag, dict) else None,
-                        "configuration": (
-                            tag.get("configuration") if isinstance(tag, dict) else None
-                        ),
-                    }
-                )
+                identity = _tag_identity(tag)
+                if not identity:
+                    continue
+                candidates_by_id[identity] = {
+                    "tag_id": identity,
+                    "category": tag.get("category") if isinstance(tag, dict) else None,
+                    "fired": tag.get("fired") if isinstance(tag, dict) else None,
+                    "configuration": (tag.get("configuration") if isinstance(tag, dict) else None),
+                }
+    candidates = list(candidates_by_id.values())
     complete = _preview_complete(rows, "tag_details")
     if not complete:
         status, reason = "BLOCKED", "Runtime tag discovery is incomplete."
     elif not candidates:
         status, reason = "FAIL", "No runtime tag matches the explicitly requested tag scope."
     else:
-        status = "REVIEW"
-        reason = "Runtime candidates were found, but the tracking plan does not identify the expected tag."
+        status = "PASS"
+        reason = "Every concerned runtime tag was identified inside the accepted tag category."
     return _inspection(
         claim,
         status,
         f"gtm.discovery.{status.casefold()}",
         reason,
         observed=candidates,
-        expected={"tag_scope": scopes, "expected_tag_identity": "confirm"},
+        expected={"tag_scope": scopes, "identity": "identified concerned runtime tags"},
         evidence=refs,
-        check_next="Confirm the expected runtime tag identity and routing",
+        check_next=("Current concerned runtime tags and routing" if status != "PASS" else None),
         scenario_id=scenario_id,
     )
 
@@ -1393,6 +1393,22 @@ def _gtm_result(
                     check_next="Concerned in-scope tag configurations",
                     scenario_id=scenario_id,
                 )
+            return _inspection(
+                claim,
+                "PASS",
+                "gtm.dynamic_tag_configurations_complete",
+                "Every concerned runtime tag has a complete effective configuration.",
+                observed=[
+                    {
+                        "tag_id": _tag_identity(tag),
+                        "configuration": tag.get("configuration"),
+                    }
+                    for tag in details
+                ],
+                expected="Complete configuration for every concerned in-scope tag",
+                evidence=refs,
+                scenario_id=scenario_id,
+            )
         cache_tag_id = tag_id or (tag_ids[0] if len(tag_ids) == 1 else "")
         cached, cached_refs, conflict = _cached_tag_configuration(model, rows, cache_tag_id)
         return _gtm_configuration_result(
@@ -3026,6 +3042,48 @@ def _claim_inspection(
     return _apply_live_plan_gap(row, claim, group)
 
 
+def _execution_protocol_inspection(
+    event: dict[str, Any], action: dict[str, Any], scenario_id: str
+) -> dict[str, Any]:
+    claim = {
+        "claim_id": f"{event['event_id']}::EXECUTION",
+        "domain": "behavior",
+        "target": {"check": "execution_protocol", "label": "Browser action protocol"},
+        "predicate": {"operator": "present"},
+        "label": "Browser action protocol",
+    }
+    violations = [row for row in action.get("execution_violations", []) if isinstance(row, dict)]
+    if violations:
+        return _inspection(
+            claim,
+            "BLOCKED",
+            "execution.protocol_violation",
+            "Browser control departed from the frozen action card; captured client evidence is preserved but confidence is blocked.",
+            observed=[
+                {
+                    "code": row.get("code"),
+                    "reason": row.get("reason"),
+                    "observed": row.get("observed"),
+                }
+                for row in violations
+            ],
+            expected=action.get("action_card"),
+            evidence=[action.get("commit_record_id")],
+            check_next="Retest only the affected action with the same action card and no extra load",
+            scenario_id=scenario_id,
+        )
+    return _inspection(
+        claim,
+        "PASS",
+        "execution.protocol_observed",
+        "The browser action stayed within its target navigation/reload/reset budget.",
+        observed=action.get("operation_deltas", {}),
+        expected=action.get("action_card"),
+        evidence=[action.get("commit_record_id")],
+        scenario_id=scenario_id,
+    )
+
+
 def _inspect_action(
     event: dict[str, Any],
     plan: dict[str, Any],
@@ -3039,6 +3097,7 @@ def _inspect_action(
     rows = [
         _binding_result(event, plan, model, scenario_id, evidence=evidence, action=action),
         _settlement_inspection(event, evidence, scenario_id),
+        _execution_protocol_inspection(event, action, scenario_id),
     ]
     acquisition = _acquisition_inspection(event, action, evidence, scenario_id)
     if acquisition is not None:

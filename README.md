@@ -4,11 +4,11 @@
 [![CI](https://github.com/haiqigeng/gtm-client-recette/actions/workflows/ci.yml/badge.svg)](https://github.com/haiqigeng/gtm-client-recette/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Repository version: **v5.2.0**.
+Repository version: **v6.0.0**.
 
 GTM Client Recette is a personal expert skill for client-side GTM Preview acceptance
-testing. It follows an existing tracking plan or explicit rules, operates in the user's
-already-open Chromium session, and asks whether the page, business state, source stream,
+testing. It follows an existing tracking plan or explicit rules, operates in a headed
+Playwright MCP-managed Microsoft Edge session, and asks whether the page, business state, source stream,
 GTM decision, runtime payload and browser delivery form one truthful causal chain.
 
 The goal is not the shortest possible run. It is the highest number of trustworthy
@@ -16,25 +16,29 @@ findings per expensive browser interaction.
 
 ## Why the redesign
 
-Versions 3.1–4.0 accumulated setup stages, ledgers and per-layer ceremony that could
-delay the first inspection for many minutes. Version 5 is a zero-based architecture:
+Versions 3.1–5.2 accumulated browser handshakes and agent-controlled staging that could
+still delay the first inspection for many minutes. Version 6 keeps the v5 quality engine
+but replaces its control path:
 
 - the unit of work is a typed measurement claim in a material scenario;
 - one staged compiler and one canonical occurrence/evidence model;
 - fully expanded Tag Assistant API Call as the normal exact-message source, with a
   document-start recorder only when stronger invocation-time evidence is needed;
-- one persisted browser/Preview handshake, one current Core load at most, current action
-  deltas, and no unnamed clean repeats;
-- one vertical browser action can satisfy several applicable claims;
-- Preview is synchronized in safe micro-batches, with selective deep reads;
+- pinned Playwright MCP `0.0.79` launches one headed persistent Edge profile by default;
+- `next` freezes one action before Preview creates the first measured page load;
+- `complete` commits browser deltas and the bounded Preview pass together;
+- operation budgets preserve evidence but block confidence after agent mistakes;
+- one real interaction can satisfy several causally co-occurring claims;
+- each interaction receives one bounded Preview pass with selective deep reads;
 - finite and dependent live values are discovered just in time;
 - high-cardinality populations are sampled by behavior signature;
 - deterministic business/anomaly judgement prevents coherent false passes;
-- immediate non-certifying action pulses and detailed canonical per-event feedback;
+- one canonical correlation/judgement pass and immediate detailed per-event feedback;
 - reports are rendered once at final reconciliation.
 
 No future-event scenario scaffold, fixed layer matrix, alternate result authority,
-browser replacement program or generic slow mode is part of the design.
+browser-extension dependency, browser replacement loop or generic slow mode is part of
+the default design. Existing-window attachment remains an explicit fallback.
 
 ## Inspection model
 
@@ -64,21 +68,22 @@ anchor, anomaly, safety and gate. The Data Layer tab never substitutes for an AP
 
 ```powershell
 python -B scripts/recette.py init --plan tracking-plan.xlsx --run-dir C:\path\to\run --approved --origin https://example.test --expected-container GTM-XXXX
-python -B scripts/recette.py begin --run-dir C:\path\to\run --event EV-view_item --scenario ordinary --input before.json
-# Perform the real browser interaction in the existing approved session.
-python -B scripts/recette.py commit --run-dir C:\path\to\run --input after-and-deltas.json
-python -B scripts/recette.py sync-preview --run-dir C:\path\to\run --input preview-batch.json --markdown
+python -B scripts/recette.py next --run-dir C:\path\to\run --event EV-view_item --scenario ordinary --input first-runtime-check.json
+# Perform exactly the returned action card once in the managed Edge window.
+python -B scripts/recette.py complete --run-dir C:\path\to\run --action A-RETURNED-BY-NEXT --input action-and-preview.json --markdown
 python -B scripts/recette.py status --run-dir C:\path\to\run
 python -B scripts/recette.py finish --run-dir C:\path\to\run
 ```
 
-The full public surface is `init`, `begin`, `commit`, `sync-preview`, `status`, `handoff`,
-`finish`, `report`, and `reopen`. Use `--help` for exact arguments. There is no arbitrary
+The public surface is `init`, `next`, `complete`, `status`, `handoff`, `finish`, `report`,
+and `reopen`. Use `--help` for exact arguments. There is no arbitrary
 append, provenance override, layer setter or verdict setter.
 
-The first `begin` carries the one capability/binding/health handshake. Later starts are
-lightweight. Repeating an already committed event/scenario requires `--retest-reason`;
-new material language, shipping, payment, product-signature, or other scenarios do not.
+The first `next` carries only a verified Playwright runtime and operation baseline before
+the target load. `complete` requires the returned action ID, so a retry cannot drift to
+another event. Later starts reuse the same runtime. Repeating an already committed event/scenario
+requires a structured evidence-defect or user-request basis; new material language,
+shipping, payment, product-signature, or other scenarios do not.
 
 ## Tracking-plan intake
 
@@ -90,10 +95,11 @@ JSON types, tag/destination scope and contiguous merged/fill-down rows, and repo
 was compiled or ignored. An orphan/ambiguous requirement fails immediately; an
 unsupported later-event rule is localized so the first valid event can start.
 
-Broad “all planned” scope is resolved only through exact event-level tag/destination
-identities. If the plan has none, intake stops immediately and asks for a concise accepted
-vendor category and any destination that must be certified; prose is never matched as a
-runtime identity.
+Broad “all planned” scope is resolved only through plan identities. Concise aliases such
+as `GA4 tags only` and a destination value of `GA4` normalize to the GA4 category rather
+than becoming literal runtime IDs. With no exact destination, one concrete causal GA4
+destination may be runtime-discovered and reported; exact declared IDs remain strict.
+Unresolvable prose still stops before browser work.
 
 ## Scenario behavior
 
@@ -117,6 +123,8 @@ for every applicable operational layer, with simple expected/observed detail, ex
 `Check next` target and stable evidence references. Every differing value and every
 `FAIL`, `BLOCKED` or `REVIEW` remains visible. The final output includes a plan-ordered
 conclusion, JSON, Markdown, validated XLSX, defect/retest views and telemetry.
+If a later continuous delta exposes an event between two interactions, the same
+completion pass visibly revises the affected prior event without another page load.
 
 Canonical statuses are `PASS`, `FAIL`, `BLOCKED`, `REVIEW`, `NOT_APPLICABLE` and
 `PENDING`; user-facing reports map pass/fail to OK/KO. The renderer—not the conversational
@@ -136,14 +144,19 @@ python -m ruff check --no-cache scripts tests
 python -m ruff format --check scripts tests
 python -m unittest discover -s tests -v
 python -B tests/run_browser_helpers.py
-python -B scripts/check_release.py --tag v5.2.0
+python -B scripts/check_release.py
+# A release tag additionally requires a sanitized successful live-pilot JSON:
+python -B scripts/check_release.py --tag v6.0.0 --live-pilot C:\path\to\live-pilot.json
 ```
 
 The controlled harness covers generalized compiler, evidence-authority, cross-layer,
 scenario, anomaly, identity, protocol, output and startup contracts. Controlled timings
-are diagnostic only; a clean run in the owner's already-open browser remains the live
-acceptance test, and no local fixture is presented as that pilot.
+are diagnostic only. A release requires a clean installed-skill run through the pinned
+Playwright MCP runtime: Core plus one ordinary event, one Preview pass, all mandatory
+layers, no guessed/coordinate methods, ad-hoc evidence files or unauthorized reloads,
+first action within 120 seconds and first detailed feedback within 300 seconds. No local
+fixture is presented as that pilot.
 
-See the [design conformance](docs/v5-design-conformance.md),
-[regression and downgrade audit](docs/v5-regression-downgrade-audit.md), and
-[technical review](docs/v5-technical-review.md).
+See the [design conformance](docs/v6-design-conformance.md),
+[regression and downgrade audit](docs/v6-regression-downgrade-audit.md), and
+[technical review](docs/v6-technical-review.md).

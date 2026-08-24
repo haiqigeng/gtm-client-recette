@@ -333,7 +333,7 @@ class StressContractTests(unittest.TestCase):
         self.assertEqual(result["domains"]["behavior"]["status"], "BLOCKED")
         self.assertFalse(result["status"] == "PASS")
 
-    def test_unnamed_in_scope_tag_is_discovered_but_not_silently_certified(self) -> None:
+    def test_one_unnamed_in_scope_tag_is_certified_without_literal_scope_failure(self) -> None:
         event = default_event()
         event["tags"] = []
         harness = V5Harness(self.root, events=[event])
@@ -366,8 +366,8 @@ class StressContractTests(unittest.TestCase):
             for row in result["inspections"]
             if row["inspection_target"] == "Runtime in-scope tag discovery"
         )
-        self.assertEqual(discovery["status"], "REVIEW")
-        self.assertEqual(result["status"], "REVIEW")
+        self.assertEqual(discovery["status"], "PASS")
+        self.assertEqual(result["status"], "PASS")
 
     def test_missing_request_parameter_with_partial_payload_is_blocked(self) -> None:
         event = default_event()

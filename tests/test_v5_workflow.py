@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 import tempfile
@@ -57,12 +58,12 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn("GTM decision PASS", rendered)
         self.assertIn("Destination delivery PASS", rendered)
         telemetry = status_view(harness.run)["telemetry"]
-        self.assertFalse(telemetry["operation_counters_instrumented"])
-        self.assertIsNone(telemetry["preview_tab_switches"])
+        self.assertTrue(telemetry["operation_counters_instrumented"])
+        self.assertEqual(telemetry["preview_tab_switches"], 0)
         self.assertEqual(telemetry["preview_events_observed"], 1)
         self.assertEqual(telemetry["network_requests_observed"], 1)
 
-    def test_commit_retry_is_idempotent_and_pulse_reports_real_layers_and_transport(self) -> None:
+    def test_commit_retry_is_idempotent_without_pre_preview_judgement(self) -> None:
         harness = V5Harness(self.root)
         action = harness.begin()
         payload = {"event": "view_item"}
@@ -77,12 +78,9 @@ class WorkflowTests(unittest.TestCase):
         second = commit_action(harness.run, bundle, action_id=action)
         self.assertEqual(len(read_stream(harness.run)[0]), count_after_first)
         self.assertEqual(first["commit"]["record_id"], second["commit"]["record_id"])
-        self.assertEqual(first["pulse"]["record_id"], second["pulse"]["record_id"])
-        self.assertEqual(first["pulse"]["observed_network_sends"], 1)
-        self.assertEqual(first["pulse"]["observed_preview_messages"], 0)
-        layers = first["pulse"]["provisional_events"][0]["layers"]
-        self.assertEqual(layers["source"]["status"], "PASS")
-        self.assertEqual(layers["gtm"]["status"], "BLOCKED")
+        self.assertEqual(first["operation_deltas"], second["operation_deltas"])
+        self.assertEqual(first["execution_violations"], [])
+        self.assertFalse(any(row["kind"] == "ACTION_PULSE" for row in read_stream(harness.run)[0]))
 
     def test_invalid_control_is_rejected_before_commit_evidence_is_written(self) -> None:
         harness = V5Harness(self.root)
@@ -224,7 +222,7 @@ class WorkflowTests(unittest.TestCase):
         )["events"]
         self.assertEqual([row["status"] for row in results], ["PASS", "PASS"])
 
-    def test_three_event_cluster_reuses_one_handshake_and_one_preview_batch(self) -> None:
+    def test_one_interaction_with_three_cooccurring_events_reuses_one_preview_pass(self) -> None:
         events = [
             default_event("E-page", "page_view"),
             default_event("E-list", "view_item_list"),
@@ -366,6 +364,7 @@ class WorkflowTests(unittest.TestCase):
                 "health": {
                     **harness._health("before"),
                     "operations": {
+                        **harness.operations,
                         "navigations": 1,
                         "full_preflights": 1,
                         "preview_tab_switches": 2,
@@ -396,10 +395,21 @@ class WorkflowTests(unittest.TestCase):
             capture_output=True,
             text=True,
         )
-        for route in ("init", "begin", "commit", "sync-preview", "finish"):
-            self.assertIn(route, result.stdout)
-        for retired in ("ready", "open", "capture", "start-event", "settle-event"):
-            self.assertNotIn("{" + retired + ",", result.stdout)
+        command_list = re.search(r"\{([^}]+)\}", result.stdout)
+        self.assertIsNotNone(command_list)
+        self.assertEqual(
+            set(command_list.group(1).split(",")),
+            {"init", "next", "complete", "status", "handoff", "finish", "report", "reopen"},
+        )
+        complete_help = subprocess.run(
+            [sys.executable, "-B", str(SCRIPTS / "recette.py"), "complete", "--help"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        self.assertIn("--action ACTION", complete_help)
+        self.assertNotIn("--event", complete_help)
 
 
 if __name__ == "__main__":

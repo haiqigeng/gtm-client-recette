@@ -1,5 +1,45 @@
 # Changelog
 
+## [v6.0.0](https://github.com/haiqigeng/gtm-client-recette/releases/tag/v6.0.0) (2026-08-24, prerelease)
+
+- Make pinned Microsoft Playwright MCP `0.0.79` the default runtime: one headed
+  persistent Edge profile, semantic accessibility targets, documented network tools and
+  no extension, coordinates, screenshot control, Firefox path or guessed helper methods.
+- Replace the normal three-stage browser loop with `next` and `complete`. `next` freezes
+  one action card before Preview creates the first measured load; `complete` commits the
+  exact frozen event slice and one bounded Preview delta together, then emits detailed
+  per-layer feedback. Its returned action ID is mandatory, including for retries.
+- Add runtime fail-fast checks for provider, exact MCP version, Edge channel, persistent
+  profile and headed mode. Existing-window attachment remains an explicit approved
+  fallback rather than an automatic recovery path.
+- Add lean action-level target-navigation/reload/reset budgets. Other browser counters
+  remain optional telemetry. Violations preserve captured client evidence and become
+  operator-protocol `BLOCKED` findings; they do not create a client failure, discard
+  progress or trigger another clean run.
+- Replace free-text repeat permission with a structured evidence-defect or explicit
+  user-request basis, while keeping distinct material scenarios unrestricted.
+- Normalize `GA4 tags only`, related aliases and destination value `GA4` as a category,
+  never a literal tag/destination identity. Certify one unambiguous causal runtime tag
+  and runtime-discovered GA4 destination while retaining strict exact IDs when declared.
+- Reduce the initial capability probe to first-action surfaces, expose browser/Preview
+  readiness telemetry, keep default status output compact, and preserve every
+  source/Data Layer/Variables/tag/runtime/request/anomaly/safety/coverage check.
+- Make the first `next` reject old binding/page/source/network/Preview preflight bundles;
+  later ordinary actions reuse the prior completion baseline. A fresh-context action
+  alone requires a new verified isolated runtime baseline.
+- Remove the internal pre-Preview action pulse and its duplicate full-stream correlation;
+  `complete` now performs one canonical model/judgement pass after Preview.
+- Carry continuous source/network/lifecycle deltas from the prior committed boundary in
+  the next single `complete`. Timestamped between-action rows remain unbound and revise
+  the affected prior event in the same model pass; stale older history is rejected and
+  revised feedback is visible in compact, full and Markdown output.
+- Add a release-only live-pilot gate: Core plus an ordinary event, one Preview pass,
+  complete mandatory layers, no unsupported/coordinate/ad-hoc-evidence/reload/scope
+  recovery, first action within 120 seconds and first feedback within 300 seconds.
+- Add generalized Playwright runtime, scope-alias, one-pass completion, operation-guard,
+  natural-navigation, mandatory-layer and compact-output regressions. No client/run-
+  specific path, event count, workbook, domain, container or destination is embedded.
+
 ## [v5.2.0](https://github.com/haiqigeng/gtm-client-recette/releases/tag/v5.2.0) (2026-08-24)
 
 - Resolve broad “all planned” tag/destination wording to exact event-level plan

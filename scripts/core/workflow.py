@@ -15,8 +15,8 @@ from .capture import (
     validate_bundle_value,
     verify_evidence_references,
 )
-from .constants import utc_now
-from .correlate import action_evidence, action_windows, build_model, source_event_names
+from .constants import OPERATION_COUNTERS, utc_now
+from .correlate import action_windows, build_model
 from .coverage import event_by_id, validate_coverage_annotation
 from .judge import judge_event, judge_run
 from .state import (
@@ -108,6 +108,162 @@ def _latest_binding_summary(records: list[dict[str, Any]]) -> dict[str, Any] | N
     )
 
 
+def _latest_capture_summary(records: list[dict[str, Any]], kind: str) -> dict[str, Any] | None:
+    return next(
+        (
+            record.get("data", {}).get("summary")
+            for record in reversed(records)
+            if record.get("kind") == kind
+            and isinstance(record.get("data", {}).get("summary"), dict)
+        ),
+        None,
+    )
+
+
+def _validate_runtime_contract(
+    plan: dict[str, Any], capability: dict[str, Any] | None, *, fresh_context: bool
+) -> None:
+    if not isinstance(capability, dict):
+        raise StateError("No verified browser runtime capability is available.")
+    runtime = capability.get("runtime")
+    if not isinstance(runtime, dict):
+        raise StateError("Browser capability has no verified runtime self-check.")
+    scope = plan.get("scope", {})
+    expected_provider = str(scope.get("browser_runtime") or "playwright_mcp")
+    observed_provider = str(runtime.get("provider") or "")
+    if observed_provider != expected_provider:
+        raise StateError(
+            f"Run requires {expected_provider}, but the verified runtime is {observed_provider or 'unknown'}."
+        )
+    if expected_provider == "playwright_mcp":
+        expected_version = str(scope.get("playwright_mcp_version") or "")
+        observed_version = str(runtime.get("mcp_version") or "")
+        if expected_version and observed_version != expected_version:
+            raise StateError(
+                f"Run requires Playwright MCP {expected_version}, not {observed_version or 'unknown'}."
+            )
+    if str(runtime.get("self_check") or "").upper() != "PASS":
+        raise StateError("Browser runtime self-check must pass before an action starts.")
+    expected_channel = str(scope.get("browser_channel") or "")
+    observed_channel = str(runtime.get("browser_channel") or "")
+    if expected_channel and observed_channel.casefold() != expected_channel.casefold():
+        raise StateError(
+            f"Run requires browser channel {expected_channel}, not {observed_channel or 'unknown'}."
+        )
+    expected_profile = str(scope.get("browser_profile_mode") or "persistent").casefold()
+    observed_profile = str(runtime.get("profile_mode") or "").casefold()
+    if fresh_context and observed_profile != "isolated":
+        raise StateError("A fresh-context action requires a verified isolated profile.")
+    if not fresh_context and observed_profile != expected_profile:
+        raise StateError(
+            f"Run requires profile mode {expected_profile}; observed {observed_profile or 'unknown'}."
+        )
+    if bool(runtime.get("headed")) != bool(scope.get("browser_headed", True)):
+        raise StateError("Browser headed/headless mode differs from the approved run scope.")
+
+
+def _operations(value: dict[str, Any] | None) -> dict[str, int] | None:
+    if not isinstance(value, dict) or not isinstance(value.get("operations"), dict):
+        return None
+    observed = value["operations"]
+    if not {"navigations", "reloads"}.issubset(observed):
+        return None
+    if not all(isinstance(item, int) and not isinstance(item, bool) for item in observed.values()):
+        return None
+    return {key: int(observed.get(key, 0)) for key in OPERATION_COUNTERS}
+
+
+def _latest_operations(records: list[dict[str, Any]]) -> dict[str, int] | None:
+    return _operations(_latest_capture_summary(records, "CAPTURE_HEALTH"))
+
+
+def _normalize_retest_basis(
+    records: list[dict[str, Any]], value: dict[str, Any] | None
+) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise StateError("Retest basis must be a structured object.")
+    kind = str(value.get("type") or "").upper()
+    if kind not in {"EVIDENCE_DEFECT", "USER_REQUEST"}:
+        raise StateError("Retest basis type must be EVIDENCE_DEFECT or USER_REQUEST.")
+    reason = " ".join(str(value.get("reason") or "").split())
+    if not reason:
+        raise StateError("Retest basis needs a concise reason.")
+    normalized = {**value, "type": kind, "reason": reason}
+    if kind == "EVIDENCE_DEFECT":
+        record_id = str(value.get("record_id") or "")
+        known = stream_record_by_id(records)
+        if record_id not in known:
+            raise StateError("Evidence-defect retest basis references an unknown stream record.")
+        normalized["record_id"] = record_id
+    elif not str(value.get("authorization") or "").strip():
+        raise StateError("User-request retest basis needs the explicit authorization text.")
+    return normalized
+
+
+def _normalize_action_contract(
+    events: list[dict[str, Any]],
+    *,
+    mode: str | None,
+    document_policy: str | None,
+    retest_basis: dict[str, Any] | None,
+) -> tuple[str, str]:
+    normalized_mode = str(mode or "").upper()
+    if not normalized_mode:
+        page_load = all(
+            event.get("mode") == "state_only"
+            or str(event.get("event_name") or "") in {"", "page_view"}
+            for event in events
+        )
+        normalized_mode = "NAVIGATE_ONCE" if page_load else "INTERACT_ONCE"
+    if normalized_mode not in {"OBSERVE_CURRENT", "NAVIGATE_ONCE", "INTERACT_ONCE"}:
+        raise StateError("Action mode must be OBSERVE_CURRENT, NAVIGATE_ONCE, or INTERACT_ONCE.")
+    normalized_policy = str(document_policy or "").upper()
+    if not normalized_policy:
+        normalized_policy = (
+            "FORBIDDEN" if normalized_mode == "OBSERVE_CURRENT" else "NATURAL_ALLOWED"
+        )
+    if normalized_policy not in {"FORBIDDEN", "NATURAL_ALLOWED", "ONE_RELOAD_AUTHORIZED"}:
+        raise StateError(
+            "Document policy must be FORBIDDEN, NATURAL_ALLOWED, or ONE_RELOAD_AUTHORIZED."
+        )
+    if normalized_policy == "ONE_RELOAD_AUTHORIZED" and retest_basis is None:
+        raise StateError("One explicit reload requires a validated retest basis.")
+    return normalized_mode, normalized_policy
+
+
+def _action_card(events: list[dict[str, Any]], mode: str, document_policy: str) -> dict[str, Any]:
+    journeys = [event.get("journey", {}) for event in events]
+    return {
+        "mode": mode,
+        "document_policy": document_policy,
+        "event_ids": [event["event_id"] for event in events],
+        "target_urls": list(
+            dict.fromkeys(
+                str(journey.get("url"))
+                for journey in journeys
+                if isinstance(journey, dict) and journey.get("url")
+            )
+        ),
+        "interaction": next(
+            (
+                str(journey.get("action"))
+                for journey in journeys
+                if isinstance(journey, dict) and journey.get("action")
+            ),
+            "Inspect the planned event once",
+        ),
+        "forbidden": [
+            "extra reload",
+            "replacement browser or tab",
+            "coordinate-based interaction",
+            "whole-container or historical-domain scan",
+        ],
+        "completion": "Capture one bounded action delta and submit it once with Preview detail.",
+    }
+
+
 def _same_binding(left: dict[str, Any], right: dict[str, Any]) -> bool:
     keys = (
         "browser_context_id",
@@ -170,11 +326,15 @@ def _after_observation_times(bundle: dict[str, Any]) -> list[tuple[str, Any]]:
     return output
 
 
-def _validate_after_freshness(bundle: dict[str, Any], action: dict[str, Any]) -> None:
+def _validate_after_freshness(
+    bundle: dict[str, Any], action: dict[str, Any], *, continuous_since: Any = None
+) -> None:
     began = parse_iso_timestamp(action.get("began_at"))
     if began is None:
         raise StateError("The action has no valid begin timestamp.")
-    earliest = began - timedelta(seconds=2)
+    action_earliest = began - timedelta(seconds=2)
+    continuous_boundary = parse_iso_timestamp(continuous_since) or began
+    continuous_earliest = continuous_boundary - timedelta(seconds=2)
     observations = _after_observation_times(bundle)
     required_labels = {"health", "page[0]"}
     observed_labels = {label for label, value in observations if value is not None}
@@ -185,9 +345,15 @@ def _validate_after_freshness(bundle: dict[str, Any], action: dict[str, Any]) ->
         parsed = parse_iso_timestamp(value)
         if parsed is None:
             raise StateError(f"After-state evidence has an invalid timestamp at {label}.")
+        earliest = (
+            action_earliest
+            if label == "health" or label.startswith("page[")
+            else continuous_earliest
+        )
         if parsed < earliest:
             raise StateError(
-                f"After-state evidence at {label} predates the action and cannot be rebound to it."
+                f"After-state evidence at {label} predates the action or previous "
+                "continuous boundary and cannot be ingested."
             )
 
 
@@ -218,14 +384,17 @@ def begin_action(
     label: str | None = None,
     replay_safety: str = "SAFE_IDEMPOTENT",
     fresh_context_required: bool = False,
-    retest_reason: str | None = None,
+    retest_basis: dict[str, Any] | None = None,
+    mode: str | None = None,
+    document_policy: str | None = None,
+    deferred_binding: bool = False,
 ) -> dict[str, Any]:
     plan = load_plan(run_dir)
     records, _ = read_stream(run_dir)
     normalized_ids = list(dict.fromkeys(str(value) for value in event_ids if str(value)))
     if not normalized_ids:
         raise StateError("begin requires at least one event_id.")
-    _event_slice(plan, normalized_ids)
+    selected_events = _event_slice(plan, normalized_ids)
     prior_actions = action_windows(records)
     open_actions = [
         action["action_id"] for action in action_windows(records) if action["status"] == "OPEN"
@@ -241,25 +410,35 @@ def begin_action(
         and str(action.get("scenario_id") or "ordinary") == str(scenario_id or "ordinary")
         and set(map(str, action.get("event_ids", []))) & set(normalized_ids)
     ]
-    if repeated and not str(retest_reason or "").strip():
+    normalized_retest = _normalize_retest_basis(records, retest_basis)
+    if repeated and normalized_retest is None:
         raise StateError(
-            "This event/scenario already has a committed action. Supply one explicit "
-            "retest reason or use a distinct material scenario; do not create a clean repeat."
+            "This event/scenario already has a committed action. Supply a structured "
+            "retest basis or use a distinct material scenario; free text cannot authorize "
+            "a clean repeat."
         )
     replay = replay_safety.upper()
     if replay not in {"SAFE_IDEMPOTENT", "SAFE_ONCE", "CONSEQUENTIAL", "PROTECTED"}:
         raise StateError("Unsupported replay-safety class.")
+    normalized_mode, normalized_policy = _normalize_action_contract(
+        selected_events,
+        mode=mode,
+        document_policy=document_policy,
+        retest_basis=normalized_retest,
+    )
     action_id = f"A-{uuid4().hex[:12].upper()}"
     prepared = _inject_action(bundle, action_id, "before")
     first = _first_action(records)
     begin_adapters = {"page", "datalayer", "source", "network", "lifecycle"}
-    if first or str(retest_reason or "").strip():
+    if first or normalized_retest is not None or fresh_context_required:
         begin_adapters.update({"capability", "binding", "health"})
     _validate_phase_adapters(prepared, phase="begin", allowed=begin_adapters)
-    required = {"page"}
-    if first:
+    required = set() if deferred_binding else {"page"}
+    if first or fresh_context_required:
         required.add("health")
-        required.update({"capability", "binding"})
+        required.add("capability")
+        if not deferred_binding:
+            required.add("binding")
         if replay in {"CONSEQUENTIAL", "PROTECTED"}:
             datalayer = prepared.get("datalayer", {})
             direct = prepared.get("source", {})
@@ -278,6 +457,12 @@ def begin_action(
                     "The first consequential/protected action requires one complete cheap "
                     "source self-test."
                 )
+    capability = (
+        prepared.get("capability")
+        if isinstance(prepared.get("capability"), dict)
+        else _latest_capture_summary(records, "CAPTURE_CAPABILITY")
+    )
+    _validate_runtime_contract(plan, capability, fresh_context=fresh_context_required)
     latest_binding = _latest_binding_summary(records)
     if (
         not first
@@ -286,7 +471,20 @@ def begin_action(
         and _same_binding(prepared["binding"], latest_binding)
     ):
         raise StateError("The begin bundle repeats the current binding without an identity change.")
-    validate_bundle_value(run_dir, prepared, required_adapters=required)
+    if prepared:
+        validate_bundle_value(run_dir, prepared, required_adapters=required)
+    elif required:
+        raise StateError("Begin bundle is missing required runtime/before-state adapters.")
+
+    baseline_operations = _operations(prepared.get("health")) or _latest_operations(records)
+    if baseline_operations is None:
+        raise StateError(
+            "The Playwright action guard needs one complete cumulative operations snapshot."
+        )
+    baseline_binding = (
+        prepared.get("binding") if isinstance(prepared.get("binding"), dict) else latest_binding
+    )
+    card = _action_card(selected_events, normalized_mode, normalized_policy)
 
     record = append_annotation(
         run_dir,
@@ -300,17 +498,97 @@ def begin_action(
             "label": label or "Browser interaction",
             "replay_safety": replay,
             "fresh_context_required": fresh_context_required,
-            "retest_reason": str(retest_reason).strip() if retest_reason else None,
+            "retest_basis": normalized_retest,
+            "mode": normalized_mode,
+            "document_policy": normalized_policy,
+            "operation_baseline": baseline_operations,
+            "baseline_document_id": (
+                baseline_binding.get("document_id") if isinstance(baseline_binding, dict) else None
+            ),
+            "action_card": card,
             "began_at": utc_now(),
         },
         idempotency_key=f"action-begin:{action_id}",
     )
-    captures = capture_bundle_value(run_dir, prepared, source_id=f"begin:{action_id}")
+    captures = (
+        capture_bundle_value(run_dir, prepared, source_id=f"begin:{action_id}") if prepared else []
+    )
     return {
         "action": record,
         "captures": [capture["record_id"] for capture in captures],
-        "instruction": "Mark this action_id in the collector, perform the real interaction once, then commit its deltas.",
+        "action_card": card,
+        "instruction": (
+            "Perform only the action card once. Do not reload for evidence cleanup; "
+            "submit one bounded completion bundle."
+        ),
     }
+
+
+def next_action(
+    run_dir: Path | str,
+    bundle: dict[str, Any] | None = None,
+    *,
+    event_ids: list[str] | None = None,
+    scenario_id: str = "ordinary",
+    scenario_label: str | None = None,
+    scenario_values: dict[str, Any] | None = None,
+    label: str | None = None,
+    replay_safety: str = "SAFE_IDEMPOTENT",
+    fresh_context_required: bool = False,
+    retest_basis: dict[str, Any] | None = None,
+    mode: str | None = None,
+    document_policy: str | None = None,
+) -> dict[str, Any]:
+    """Open the next action with only the runtime evidence needed before interaction."""
+    plan = load_plan(run_dir)
+    records, _ = read_stream(run_dir)
+    incoming = dict(bundle or {})
+    runtime_refresh = _first_action(records) or fresh_context_required
+    allowed = {"capability", "health"} if runtime_refresh else set()
+    unexpected = sorted(set(incoming) - allowed)
+    if unexpected:
+        expectation = (
+            "only capability and health before the target load"
+            if runtime_refresh
+            else "no evidence; reuse the prior completion baseline"
+        )
+        raise StateError(
+            "next accepts " + expectation + ". Unexpected adapters: " + ", ".join(unexpected)
+        )
+    selected = list(event_ids or [])
+    if not selected:
+        committed = {
+            str(event_id)
+            for action in action_windows(records)
+            if action.get("status") == "COMMITTED"
+            and str(action.get("scenario_id") or "ordinary") == str(scenario_id or "ordinary")
+            for event_id in action.get("event_ids", [])
+        }
+        selected = [
+            str(event["event_id"])
+            for event in plan.get("events", [])
+            if event.get("executable") is True and str(event["event_id"]) not in committed
+        ][:1]
+    if not selected:
+        raise StateError(
+            "No untested executable event remains for this scenario; select a distinct "
+            "material scenario or provide a structured retest basis."
+        )
+    return begin_action(
+        run_dir,
+        selected,
+        incoming,
+        scenario_id=scenario_id,
+        scenario_label=scenario_label,
+        scenario_values=scenario_values,
+        label=label,
+        replay_safety=replay_safety,
+        fresh_context_required=fresh_context_required,
+        retest_basis=retest_basis,
+        mode=mode,
+        document_policy=document_policy,
+        deferred_binding=True,
+    )
 
 
 def _coverage_rows(value: Any) -> list[dict[str, Any]]:
@@ -500,6 +778,95 @@ def _add_control_annotations(
     return record_ids
 
 
+def _execution_violations(
+    action: dict[str, Any], prepared: dict[str, Any]
+) -> tuple[dict[str, int], list[dict[str, Any]]]:
+    baseline = action.get("operation_baseline")
+    after = _operations(prepared.get("health"))
+    if not isinstance(baseline, dict) or after is None:
+        return {}, [
+            {
+                "code": "execution.operations_unavailable",
+                "reason": "Cumulative browser operation counters are incomplete.",
+                "expected": "One complete before/after counter pair",
+            }
+        ]
+    deltas = {key: after[key] - int(baseline.get(key, 0)) for key in OPERATION_COUNTERS}
+    violations: list[dict[str, Any]] = []
+    regressed = {key: value for key, value in deltas.items() if value < 0}
+    if regressed:
+        violations.append(
+            {
+                "code": "execution.counter_regression",
+                "reason": "One or more cumulative browser counters moved backwards.",
+                "observed": regressed,
+                "expected": "Monotonic counters",
+            }
+        )
+    mode = str(action.get("mode") or "INTERACT_ONCE")
+    policy = str(action.get("document_policy") or "NATURAL_ALLOWED")
+    navigation_limit = 0 if mode == "OBSERVE_CURRENT" else 1
+    reload_limit = 1 if policy == "ONE_RELOAD_AUTHORIZED" else 0
+    reset_limit = 1 if action.get("fresh_context_required") is True else 0
+    limits = {
+        "navigations": navigation_limit,
+        "reloads": reload_limit,
+        "resets": reset_limit,
+    }
+    for key, limit in limits.items():
+        if deltas.get(key, 0) > limit:
+            violations.append(
+                {
+                    "code": f"execution.{key}_exceeded",
+                    "reason": f"The action used {deltas[key]} {key}; its action card allows {limit}.",
+                    "observed": deltas[key],
+                    "expected": {"maximum": limit},
+                }
+            )
+
+    page = prepared.get("page")
+    states = page.get("states", []) if isinstance(page, dict) else []
+    after_documents = {
+        str(row.get("document_id"))
+        for row in states
+        if isinstance(row, dict) and row.get("phase", "after") == "after" and row.get("document_id")
+    }
+    baseline_document = str(action.get("baseline_document_id") or "")
+    if (
+        policy == "FORBIDDEN"
+        and baseline_document
+        and any(document != baseline_document for document in after_documents)
+    ):
+        violations.append(
+            {
+                "code": "execution.document_change_forbidden",
+                "reason": "The document changed during an observe-current action.",
+                "observed": sorted(after_documents),
+                "expected": baseline_document,
+            }
+        )
+    changed_documents = {
+        document
+        for document in after_documents
+        if baseline_document and document != baseline_document
+    }
+    if changed_documents:
+        binding = prepared.get("binding")
+        rebound_document = (
+            str(binding.get("document_id") or "") if isinstance(binding, dict) else ""
+        )
+        if len(changed_documents) != 1 or rebound_document not in changed_documents:
+            violations.append(
+                {
+                    "code": "execution.document_rebind_missing",
+                    "reason": "A new post-action document was not rebound exactly once.",
+                    "observed": sorted(changed_documents),
+                    "expected": "One matching after-action binding",
+                }
+            )
+    return deltas, violations
+
+
 def commit_action(
     run_dir: Path | str,
     bundle: dict[str, Any],
@@ -507,7 +874,6 @@ def commit_action(
     action_id: str | None = None,
     outcome_may_have_occurred: bool | None = None,
 ) -> dict[str, Any]:
-    plan = load_plan(run_dir)
     records, _ = read_stream(run_dir)
     actions = action_windows(records)
     open_actions = [action for action in actions if action["status"] == "OPEN"]
@@ -526,6 +892,25 @@ def commit_action(
             raise StateError("commit requires exactly one matching open action.")
         action = committed[0]
         resuming = True
+    existing_commit = (
+        next(
+            record
+            for record in reversed(records)
+            if record.get("kind") == "ACTION_COMMIT"
+            and record.get("data", {}).get("action_id") == action["action_id"]
+        )
+        if resuming
+        else None
+    )
+    original_capture_ids = set(
+        existing_commit.get("data", {}).get("capture_record_ids", [])
+        if existing_commit is not None
+        else []
+    )
+    original_binding_captured = any(
+        record.get("record_id") in original_capture_ids and record.get("kind") == "CAPTURE_BINDING"
+        for record in records
+    )
     machine_bundle, control = _split_bundle(bundle)
     prepared = _inject_action(machine_bundle, action["action_id"], "after")
     _validate_phase_adapters(
@@ -533,32 +918,55 @@ def commit_action(
         phase="commit",
         allowed={"binding", "health", "page", "datalayer", "source", "network", "lifecycle"},
     )
-    validate_bundle_value(run_dir, prepared, required_adapters={"health", "page"})
-    _validate_after_freshness(prepared, action)
     latest_binding = _latest_binding_summary(records)
+    required = {"health", "page"}
+    if latest_binding is None:
+        required.add("binding")
+    validate_bundle_value(run_dir, prepared, required_adapters=required)
+    began = parse_iso_timestamp(action.get("began_at"))
+    prior_boundaries = [
+        candidate.get("committed_at")
+        for candidate in actions
+        if candidate.get("action_id") != action.get("action_id")
+        and candidate.get("status") == "COMMITTED"
+        and parse_iso_timestamp(candidate.get("committed_at")) is not None
+        and began is not None
+        and parse_iso_timestamp(candidate.get("committed_at")) <= began
+    ]
+    continuous_since = max(
+        prior_boundaries,
+        key=lambda value: parse_iso_timestamp(value),
+        default=action.get("began_at"),
+    )
+    _validate_after_freshness(prepared, action, continuous_since=continuous_since)
     if (
-        isinstance(prepared.get("binding"), dict)
+        (not resuming or not original_binding_captured)
+        and isinstance(prepared.get("binding"), dict)
         and isinstance(latest_binding, dict)
         and _same_binding(prepared["binding"], latest_binding)
     ):
-        raise StateError(
-            "The commit bundle repeats the current binding without a navigation change."
-        )
+        prepared.pop("binding")
+    operation_deltas, execution_violations = _execution_violations(action, prepared)
     control = _normalized_controls(run_dir, control, action["action_id"])
-    captures = capture_bundle_value(run_dir, prepared, source_id=f"commit:{action['action_id']}")
-    capture_ids = [record["record_id"] for record in captures]
     outcome = (
         control.get("outcome_may_have_occurred")
         if outcome_may_have_occurred is None
         else outcome_may_have_occurred
     )
+    bundle_digest = content_digest(
+        {"machine": prepared, "control": control, "outcome_may_have_occurred": outcome}
+    )
+    if (
+        resuming
+        and existing_commit is not None
+        and existing_commit.get("data", {}).get("bundle_digest") not in {None, bundle_digest}
+    ):
+        raise StateError("The committed action can only be resumed with its exact original bundle.")
+    captures = capture_bundle_value(run_dir, prepared, source_id=f"commit:{action['action_id']}")
+    capture_ids = [record["record_id"] for record in captures]
     if resuming:
-        commit = next(
-            record
-            for record in reversed(records)
-            if record.get("kind") == "ACTION_COMMIT"
-            and record.get("data", {}).get("action_id") == action["action_id"]
-        )
+        assert existing_commit is not None
+        commit = existing_commit
         if (
             commit.get("data", {}).get("capture_record_ids") != capture_ids
             or commit.get("data", {}).get("outcome_may_have_occurred") != outcome
@@ -575,93 +983,29 @@ def commit_action(
                 "committed_at": utc_now(),
                 "outcome_may_have_occurred": outcome,
                 "capture_record_ids": capture_ids,
+                "operation_deltas": operation_deltas,
+                "execution_violations": execution_violations,
+                "bundle_digest": bundle_digest,
             },
-            idempotency_key=f"action-commit:{action['action_id']}:{content_digest(prepared)}",
+            idempotency_key=f"action-commit:{action['action_id']}:{bundle_digest}",
         )
     annotation_ids = _add_control_annotations(run_dir, control, action_id=action["action_id"])
-    final_records, _ = read_stream(run_dir)
-    model = build_model(run_dir, plan, final_records)
-    observed = source_event_names(model, action["action_id"], authoritative_only=True)
-    duplicates = sorted({name for name in observed if observed.count(name) > 1})
-    expected_names = {
-        str(event_by_id(plan, event_id).get("event_name"))
-        for event_id in action.get("event_ids", [])
-        if event_by_id(plan, event_id).get("event_name")
-    }
-    unexpected = [
-        name for name in observed if name not in expected_names and not name.startswith("gtm.")
-    ]
-    current_evidence = action_evidence(model, action["action_id"])
-    provisional = []
-    for event_id in action.get("event_ids", []):
-        event_result = judge_event(run_dir, plan, final_records, str(event_id), model=model)
-        provisional.append(
-            {
-                "event_id": event_id,
-                "status": event_result["status"],
-                "layers": {
-                    domain: {
-                        "status": value.get("status"),
-                        "reason": value.get("reason"),
-                    }
-                    for domain, value in event_result.get("domains", {}).items()
-                },
-                "operational_rows": [
-                    {
-                        "scenario_id": row.get("scenario_id"),
-                        "target": row.get("inspection_target"),
-                        "domain": row.get("domain"),
-                        "status": row.get("status"),
-                        "observed": row.get("observed"),
-                        "expected": row.get("expected"),
-                        "reason": row.get("reason"),
-                        "check_next": row.get("check_next"),
-                        "evidence": row.get("evidence", []),
-                    }
-                    for row in event_result.get("inspections", [])
-                ],
-            }
-        )
-    awaiting = []
-    if any(
-        row.get("layers", {}).get("gtm", {}).get("status") in {"BLOCKED", "PENDING"}
-        for row in provisional
-    ):
-        awaiting.append("one targeted Preview detail pass")
-    if any(row.get("status") == "PENDING" for row in provisional):
-        awaiting.append("remaining material scenario coverage")
-    pulse_data = {
-        "action_id": action["action_id"],
-        "event_ids": action.get("event_ids", []),
-        "observed_events": observed,
-        "immediate_defects": {
-            "duplicates": duplicates,
-            "unexpected_events": unexpected,
-        },
-        "observed_network_sends": len(current_evidence.get("logical_sends", [])),
-        "observed_preview_messages": len(current_evidence.get("preview_events", [])),
-        "provisional_events": provisional,
-        "awaiting": awaiting,
-    }
-    pulse = append_derived(
-        run_dir,
-        "ACTION_PULSE",
-        pulse_data,
-        idempotency_key=f"pulse:{action['action_id']}:{content_digest(pulse_data)}",
-    )
     return {
         "commit": commit,
         "captures": capture_ids,
         "annotations": annotation_ids,
-        "pulse": {**pulse_data, "record_id": pulse["record_id"], "certifying": False},
+        "operation_deltas": operation_deltas,
+        "execution_violations": execution_violations,
     }
 
 
-def issue_event_feedback(run_dir: Path | str, event_id: str) -> dict[str, Any]:
-    plan = load_plan(run_dir)
-    records, _ = read_stream(run_dir)
-    result = judge_event(run_dir, plan, records, event_id)
-    output_kinds = {"ACTION_PULSE", "EVENT_FEEDBACK_ISSUED", "PREVIEW_SYNC"}
+def _persist_event_feedback(
+    run_dir: Path | str,
+    event_id: str,
+    result: dict[str, Any],
+    records: list[dict[str, Any]],
+) -> dict[str, Any]:
+    output_kinds = {"EVENT_FEEDBACK_ISSUED", "PREVIEW_SYNC"}
     reviewed_through = max(
         (int(record.get("seq", 0)) for record in records if record.get("kind") not in output_kinds),
         default=0,
@@ -682,11 +1026,19 @@ def issue_event_feedback(run_dir: Path | str, event_id: str) -> dict[str, Any]:
     return {**result, "feedback_record_id": record["record_id"]}
 
 
+def issue_event_feedback(run_dir: Path | str, event_id: str) -> dict[str, Any]:
+    plan = load_plan(run_dir)
+    records, _ = read_stream(run_dir)
+    result = judge_event(run_dir, plan, records, event_id)
+    return _persist_event_feedback(run_dir, event_id, result, records)
+
+
 def sync_preview(
     run_dir: Path | str,
     bundle: dict[str, Any],
     *,
     event_ids: list[str] | None = None,
+    revisit_event_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     plan = load_plan(run_dir)
     records, _ = read_stream(run_dir)
@@ -721,14 +1073,21 @@ def sync_preview(
                 if action:
                     event_ids.extend(map(str, action.get("event_ids", [])))
     normalized_ids = list(dict.fromkeys(event_ids or []))
-    _event_slice(plan, normalized_ids)
-    output_kinds = {"ACTION_PULSE", "EVENT_FEEDBACK_ISSUED", "PREVIEW_SYNC"}
+    normalized_revisit_ids = [
+        event_id
+        for event_id in dict.fromkeys(map(str, revisit_event_ids or []))
+        if event_id not in normalized_ids
+    ]
+    feedback_ids = [*normalized_ids, *normalized_revisit_ids]
+    _event_slice(plan, feedback_ids)
+    output_kinds = {"EVENT_FEEDBACK_ISSUED", "PREVIEW_SYNC"}
     through_seq = max(
         (int(record.get("seq", 0)) for record in records if record.get("kind") not in output_kinds),
         default=0,
     )
     sync_data = {
         "event_ids": normalized_ids,
+        "revisited_event_ids": normalized_revisit_ids,
         "through_seq": through_seq,
         "capture_record_ids": [record["record_id"] for record in captures],
     }
@@ -738,12 +1097,119 @@ def sync_preview(
         sync_data,
         idempotency_key=f"preview-sync:{content_digest(sync_data)}",
     )
-    feedback = [issue_event_feedback(run_dir, event_id) for event_id in normalized_ids]
+    model = build_model(run_dir, plan, records)
+    feedback_by_id = {
+        event_id: _persist_event_feedback(
+            run_dir,
+            event_id,
+            judge_event(run_dir, plan, records, event_id, model=model),
+            records,
+        )
+        for event_id in feedback_ids
+    }
     return {
         "sync_record_id": sync["record_id"],
         "captures": [record["record_id"] for record in captures],
         "annotations": annotation_ids,
-        "events": feedback,
+        "events": [feedback_by_id[event_id] for event_id in normalized_ids],
+        "revised_events": [feedback_by_id[event_id] for event_id in normalized_revisit_ids],
+    }
+
+
+def _prior_events_changed_by_continuous_delta(
+    actions: list[dict[str, Any]], action: dict[str, Any], bundle: dict[str, Any]
+) -> list[str]:
+    began = parse_iso_timestamp(action.get("began_at"))
+    if began is None or not any(
+        parse_iso_timestamp(value) < began
+        for label, value in _after_observation_times(bundle)
+        if label != "health"
+        and not label.startswith("page[")
+        and parse_iso_timestamp(value) is not None
+    ):
+        return []
+    position = next(
+        (index for index, row in enumerate(actions) if row.get("action_id") == action["action_id"]),
+        0,
+    )
+    prior = next(
+        (row for row in reversed(actions[:position]) if row.get("status") == "COMMITTED"),
+        None,
+    )
+    return list(map(str, prior.get("event_ids", []))) if isinstance(prior, dict) else []
+
+
+def complete_action(
+    run_dir: Path | str,
+    bundle: dict[str, Any],
+    *,
+    action_id: str | None = None,
+    event_ids: list[str] | None = None,
+    outcome_may_have_occurred: bool | None = None,
+) -> dict[str, Any]:
+    """Commit one action and synchronize its bounded Preview delta in one pass."""
+    plan = load_plan(run_dir)
+    records, _ = read_stream(run_dir)
+    actions = action_windows(records)
+    candidates = [row for row in actions if row.get("status") == "OPEN"]
+    if action_id:
+        candidates = [row for row in candidates if row.get("action_id") == action_id]
+    if len(candidates) != 1:
+        committed = [
+            row
+            for row in actions
+            if action_id and row.get("action_id") == action_id and row.get("status") == "COMMITTED"
+        ]
+        if len(committed) != 1:
+            raise StateError("complete requires exactly one matching open or resumable action.")
+        action = committed[0]
+    else:
+        action = candidates[0]
+    frozen_ids = list(dict.fromkeys(map(str, action.get("event_ids", []))))
+    normalized_ids = list(dict.fromkeys(map(str, event_ids or frozen_ids)))
+    if normalized_ids != frozen_ids:
+        raise StateError(
+            "complete event_ids must exactly match the frozen action card; start a distinct "
+            "action for another event or scenario."
+        )
+    _event_slice(plan, normalized_ids)
+    machine, control = _split_bundle(bundle)
+    preview = machine.pop("preview", None)
+    requires_preview = any(
+        "preview" in claim.get("evidence", [])
+        for event_id in normalized_ids
+        for claim in event_by_id(plan, event_id).get("claims", [])
+    )
+    if requires_preview and not isinstance(preview, dict):
+        raise StateError("The selected event requires one bounded Preview delta in complete.")
+    preview_bundle: dict[str, Any] = {}
+    if isinstance(preview, dict):
+        preview_value = json.loads(json.dumps(preview))
+        preview_value.setdefault("action_id", action["action_id"])
+        preview_bundle["preview"] = preview_value
+        validate_bundle_value(run_dir, preview_bundle, required_adapters={"preview"})
+    revisit_ids = _prior_events_changed_by_continuous_delta(actions, action, machine)
+    commit_bundle = {**machine, **control}
+    committed = commit_action(
+        run_dir,
+        commit_bundle,
+        action_id=action["action_id"],
+        outcome_may_have_occurred=outcome_may_have_occurred,
+    )
+    synchronized = sync_preview(
+        run_dir,
+        preview_bundle,
+        event_ids=normalized_ids,
+        revisit_event_ids=revisit_ids,
+    )
+    return {
+        "action_id": action["action_id"],
+        "commit_record_id": committed["commit"]["record_id"],
+        "sync_record_id": synchronized["sync_record_id"],
+        "operation_deltas": committed["operation_deltas"],
+        "execution_violations": committed["execution_violations"],
+        "events": synchronized["events"],
+        "revised_events": synchronized["revised_events"],
     }
 
 

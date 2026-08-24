@@ -117,7 +117,7 @@ class CompilerAndEvidenceTests(unittest.TestCase):
     def test_json_yaml_and_xlsx_compile_to_typed_claims_with_source_coordinates(self) -> None:
         json_path = write_json(self.root / "plan.json", {"events": [default_event()]})
         json_plan = normalize_plan(json_path, scope=self.scope())
-        self.assertEqual(json_plan["schema_version"], "5.0")
+        self.assertEqual(json_plan["schema_version"], "6.0")
         self.assertTrue(json_plan["events"][0]["claims"])
 
         yaml_path = self.root / "plan.yaml"

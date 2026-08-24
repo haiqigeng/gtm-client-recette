@@ -579,7 +579,12 @@ class QualityAndAnomalyTests(unittest.TestCase):
             "acquisition": {"source": "google"},
         }
         harness = V5Harness(self.root, events=[event])
-        action = harness.begin(fresh_context_required=True)
+        isolated_capability = harness.capability()
+        isolated_capability["runtime"]["profile_mode"] = "isolated"
+        action = harness.begin(
+            fresh_context_required=True,
+            first_bundle_updates={"capability": isolated_capability},
+        )
         evidence_refs = list(harness.last_begin_result["captures"])
         payload = {"event": "view_item"}
         harness.commit(

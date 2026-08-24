@@ -1,6 +1,6 @@
 # Contributing
 
-The source version is **v5.2.0**. Use synthetic fixtures only. Never commit
+The source version is **v6.0.0**. Use synthetic fixtures only. Never commit
 client plans, domains, container or destination IDs, browser traces,
 screenshots, reports, credentials, tokens, form data, or run artifacts.
 
@@ -25,6 +25,9 @@ screenshots, reports, credentials, tokens, form data, or run artifacts.
   deterministic renderer owns all statuses.
 - Keep behavior signatures as lean coverage evidence, not a large ontology.
 - Optimize measured browser/navigation/Preview work, not by skipping proof.
+- Keep Playwright MCP headed Edge as the default runtime, `next`/`complete` as the normal
+  loop, one real interaction per action, and existing-window attachment as an explicit
+  fallback. Do not add coordinate or guessed-tool recovery.
 - Keep server-side certification outside this skill.
 
 Every verdict or workflow change needs a focused synthetic regression that
@@ -39,12 +42,14 @@ python -m ruff check --no-cache scripts tests
 python -m ruff format --check scripts tests
 python -m unittest discover -s tests -v
 python -B tests/run_browser_helpers.py
-python -B scripts/check_release.py --tag v5.2.0
+python -B scripts/check_release.py
+# Release validation also needs a sanitized successful live pilot:
+python -B scripts/check_release.py --tag v6.0.0 --live-pilot C:\path\to\live-pilot.json
 ```
 
 ## Versioning
 
-Use semantic tags and archive names. Store `5.2.0` in `pyproject.toml`, tag it
-as `v5.2.0`, and package it as `gtm-client-recette-v5.2.0.zip`. Increment major
+Use semantic tags and archive names. Store `6.0.0` in `pyproject.toml`, tag it
+as `v6.0.0`, and package it as `gtm-client-recette-v6.0.0.zip`. Increment major
 for incompatible architecture/contracts, minor for compatible capability, and
 patch for compatible corrections.

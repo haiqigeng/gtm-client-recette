@@ -561,6 +561,7 @@ def _normalize_object(value: Any, label: str) -> tuple[dict[str, Any], dict[str,
         "network_active",
         "data_layer_cursor",
         "preview_epoch",
+        "preview_event_index",
         "preview_reconnected",
         "previous_preview_epoch",
         "container_ids",
@@ -608,7 +609,7 @@ def _normalize_capability(value: Any) -> tuple[dict[str, Any], dict[str, Any]]:
     if not isinstance(surfaces, dict):
         raise StateError("Capability capture needs a surfaces object.")
     allowed = {True, False, "unknown"}
-    required = {
+    known_surfaces = {
         "stable_target_identity",
         "document_start_injection",
         "network_deltas",
@@ -619,23 +620,51 @@ def _normalize_capability(value: Any) -> tuple[dict[str, Any], dict[str, Any]]:
         "preview_variables",
         "preview_consent",
     }
+    required = {"stable_target_identity", "network_deltas", "preview_events"}
     missing = sorted(required - set(surfaces))
+    unknown = sorted(set(surfaces) - known_surfaces)
     invalid = sorted(key for key, item in surfaces.items() if item not in allowed)
-    if missing or invalid:
+    if missing or unknown or invalid:
         details = []
         if missing:
             details.append("missing " + ", ".join(missing))
+        if unknown:
+            details.append("unknown " + ", ".join(unknown))
         if invalid:
             details.append("invalid " + ", ".join(invalid))
         raise StateError("Capability profile is incomplete: " + "; ".join(details))
+    runtime = value.get("runtime")
+    if not isinstance(runtime, dict):
+        raise StateError("Capability capture needs a runtime self-check object.")
+    provider = str(runtime.get("provider") or "").strip().casefold()
+    if provider not in {"playwright_mcp", "existing_chromium"}:
+        raise StateError("Capability runtime provider is unsupported.")
+    if str(runtime.get("self_check") or "").upper() != "PASS":
+        raise StateError("Browser runtime self-check did not pass; fail before opening an action.")
+    if not str(runtime.get("browser_channel") or "").strip():
+        raise StateError("Capability runtime needs a browser_channel.")
+    if str(runtime.get("profile_mode") or "").casefold() not in {"persistent", "isolated"}:
+        raise StateError("Capability runtime profile_mode must be persistent or isolated.")
+    if not isinstance(runtime.get("headed"), bool):
+        raise StateError("Capability runtime needs an explicit headed boolean.")
+    if provider == "playwright_mcp" and not str(runtime.get("mcp_version") or "").strip():
+        raise StateError("Playwright MCP runtime needs the verified MCP version.")
+    normalized_surfaces = {key: surfaces.get(key, "unknown") for key in sorted(known_surfaces)}
+    milestones = value.get("milestones", {})
+    if not isinstance(milestones, dict):
+        raise StateError("Capability milestones must be an object when supplied.")
     normalized = {
         **value,
         "browser_family": str(value.get("browser_family") or "chromium"),
-        "surfaces": {key: surfaces[key] for key in sorted(surfaces)},
+        "runtime": {**runtime, "provider": provider},
+        "surfaces": normalized_surfaces,
+        "milestones": milestones,
     }
     return normalized, {
         "browser_family": normalized["browser_family"],
+        "runtime": normalized["runtime"],
         "surfaces": normalized["surfaces"],
+        "milestones": milestones,
         "observed_at": value.get("observed_at"),
     }
 

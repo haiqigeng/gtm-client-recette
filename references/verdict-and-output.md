@@ -66,7 +66,8 @@ claims that depend on it.
   event, tag, logical hit and transport attempt. Never assign an unbound row merely
   because an action is currently open.
 - Reject capture timestamps that predate the action instead of trusting a newly supplied
-  action ID. Keep between-action unbound deltas in the continuous anomaly stream.
+  action ID. Start `next` before the Preview connection's first measured load; keep
+  between-action unbound deltas in the continuous anomaly stream.
 - For a proved navigation/reload, the before page may belong to the old document while
   occurrence evidence belongs to the explicitly rebound new document. Mixed post-action
   documents or an unbound transition remain `BLOCKED`.
@@ -95,12 +96,16 @@ Roll-up precedence is `FAIL` > `BLOCKED` > `REVIEW` > `PENDING` > `PASS` >
 Technical delivery is visible separately but cannot override reality, behavior,
 confidence or coverage.
 
-## Immediate pulse and canonical feedback
+## One-pass canonical feedback
 
-`commit` emits a compact pulse with action outcome, every currently applicable
-operational row/status, notable anomalies, and what still awaits Preview or scenario
-closure. It is deliberately
-provisional and cannot contain a certified pass.
+`complete` is the one-pass checkpoint. It commits action deltas, ingests the one bounded
+Preview delta, builds the causal model once, and emits canonical feedback immediately.
+If it is interrupted after the commit record, rerunning the same action ID and bundle
+resumes synchronization without another browser action.
+
+The continuous delta may begin at the prior committed boundary. Timestamped rows before
+the current action stay unbound and can revise the immediately preceding event in this
+same model pass; they are never relabelled as current-action evidence.
 
 When an event closes, render two levels from the same canonical result:
 
@@ -114,7 +119,9 @@ anchor, anomaly, safety or gate), status, observed and expected detail, `Check n
 stable evidence IDs. Identical passing rows may be grouped; all differing and non-pass
 rows remain scenario-specific. No event may move on without making every applicable
 layer status visible; conditional layers remain explicit through applicability or
-`NOT_APPLICABLE` reasoning rather than silent omission.
+`NOT_APPLICABLE` reasoning rather than silent omission. An action-card violation is an
+operator-protocol `BLOCKED` row: useful client evidence remains, no client `FAIL` is
+invented, and no automatic repeat starts.
 
 Feedback lists concerned tags, occurrence/count, tested values/signatures, plan gaps,
 limitations and exact retest actions. Late journey anomalies may amend an earlier event.

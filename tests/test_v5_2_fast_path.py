@@ -73,19 +73,25 @@ class FastPathRegressionTests(unittest.TestCase):
         self.assertEqual(media.plan["scope"]["tag_scope"], ["Meta Pixel"])
         self.assertEqual(media.plan["events"][0]["tags"][0]["tag_id"], "Meta-lead")
 
-    def test_one_action_per_scenario_requires_an_explicit_retest_reason(self) -> None:
+    def test_one_action_per_scenario_requires_a_structured_retest_basis(self) -> None:
         harness = V5Harness(self.root)
         action = harness.begin()
         harness.commit(action, [{"event": "view_item"}])
-        with self.assertRaisesRegex(StateError, "retest reason"):
+        with self.assertRaisesRegex(StateError, "structured retest basis"):
             harness.begin()
         distinct = harness.begin(scenario_id="alternate-product")
         self.assertTrue(distinct.startswith("A-"))
 
         other = V5Harness(self.root / "retest")
         first = other.begin()
-        other.commit(first, [{"event": "view_item"}])
-        repeated = other.begin(retest_reason="Corrected a proven capture defect")
+        committed = other.commit(first, [{"event": "view_item"}])
+        repeated = other.begin(
+            retest_basis={
+                "type": "EVIDENCE_DEFECT",
+                "record_id": committed["commit"]["record_id"],
+                "reason": "Corrected a proven capture defect",
+            }
+        )
         self.assertTrue(repeated.startswith("A-"))
 
     def test_phase_bundles_reject_repeated_handshake_and_stale_after_state(self) -> None:
@@ -134,8 +140,10 @@ class FastPathRegressionTests(unittest.TestCase):
         harness = V5Harness(self.root, events=[event])
         payload = {"event": "view_item", "ecommerce": {"currency": "EUR"}}
         action = harness.begin()
-        committed = harness.commit(action, [payload])
-        self.assertTrue(committed["pulse"]["provisional_events"][0]["operational_rows"])
+        harness.commit(action, [payload])
+        self.assertFalse(
+            any(row["kind"] == "EVENT_FEEDBACK_ISSUED" for row in read_stream(harness.run)[0])
+        )
 
         preview = harness.preview([payload], action_id=action)
         source = preview["events"][0]
