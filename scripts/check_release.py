@@ -9,8 +9,6 @@ import re
 import tomllib
 from pathlib import Path
 
-from core.constants import PLAYWRIGHT_MCP_VERSION
-
 ROOT = Path(__file__).resolve().parents[1]
 SEMVER = re.compile(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)")
 REFERENCE_LINK = re.compile(r"\((references/[^)]+\.md)\)")
@@ -118,13 +116,16 @@ def validate_live_pilot(path: Path) -> list[str]:
         "browser_channel": "msedge",
         "profile_mode": "persistent",
         "headed": True,
-        "self_check": "PASS",
     }
     for key, expected in expected_runtime.items():
         if runtime.get(key) != expected:
             errors.append(f"live pilot runtime {key} must be {expected!r}")
-    if runtime.get("mcp_version") != PLAYWRIGHT_MCP_VERSION:
-        errors.append(f"live pilot Playwright MCP version must be {PLAYWRIGHT_MCP_VERSION!r}")
+    if runtime.get("self_check") is not None and runtime.get("self_check") != "PASS":
+        errors.append("live pilot runtime self_check must be 'PASS' when supplied")
+    surfaces = value.get("capabilities", {})
+    for key in ("stable_target_identity", "network_deltas", "preview_events"):
+        if surfaces.get(key) is not True:
+            errors.append(f"live pilot capability {key} must be true")
     latency = value.get("latency_seconds", {})
     for key, limit in (("first_action", 120), ("first_feedback", 300)):
         observed = latency.get(key)

@@ -1,6 +1,6 @@
 # Contributing
 
-The source version is **v6.0.0**. Use synthetic fixtures only. Never commit
+The source version is **v6.0.1**. Use synthetic fixtures only. Never commit
 client plans, domains, container or destination IDs, browser traces,
 screenshots, reports, credentials, tokens, form data, or run artifacts.
 
@@ -44,12 +44,12 @@ python -m unittest discover -s tests -v
 python -B tests/run_browser_helpers.py
 python -B scripts/check_release.py
 # Release validation also needs a sanitized successful live pilot:
-python -B scripts/check_release.py --tag v6.0.0 --live-pilot C:\path\to\live-pilot.json
+python -B scripts/check_release.py --tag v6.0.1 --live-pilot C:\path\to\live-pilot.json
 ```
 
 ## Versioning
 
-Use semantic tags and archive names. Store `6.0.0` in `pyproject.toml`, tag it
-as `v6.0.0`, and package it as `gtm-client-recette-v6.0.0.zip`. Increment major
+Use semantic tags and archive names. Store `6.0.1` in `pyproject.toml`, tag it
+as `v6.0.1`, and package it as `gtm-client-recette-v6.0.1.zip`. Increment major
 for incompatible architecture/contracts, minor for compatible capability, and
 patch for compatible corrections.

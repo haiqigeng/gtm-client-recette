@@ -628,7 +628,10 @@ class QualityAndAnomalyTests(unittest.TestCase):
             action_id=action,
             coverage=wrong.coverage("E-view_item", [action]),
         )["events"][0]
-        self.assertEqual(wrong_result["domains"]["reality"]["status"], "FAIL")
+        self.assertEqual(wrong_result["domains"]["reality"]["status"], "BLOCKED")
+        self.assertEqual(wrong_result["domains"]["source"]["status"], "BLOCKED")
+        self.assertEqual(wrong_result["domains"]["gtm"]["status"], "BLOCKED")
+        self.assertEqual(wrong_result["domains"]["delivery"]["status"], "BLOCKED")
 
         approved = V5Harness(self.root / "approved", scope={"allow_container_override": True})
         action = approved.begin(

@@ -14,11 +14,13 @@ or more typed claims:
 
 Tabular intake reports rows seen, compiled, inherited from a contiguous event identity,
 and intentionally ignored. Merged/fill-down event cells are retained only inside one
-contiguous table; a blank separator resets that context. Orphan or ambiguous requirement
-rows stop intake before browser work. Malformed predicates become event-local compile
-failures with source coordinates, so a later unsupported rule cannot block the first
-valid event. Do not silently reinterpret a rule or invent missing tag scope. A
-source-only/state-only claim remains source-oriented. For ordinary GA4 claims, the same
+contiguous flat table; a blank separator resets that identity. In a recognized sectioned
+variable sheet, blank rows do not terminate the variable table. XLSX intake classifies
+every sheet and reconciles index events with requirement sheets. Index-only or malformed
+later events become localized non-executable events; orphan/ambiguous rows still stop
+intake. Preserve exact case for valid machine event/field identifiers. Do not silently
+reinterpret a rule or invent missing tag scope. A source-only/state-only claim remains
+source-oriented. For ordinary GA4 claims, the same
 destination-applicable plan predicate is automatically checked at the exact API Call or
 proven call-time source,
 Tag Assistant accumulated Data Layer state, resolved Variables, effective tag mapping,
@@ -68,6 +70,9 @@ claims that depend on it.
 - Reject capture timestamps that predate the action instead of trusting a newly supplied
   action ID. Start `next` before the Preview connection's first measured load; keep
   between-action unbound deltas in the continuous anomaly stream.
+- Consume Preview by epoch/index cursor. One completion may contain only indexes after
+  the frozen boundary; a new epoch must start at zero with a matching rebound identity.
+  This prevents historical session scans from becoming current evidence.
 - For a proved navigation/reload, the before page may belong to the old document while
   occurrence evidence belongs to the explicitly rebound new document. Mixed post-action
   documents or an unbound transition remain `BLOCKED`.
@@ -81,6 +86,12 @@ claims that depend on it.
 - Unplanned source/state pushes are inspected between action boundaries. Flag only
   material unexpected, duplicate, premature, delayed, wrong-context or contaminating
   behavior; routine lifecycle/state noise can be classified without failing the event.
+- When ordinary consent is accidentally denied, tag/delivery rows are setup `BLOCKED`
+  with an instruction to accept the CMP; do not report client failures from that context.
+  An explicitly denied-consent scenario passes suppression only when fired/non-fired and
+  request windows are complete. Runtime/request values then become `NOT_APPLICABLE`.
+- A wrong or unattributable origin/container/Preview binding blocks every dependent
+  source/GTM/delivery/behavior claim. It does not manufacture downstream client failures.
 
 ## Status and roll-up
 
@@ -107,24 +118,31 @@ The continuous delta may begin at the prior committed boundary. Timestamped rows
 the current action stay unbound and can revise the immediately preceding event in this
 same model pass; they are never relabelled as current-action evidence.
 
-When an event closes, render two levels from the same canonical result:
+After every completed action, render two levels from the same canonical result even when
+scenario coverage remains pending or contains a closure error:
 
 1. one compact row per material scenario/signature, then a six-domain event summary;
-2. operational rows for every applicable proof target.
+2. compact operational-layer rows, with detailed proof-target rows retained in canonical
+   JSON/XLSX.
 
-Each operational row contains scenario, domain, target (for example DataLayer API, GTM
-Preview event, accumulated Data Layer state, resolved variable, named tag
-configuration/effective mapping/firing/runtime, browser request/destination, reality
-anchor, anomaly, safety or gate), status, observed and expected detail, `Check next`, and
-stable evidence IDs. Identical passing rows may be grouped; all differing and non-pass
-rows remain scenario-specific. No event may move on without making every applicable
-layer status visible; conditional layers remain explicit through applicability or
-`NOT_APPLICABLE` reasoning rather than silent omission. An action-card violation is an
+Each compact layer row shows status, passed/total checks, concise non-pass
+observed-versus-expected exceptions, `Check next`, and stable evidence IDs. Detailed rows
+retain scenario, domain, exact target (for example DataLayer API, GTM Preview event,
+accumulated Data Layer state, resolved variable, named tag configuration/effective
+mapping/firing/runtime, browser request/destination, reality anchor, anomaly, safety or
+gate), status, observed, expected, reason and evidence. Identical passing rows may be
+grouped; all differing and non-pass rows remain scenario-specific. Conditional layers
+remain explicit through applicability or `NOT_APPLICABLE` reasoning rather than silent
+omission. An action-card violation is an
 operator-protocol `BLOCKED` row: useful client evidence remains, no client `FAIL` is
 invented, and no automatic repeat starts.
 
 Feedback lists concerned tags, occurrence/count, tested values/signatures, plan gaps,
 limitations and exact retest actions. Late journey anomalies may amend an earlier event.
+An incomplete coverage annotation is persisted and shown as `PENDING`/`BLOCKED`; it does
+not roll back machine evidence or suppress immediate feedback. A committed
+evidence-defect retest supersedes its referenced bad action only when the event slice and
+scenario are identical; user-request retests do not erase prior evidence.
 
 ## Finalization and reports
 

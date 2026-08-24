@@ -7,14 +7,13 @@ from datetime import UTC, datetime
 from typing import Any
 
 SCHEMA_VERSION = "6.0"
-PLAYWRIGHT_MCP_VERSION = "0.0.79"
 
 STATUSES = frozenset({"PASS", "FAIL", "BLOCKED", "REVIEW", "NOT_APPLICABLE", "PENDING"})
 STATUS_PRIORITY = {
     "NOT_APPLICABLE": 0,
     "PASS": 1,
-    "REVIEW": 2,
-    "PENDING": 3,
+    "PENDING": 2,
+    "REVIEW": 3,
     "BLOCKED": 4,
     "FAIL": 5,
 }

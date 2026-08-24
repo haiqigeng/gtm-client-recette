@@ -25,7 +25,6 @@ from client_side_rules import valid_path
 from .constants import (
     ARCHETYPE_DOMAIN,
     CLAIM_ARCHETYPES,
-    PLAYWRIGHT_MCP_VERSION,
     SCHEMA_VERSION,
     utc_now,
 )
@@ -305,17 +304,22 @@ def _canonical_event_name(value: Any) -> str:
     if not text:
         return ""
     if re.fullmatch(r"[A-Za-z0-9_.-]+", text):
-        return text.casefold()
+        return text
     return re.sub(r"[^a-z0-9]+", "_", text.casefold()).strip("_")
 
 
 def _canonical_field_name(value: Any) -> str:
-    text = unicodedata.normalize("NFKD", str(value or ""))
+    original = " ".join(str(value or "").split())
+    if valid_path(original):
+        return original
+    text = unicodedata.normalize("NFKD", original)
     text = "".join(character for character in text if not unicodedata.combining(character))
     return re.sub(r"[^a-zA-Z0-9_]+", "_", text).strip("_").casefold()
 
 
 def _section_field_path(event_name: str, field_name: str) -> str:
+    if "." in field_name or "[" in field_name:
+        return field_name
     if event_name in GA4_ECOMMERCE_EVENTS:
         if field_name in GA4_ITEM_FIELDS:
             return f"ecommerce.items[].{field_name}"
@@ -417,7 +421,11 @@ def _sectioned_rows(
     if event_row_index is None:
         return None
     event_label = " ".join(str(rows[event_row_index][event_column]).split())
-    state_only = _header_key(event_label) in {"core_datalayer", "core_data_layer", "core_state"}
+    state_only = _header_key(event_label) in {
+        "core_datalayer",
+        "core_data_layer",
+        "core_state",
+    } or _header_key(sheet_title) in {"core_datalayer", "core_data_layer", "core_state"}
     event_name = "" if state_only else _canonical_event_name(event_label)
 
     variable_header_index = None
@@ -451,15 +459,35 @@ def _sectioned_rows(
         field_column = column_map["field_path"]
         raw_field = row[field_column] if field_column < len(row) else None
         if not _has_cell_value(raw_field):
-            if output:
-                break
+            if any(_has_cell_value(value) for value in row):
+                source = f"{sheet_title}!{row_index + 1}"
+                reason = (
+                    "code_example"
+                    if any(
+                        re.search(
+                            r"(?:data\s*layer\s*\.\s*push|window\s*\.\s*data\s*layer|<script|```)",
+                            str(value),
+                            re.I,
+                        )
+                        for value in row
+                        if _has_cell_value(value)
+                    )
+                    else "non_requirement_row"
+                )
+                ignored.append({"source": source, "reason": reason})
             continue
         normalized_field = _header_key(raw_field)
         if normalized_field in SECTION_STOP_MARKERS:
             break
         source = f"{sheet_title}!{row_index + 1}"
-        if re.search(
-            r"(?:data\s*layer\s*\.\s*push|window\s*\.\s*data\s*layer|<script)", str(raw_field), re.I
+        if any(
+            re.search(
+                r"(?:data\s*layer\s*\.\s*push|window\s*\.\s*data\s*layer|<script|```)",
+                str(value),
+                re.I,
+            )
+            for value in row
+            if _has_cell_value(value)
         ):
             ignored.append({"source": source, "reason": "code_example"})
             continue
@@ -529,6 +557,52 @@ def _sectioned_rows(
         "ignored": ignored,
         "layout": "event_metadata_plus_variable_table",
     }
+
+
+def _index_event_names(rows: list[tuple[Any, ...]]) -> list[str]:
+    """Read only a simple event-name index; never interpret prose as requirements."""
+    for row_index, row in enumerate(rows[:60]):
+        mapping = _headers(list(row))
+        event_columns = [index for index, name in mapping.items() if name == "event_name"]
+        if not event_columns:
+            continue
+        if any(name in TABULAR_REQUIREMENT_FIELDS for name in mapping.values()):
+            return []
+        column = event_columns[0]
+        output: list[str] = []
+        for candidate in rows[row_index + 1 :]:
+            value = candidate[column] if column < len(candidate) else None
+            if _has_cell_value(value):
+                normalized = " ".join(str(value).split())
+                if normalized not in output:
+                    output.append(normalized)
+        return output
+    return []
+
+
+def _sheet_kind(rows: list[tuple[Any, ...]], title: str) -> tuple[str, str, list[str]]:
+    nonempty = [row for row in rows if any(_has_cell_value(value) for value in row)]
+    if not nonempty:
+        return "empty", "sheet_has_no_values", []
+    index_events = _index_event_names(rows)
+    if index_events:
+        return "index", "simple_event_index", index_events
+    searchable = " ".join(str(value) for row in nonempty[:80] for value in row if value)
+    title_key = _header_key(title)
+    if re.search(r"(?:data\s*layer\s*\.\s*push|<script|```)", searchable, re.I) or any(
+        token in title_key for token in ("code", "example", "exemple")
+    ):
+        return "example", "code_or_example_content", []
+    if any(
+        token in title_key
+        for token in ("reference", "referentiel", "catalog", "dimension", "category", "values")
+    ):
+        return "reference", "reference_content_not_requirements", []
+    return "ignored", "unrecognized_nonempty_layout", []
+
+
+def _identity_key(value: Any) -> str:
+    return _header_key(value)
 
 
 def _tabular_rows(
@@ -610,6 +684,8 @@ def _rows_from_xlsx(path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     output: list[dict[str, Any]] = []
     tables: list[str] = []
     ignored_sheets: list[str] = []
+    sheet_manifest: list[dict[str, Any]] = []
+    indexed_events: list[str] = []
     diagnostics = {
         "rows_seen": 0,
         "requirements_compiled": 0,
@@ -624,7 +700,20 @@ def _rows_from_xlsx(path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
             if header is None:
                 sectioned = _sectioned_rows(rows, sheet.title)
                 if sectioned is None:
+                    classification, reason, events = _sheet_kind(rows, sheet.title)
                     ignored_sheets.append(sheet.title)
+                    indexed_events.extend(event for event in events if event not in indexed_events)
+                    sheet_manifest.append(
+                        {
+                            "sheet": sheet.title,
+                            "classification": classification,
+                            "reason": reason,
+                            "nonempty_rows": sum(
+                                any(_has_cell_value(value) for value in row) for row in rows
+                            ),
+                            "indexed_events": events,
+                        }
+                    )
                     continue
                 table_rows, table_diagnostics = sectioned
             else:
@@ -636,6 +725,17 @@ def _rows_from_xlsx(path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
                     lambda excel_row, title=sheet.title: f"{title}!{excel_row}",
                 )
             tables.append(sheet.title)
+            sheet_manifest.append(
+                {
+                    "sheet": sheet.title,
+                    "classification": "requirements",
+                    "reason": table_diagnostics.get("layout", "recognized_requirement_table"),
+                    "nonempty_rows": sum(
+                        any(_has_cell_value(value) for value in row) for row in rows
+                    ),
+                    "requirements_compiled": len(table_rows),
+                }
+            )
             output.extend(table_rows)
             for key in (
                 "rows_seen",
@@ -651,10 +751,37 @@ def _rows_from_xlsx(path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         raise StateError(
             "No worksheet contained an event column plus a requirement, field, or claim column."
         )
+    compiled_identities = {
+        _identity_key(value)
+        for row in output
+        for value in (row.get("event_name"), row.get("event_label"), row.get("event_id"))
+        if _has_cell_value(value)
+    }
+    indexed_by_key = {_identity_key(value): value for value in indexed_events}
+    index_only = [value for key, value in indexed_by_key.items() if key not in compiled_identities]
+    detail_only = sorted(
+        {
+            str(row.get("event_label") or row.get("event_name") or row.get("event_id"))
+            for row in output
+            if indexed_events
+            and not any(
+                _identity_key(value) in indexed_by_key
+                for value in (row.get("event_name"), row.get("event_label"), row.get("event_id"))
+                if _has_cell_value(value)
+            )
+        }
+    )
     return output, {
         "format": "xlsx",
         "tables": tables,
         "ignored_sheets": ignored_sheets,
+        "sheet_manifest": sheet_manifest,
+        "reconciliation": {
+            "indexed_events": indexed_events,
+            "index_only_events": index_only,
+            "detail_only_events": detail_only,
+            "status": "REVIEW" if index_only or detail_only else "PASS",
+        },
         **diagnostics,
     }
 
@@ -796,9 +923,10 @@ def _normalize_scope(scope: dict[str, Any] | None) -> dict[str, Any]:
     origins = value.get("origins", [])
     if isinstance(origins, str):
         origins = [origins]
-    if not isinstance(origins, list) or not all(str(item).strip() for item in origins):
-        raise StateError("Approved scope needs at least one non-empty origin.")
-    value["origins"] = [str(item).strip() for item in origins]
+    if not isinstance(origins, list):
+        raise StateError("Scope origins must be an array when supplied.")
+    value["origins"] = [str(item).strip() for item in origins if str(item).strip()]
+    value["origin_mode"] = "explicit" if value["origins"] else "prepared_runtime"
     for key in ("expected_container", "destination", "tag_scope"):
         item = value.get(key, [])
         if isinstance(item, str):
@@ -892,7 +1020,7 @@ def _normalize_scope(scope: dict[str, Any] | None) -> dict[str, Any]:
         "explicit"
         if normalized_destinations
         else "runtime_discovered"
-        if destination_categories
+        if destination_categories or normalized_tag_scope
         else "plan_declared"
     )
     value["destination_scope_declared"] = declared_destinations
@@ -932,8 +1060,6 @@ def _normalize_scope(scope: dict[str, Any] | None) -> dict[str, Any]:
     value.setdefault("browser_channel", "msedge" if runtime == "playwright_mcp" else "chromium")
     value.setdefault("browser_profile_mode", "persistent")
     value.setdefault("browser_headed", True)
-    if runtime == "playwright_mcp":
-        value.setdefault("playwright_mcp_version", PLAYWRIGHT_MCP_VERSION)
     return value
 
 
@@ -1749,6 +1875,7 @@ def _compile_event(
     source_only = raw.get("source_only") is True or not scope.get("certify_tags", True)
     errors: list[str] = [str(value) for value in raw.get("_input_errors", [])]
     builder = _ClaimBuilder(event_id)
+    builder.warnings.extend(str(value) for value in raw.get("_input_warnings", []))
     journey = (
         raw.get("journey")
         if isinstance(raw.get("journey"), dict)
@@ -1770,6 +1897,7 @@ def _compile_event(
         and scope.get("browser_send_required") is True
         and scope.get("destination_scope_declared") is True
         and not destinations
+        and not scope.get("tag_scope")
     ):
         errors.append(
             "Plan-declared destination scope has no exact event destination; normalize the "
@@ -1999,6 +2127,57 @@ def normalize_plan(
     value, source_kind, digest = _load_source(path)
     normalized_scope = _normalize_scope(scope)
     inputs = _event_inputs(value)
+    normalization = value.get("_normalization", {})
+    reconciliation = (
+        normalization.get("reconciliation", {}) if isinstance(normalization, dict) else {}
+    )
+    detail_only = {
+        _identity_key(item)
+        for item in reconciliation.get("detail_only_events", [])
+        if str(item).strip()
+    }
+    reconciled_inputs: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
+    for event, requirements in inputs:
+        raw = dict(event)
+        identities = {
+            _identity_key(value)
+            for value in (
+                raw.get("event_id"),
+                raw.get("event_group_id"),
+                raw.get("event_name"),
+                raw.get("event_label"),
+            )
+            if str(value or "").strip()
+        }
+        if detail_only.intersection(identities):
+            raw.setdefault("_input_warnings", []).append(
+                "The event has a requirement sheet/table but is absent from the workbook event index."
+            )
+        reconciled_inputs.append((raw, requirements))
+    for name in reconciliation.get("index_only_events", []):
+        label = " ".join(str(name).split())
+        if not label:
+            continue
+        state_only = _identity_key(label) in {
+            "core_datalayer",
+            "core_data_layer",
+            "core_state",
+        }
+        reconciled_inputs.append(
+            (
+                {
+                    "event_id": label,
+                    "event_name": label,
+                    "event_label": label,
+                    "mode": "state_only" if state_only else "named_event",
+                    "_input_errors": [
+                        "The event is listed in the workbook index but has no requirement sheet/table."
+                    ],
+                },
+                [],
+            )
+        )
+    inputs = reconciled_inputs
     seen_ids: dict[str, int] = {}
     prepared_inputs = []
     for event, requirements in inputs:
@@ -2041,12 +2220,26 @@ def normalize_plan(
         normalized_scope.get("browser_send_required") is True
         and normalized_scope.get("destination_scope_declared") is True
         and not any(event.get("destinations") for event in events)
+        and not normalized_scope.get("tag_scope")
     ):
         raise StateError(
             "The broad plan-declared destination scope resolves to no exact destination. "
             "Supply accepted measurement/conversion destinations or omit destination "
             "certification until they are confirmed."
         )
+    if not normalized_scope.get("origins"):
+        inferred_origins = []
+        for event in events:
+            candidate = str(event.get("journey", {}).get("url") or "").strip()
+            if not candidate:
+                continue
+            match = re.match(r"^(https?://[^/]+)", candidate, re.I)
+            if match and match.group(1) not in inferred_origins:
+                inferred_origins.append(match.group(1))
+        if inferred_origins:
+            normalized_scope["origins"] = inferred_origins
+            normalized_scope["origin_mode"] = "plan_inferred"
+
     claim_count = sum(event["claim_count"] for event in events)
     requirement_count = sum(len(requirements) for _, requirements in inputs)
     source_details = {"kind": source_kind, "path": str(path), "sha256": digest}

@@ -457,8 +457,17 @@ def _normalize_preview(value: Any) -> tuple[dict[str, Any], dict[str, Any]]:
     if not isinstance(value, dict) or not isinstance(value.get("events"), list):
         raise StateError("Preview capture must contain an events array.")
     default_epoch = value.get("epoch")
+    if not default_epoch:
+        raise StateError("Preview capture needs one connection epoch.")
+    try:
+        cursor_start = int(value.get("cursor_start"))
+    except (TypeError, ValueError) as error:
+        raise StateError("Preview capture needs a numeric cursor_start boundary.") from error
+    if cursor_start < 0:
+        raise StateError("Preview cursor_start cannot be negative.")
     summary = []
     identities = set()
+    numeric_indexes: list[int] = []
     for position, event in enumerate(value["events"], start=1):
         if not isinstance(event, dict):
             raise StateError(f"Preview event {position} is not an object.")
@@ -466,6 +475,15 @@ def _normalize_preview(value: Any) -> tuple[dict[str, Any], dict[str, Any]]:
         epoch = event.get("epoch", default_epoch)
         if index is None or not epoch:
             raise StateError("Every Preview event needs an index and connection epoch.")
+        if str(epoch) != str(default_epoch):
+            raise StateError("One Preview delta cannot mix connection epochs.")
+        try:
+            numeric_index = int(index)
+        except (TypeError, ValueError) as error:
+            raise StateError("Preview event indexes must be numeric.") from error
+        if numeric_index <= cursor_start:
+            raise StateError("Preview delta contains a historical index at or before cursor_start.")
+        numeric_indexes.append(numeric_index)
         identity = (str(epoch), str(index))
         if identity in identities:
             raise StateError("Preview indexes must be unique within a connection epoch.")
@@ -506,11 +524,22 @@ def _normalize_preview(value: Any) -> tuple[dict[str, Any], dict[str, Any]]:
                 "completeness": event.get("completeness", {}),
             }
         )
-    return value, {
+    try:
+        cursor_end = int(value.get("cursor_end", max(numeric_indexes, default=cursor_start)))
+    except (TypeError, ValueError) as error:
+        raise StateError("Preview capture cursor_end must be numeric.") from error
+    expected_end = max(numeric_indexes, default=cursor_start)
+    if cursor_end != expected_end:
+        raise StateError("Preview cursor_end must equal the last captured delta index.")
+    normalized = {**value, "cursor_start": cursor_start, "cursor_end": cursor_end}
+    return normalized, {
         "event_count": len(summary),
         "events": summary,
         "complete": value.get("complete") is True,
         "action_id": value.get("action_id"),
+        "epoch": str(default_epoch),
+        "cursor_start": cursor_start,
+        "cursor_end": cursor_end,
         "preview_session_id": value.get("preview_session_id"),
         "container_ids": value.get("container_ids", []),
         "workspace_version": value.get("workspace_version"),
@@ -639,16 +668,14 @@ def _normalize_capability(value: Any) -> tuple[dict[str, Any], dict[str, Any]]:
     provider = str(runtime.get("provider") or "").strip().casefold()
     if provider not in {"playwright_mcp", "existing_chromium"}:
         raise StateError("Capability runtime provider is unsupported.")
-    if str(runtime.get("self_check") or "").upper() != "PASS":
-        raise StateError("Browser runtime self-check did not pass; fail before opening an action.")
+    if runtime.get("self_check") is not None and str(runtime.get("self_check")).upper() != "PASS":
+        raise StateError("Browser runtime capability probe did not pass.")
     if not str(runtime.get("browser_channel") or "").strip():
         raise StateError("Capability runtime needs a browser_channel.")
     if str(runtime.get("profile_mode") or "").casefold() not in {"persistent", "isolated"}:
         raise StateError("Capability runtime profile_mode must be persistent or isolated.")
     if not isinstance(runtime.get("headed"), bool):
         raise StateError("Capability runtime needs an explicit headed boolean.")
-    if provider == "playwright_mcp" and not str(runtime.get("mcp_version") or "").strip():
-        raise StateError("Playwright MCP runtime needs the verified MCP version.")
     normalized_surfaces = {key: surfaces.get(key, "unknown") for key in sorted(known_surfaces)}
     milestones = value.get("milestones", {})
     if not isinstance(milestones, dict):

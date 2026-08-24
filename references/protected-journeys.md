@@ -2,8 +2,10 @@
 
 ## Ordinary forms
 
-Within the approved scope, use synthetic data and the ordinary visible user journey.
-Test applicable validation failure and approved non-production success states. Capture:
+Within the approved test scope, use synthetic data and the ordinary visible user journey.
+Ordinary navigation, field entry, validation, and form submission are authorized by the
+skill invocation; do not pause for a second permission question. Pause only when the
+submission reaches a protected or materially consequential gate. Capture:
 
 - before-state and enabled/visible controls;
 - field entry, validation and submit interaction;
@@ -21,15 +23,27 @@ with personal or client-sensitive data.
 
 ## Consent
 
-Activate consent checks from both explicit plan requirements and observed capability:
-CMP UI, Consent Mode events/state, consent fields, consent-controlled tags or requests,
-or a known consent API. Treat materially different untouched/reject/accept/granular
-states as scenarios when applicable.
+For an ordinary tracking scenario, inspect the CMP and accept it before the measured
+interaction when consent is not already granted. Do not wait for the user to notice the
+banner: otherwise expected tags may be suppressed and every downstream layer can fail
+for the wrong reason. If consent setup used an unmeasured page, authorize only one Core
+load afterward.
+
+Leave consent untouched, reject it, withdraw it, or select granular choices only when
+that scenario is explicitly requested or materially discovered. Activate consent checks
+from explicit plan requirements and observed behavior: CMP UI, Consent Mode events/state,
+consent fields, consent-controlled tags/requests, or a known consent API.
 
 Bind consent evidence to the action and scenario that produced it. A warm consent state
 from another locale/session cannot certify the current branch. Keep natural CMP behavior
 separate from any explicitly authorized override. An override tests only the override
 path and cannot erase a natural-path defect.
+
+If an ordinary action was accidentally captured while required consent remained denied,
+classify dependent firing/delivery rows as setup `BLOCKED`, accept consent, and use one
+structured retest. Do not blame the client implementation. In an explicitly denied
+scenario, suppression passes only with complete fired/non-fired and network windows; an
+unavailable surface remains `BLOCKED`.
 
 The skill reports observed tracking behavior; it does not issue legal compliance advice.
 

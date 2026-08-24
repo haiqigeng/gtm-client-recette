@@ -56,6 +56,17 @@ def action_windows(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     "status": "COMMITTED",
                 }
             )
+    for action_id in order:
+        action = actions[action_id]
+        basis = action.get("retest_basis")
+        if action.get("status") != "COMMITTED" or not isinstance(basis, dict):
+            continue
+        if str(basis.get("type") or "").upper() != "EVIDENCE_DEFECT":
+            continue
+        superseded_id = str(basis.get("supersedes_action_id") or "")
+        if superseded_id in actions and superseded_id != action_id:
+            actions[superseded_id]["status"] = "SUPERSEDED"
+            actions[superseded_id]["superseded_by"] = action_id
     return [actions[action_id] for action_id in order]
 
 
@@ -410,9 +421,10 @@ def _ingest_preview(
         epoch = str(event.get("epoch", default_epoch))
         index = event.get("index", event.get("event_index"))
         identity = f"PV:{epoch}:{index}"
+        requested_action = event.get("action_id") or payload.get("action_id")
         action_id = _attributed_action(
             model,
-            event.get("action_id"),
+            requested_action,
             event.get("timestamp"),
             identity=identity,
         )
@@ -425,6 +437,8 @@ def _ingest_preview(
             "preview_session_id": payload.get("preview_session_id"),
             "container_ids": event.get("container_ids", payload.get("container_ids", [])),
             "workspace_version": event.get("workspace_version", payload.get("workspace_version")),
+            "cursor_start": payload.get("cursor_start"),
+            "cursor_end": payload.get("cursor_end"),
             "evidence_refs": [evidence_ref],
         }
         if identity in preview_by_id:
@@ -476,6 +490,9 @@ def _ingest_preview(
                 or event.get("completeness", {}).get("event_list") is True
                 for event in payload.get("events", [])
             ),
+            "epoch": str(default_epoch or ""),
+            "cursor_start": payload.get("cursor_start"),
+            "cursor_end": payload.get("cursor_end"),
             "evidence_ref": evidence_ref,
         }
     )
@@ -584,26 +601,38 @@ def _finalize_occurrences(
         preview_by_id.values(),
         key=lambda value: (str(value.get("epoch")), _safe_int(value.get("index"))),
     )
-    direct_actions = {
-        row.get("action_id")
+    authoritative_direct = [
+        row
         for row in [*model["source_calls"], *model["direct_signals"]]
-        if row.get("action_id")
-        and (
-            (row.get("capture_mode") == "call_time" and row.get("document_start") is True)
-            or row.get("authoritative") is True
-        )
-    }
+        if (row.get("capture_mode") == "call_time" and row.get("document_start") is True)
+        or row.get("authoritative") is True
+    ]
+    matched_direct: set[int] = set()
     for row in model["preview_events"]:
         api_call = row.get("api_call")
         action_id = row.get("action_id")
-        if (
-            action_id in direct_actions
-            or not isinstance(api_call, dict)
-            or api_call.get("complete") is not True
-        ):
+        if not isinstance(api_call, dict) or api_call.get("complete") is not True:
             continue
         arguments = api_call.get("arguments", [])
         if not isinstance(arguments, list):
+            continue
+        duplicate_index = next(
+            (
+                index
+                for index, source in enumerate(authoritative_direct)
+                if index not in matched_direct
+                and source.get("action_id") == action_id
+                and source.get("arguments") == arguments
+                and (
+                    source.get("document_id") in (None, "")
+                    or row.get("document_id") in (None, "")
+                    or source.get("document_id") == row.get("document_id")
+                )
+            ),
+            None,
+        )
+        if duplicate_index is not None:
+            matched_direct.add(duplicate_index)
             continue
         model["source_calls"].append(
             {
@@ -630,6 +659,7 @@ def _finalize_occurrences(
                 "evidence_refs": row.get("evidence_refs", []),
                 "preview_epoch": row.get("epoch"),
                 "preview_event_index": row.get("index"),
+                "bookmarked": row.get("bookmarked") is True,
             }
         )
     model["source_calls"].sort(

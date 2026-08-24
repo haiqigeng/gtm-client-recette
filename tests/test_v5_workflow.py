@@ -50,10 +50,7 @@ class WorkflowTests(unittest.TestCase):
         }
         self.assertFalse(set(coverage_reviews(records)) - acted)
         rendered = render_event_feedback(result)
-        self.assertIn(
-            "| Scenario | Inspection target | Domain | Status | Observed | Expected | Reason |",
-            rendered,
-        )
+        self.assertIn("| Layer | Status | Checks | Detail | Check next | Evidence |", rendered)
         self.assertIn("Source signal PASS", rendered)
         self.assertIn("GTM decision PASS", rendered)
         self.assertIn("Destination delivery PASS", rendered)
@@ -82,34 +79,32 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(first["execution_violations"], [])
         self.assertFalse(any(row["kind"] == "ACTION_PULSE" for row in read_stream(harness.run)[0]))
 
-    def test_invalid_control_is_rejected_before_commit_evidence_is_written(self) -> None:
+    def test_incomplete_coverage_does_not_block_capture_and_is_visible_in_verdict(self) -> None:
         harness = V5Harness(self.root)
         action = harness.begin()
         records_before = len(read_stream(harness.run)[0])
-        evidence_before = {path.name for path in (harness.run / "evidence").iterdir()}
-        with self.assertRaisesRegex(StateError, "Coverage review is invalid"):
-            commit_action(
-                harness.run,
-                {
-                    "health": harness._health("after"),
-                    "page": {"states": [harness._page("after")]},
-                    "datalayer": harness.datalayer([{"event": "view_item"}], action_id=action),
-                    "coverage": {
-                        "event_id": "E-view_item",
-                        "mode": "EXHAUSTIVE",
-                        "complete": True,
-                        "rationale": "invalid on purpose",
-                        "stop_reason": "invalid on purpose",
-                        "dimensions": [],
-                        "scenarios": [],
-                    },
+        commit_action(
+            harness.run,
+            {
+                "health": harness._health("after"),
+                "page": {"states": [harness._page("after")]},
+                "datalayer": harness.datalayer([{"event": "view_item"}], action_id=action),
+                "coverage": {
+                    "event_id": "E-view_item",
+                    "mode": "EXHAUSTIVE",
+                    "complete": True,
+                    "rationale": "incomplete on purpose",
+                    "stop_reason": "incomplete on purpose",
+                    "dimensions": [],
+                    "scenarios": [],
                 },
-                action_id=action,
-            )
-        self.assertEqual(len(read_stream(harness.run)[0]), records_before)
-        self.assertEqual(
-            {path.name for path in (harness.run / "evidence").iterdir()}, evidence_before
+            },
+            action_id=action,
         )
+        self.assertGreater(len(read_stream(harness.run)[0]), records_before)
+        result = harness.feedback("E-view_item")
+        self.assertEqual(result["coverage"]["status"], "BLOCKED")
+        self.assertTrue(result["coverage"]["errors"])
 
     def test_source_does_not_substitute_for_missing_preview(self) -> None:
         harness = V5Harness(self.root)
@@ -139,7 +134,8 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue(non_pass)
         self.assertTrue(all(row.get("check_next") for row in non_pass))
         rendered = render_event_feedback(result)
-        self.assertIn("| Resolved variable - event | GTM decision | BLOCKED |", rendered)
+        self.assertIn("| Data Layer API Call | PASS |", rendered)
+        self.assertIn("| GTM Variables | BLOCKED |", rendered)
         self.assertIn("Current Tag Assistant event list and Preview linkage", rendered)
         self.assertNotEqual(result["status"], "PASS")
 
@@ -252,6 +248,7 @@ class WorkflowTests(unittest.TestCase):
                 "preview": {
                     "complete": True,
                     "epoch": "EPOCH-1",
+                    "cursor_start": 0,
                     "preview_session_id": "PREVIEW-1",
                     "container_ids": ["GTM-EXPECTED"],
                     "workspace_version": "42",
