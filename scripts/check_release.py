@@ -9,8 +9,6 @@ import re
 import tomllib
 from pathlib import Path
 
-from core.constants import PLAYWRIGHT_MCP_VERSION
-
 ROOT = Path(__file__).resolve().parents[1]
 SEMVER = re.compile(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)")
 REFERENCE_LINK = re.compile(r"\((references/[^)]+\.md)\)")
