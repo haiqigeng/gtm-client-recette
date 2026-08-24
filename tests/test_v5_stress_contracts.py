@@ -133,17 +133,17 @@ class StressContractTests(unittest.TestCase):
         self.assertEqual(result["domains"]["gtm"]["status"], "FAIL")
         self.assertEqual(result["domains"]["delivery"]["status"], "FAIL")
         codes = [row["reason_code"] for row in result["inspections"]]
-        self.assertEqual(codes.count("gtm.variable.value.absent"), 11)
+        # Default certification uses the exact API Call and later tag/runtime/request
+        # surfaces. Accumulated state and Variables are diagnostics, not default claims.
+        self.assertFalse(
+            any(
+                row["target"].get("check") in {"data_layer_state", "resolved_variable"}
+                for row in result["inspections"]
+            )
+        )
         self.assertEqual(codes.count("gtm.effective_mapping_absent"), 11)
         self.assertEqual(codes.count("delivery.runtime_parameter_absent"), 11)
         self.assertEqual(codes.count("delivery.request_parameter.value.absent"), 11)
-        self.assertTrue(
-            all(
-                row["status"] == "PASS"
-                for row in result["inspections"]
-                if row["inspection_target"].startswith("Tag Assistant Data Layer state")
-            )
-        )
 
     def test_every_taxonomy_dimension_mutation_and_failed_run_case_is_mapped(self) -> None:
         expected = TAXONOMY_DIMENSIONS | MUTATIONS | FAILED_RUN_CASES

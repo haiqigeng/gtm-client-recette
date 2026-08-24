@@ -51,9 +51,9 @@ class WorkflowTests(unittest.TestCase):
         self.assertFalse(set(coverage_reviews(records)) - acted)
         rendered = render_event_feedback(result)
         self.assertIn("| Layer | Status | Checks | Detail | Check next | Evidence |", rendered)
-        self.assertIn("Source signal PASS", rendered)
-        self.assertIn("GTM decision PASS", rendered)
-        self.assertIn("Destination delivery PASS", rendered)
+        self.assertIn("| Data Layer API Call | PASS |", rendered)
+        self.assertIn("| GTM Tags | PASS |", rendered)
+        self.assertIn("| Browser request | PASS |", rendered)
         telemetry = status_view(harness.run)["telemetry"]
         self.assertTrue(telemetry["operation_counters_instrumented"])
         self.assertEqual(telemetry["preview_tab_switches"], 0)
@@ -135,7 +135,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue(all(row.get("check_next") for row in non_pass))
         rendered = render_event_feedback(result)
         self.assertIn("| Data Layer API Call | PASS |", rendered)
-        self.assertIn("| GTM Variables | BLOCKED |", rendered)
+        self.assertIn("| GTM Tags | BLOCKED |", rendered)
         self.assertIn("Current Tag Assistant event list and Preview linkage", rendered)
         self.assertNotEqual(result["status"], "PASS")
 

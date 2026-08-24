@@ -1,5 +1,38 @@
 # Changelog
 
+## Unreleased
+
+## [v7.0.0](https://github.com/haiqigeng/gtm-client-recette/releases/tag/v7.0.0) (2026-08-25)
+
+- Replace the expensive default inspection matrix with five mandatory-applicable
+  user-facing layers: page/action reality, exact Data Layer API Call, GTM Tags, browser
+  request, and surrounding behavior. Accumulated Data Layer state, GTM Variables,
+  consent, acquisition, recorder, form, media, and protected diagnostics are conditional.
+- Stop generating default Data Layer-state and Variables claims for every planned field.
+  Preserve explicit `state_path` and `resolved_path` diagnostics while keeping source,
+  effective mapping, runtime, and request comparisons strict against the tracking plan.
+- Add scenario-local cross-layer coherence so dynamic values may vary between scenarios
+  but API Call, tag runtime, and request cannot silently carry different values inside
+  one action, even under `present` or multi-value predicates.
+- Turn the Tag Assistant collector into a safe canonical page-context function and embed
+  it in paste-ready `playwright_completion.code`. It parses expanded API Calls without
+  evaluating observed code, reads every post-cursor business event for anomalies, reads
+  only concerned tag details, returns granular completeness, and stops at five seconds.
+- Remove the handwritten collector-normalization handoff and mandatory health telemetry.
+  A settled post-action page is sufficient; missing page, binding, Preview, network, or
+  health evidence now yields explained dependent `BLOCKED` rows and immediate feedback
+  instead of aborting completion.
+- Keep one measured Core navigation and prohibit cleanup reloads. Add a privacy-safe
+  Resource Timing fallback while preferring a native action-bounded Playwright request
+  delta for complete browser-delivery certification.
+- Standardize every event checkpoint and final conclusion on all five layer statuses.
+  Non-pass rows include exact reasons, affected fields, observed/expected values, targeted
+  next checks, and evidence IDs; GTM details separate inventory, mapping, firing, and
+  runtime passed/total counts.
+- Add browser-level collector execution tests, conditional-diagnostic tests,
+  twelve-to-one field-loss preservation, dynamic cross-layer mismatch tests,
+  partial-evidence feedback tests, and v6/v5/v3 regression/downgrade review artifacts.
+
 ## [v6.0.1](https://github.com/haiqigeng/gtm-client-recette/releases/tag/v6.0.1) (2026-08-24)
 
 - Reorder startup around progressive discovery: one minimal intake, immediate blank

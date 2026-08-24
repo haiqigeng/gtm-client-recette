@@ -1,32 +1,22 @@
 # Browser and Preview
 
-## Preparation sequence
+## Responsibility and sequence
 
-After the intake reply says `ready`, open one headed Playwright MCP-managed Microsoft
-Edge window at `about:blank`. Do this before long plan work so the user can authenticate
-and prepare GTM Preview while `init` runs.
+1. The agent asks the minimal intake questions.
+2. After `ready`, the agent opens one headed Playwright MCP-managed Microsoft Edge
+   window at `about:blank` immediately and starts plan compilation.
+3. The user signs in where necessary, connects GTM Preview/Tag Assistant, opens the
+   target site, and accepts ordinary consent.
+4. The agent derives runtime identities and freezes one setup cursor.
+5. The agent executes one measured action and one bounded observation.
 
-Tell the user to prepare GTM/Tag Assistant and the site in that managed window. If a site
-load is needed to establish login or accept the CMP, classify it as setup and never as
-Core evidence. When persistent consent is already granted, leave final Preview Connect or
-target navigation until the first action card is open. Reuse this window and its
-persistent workspace profile for the run. Do not open the user's everyday browser,
-another Edge window, Firefox, an extension-attached replacement, or a fresh profile as an
-automatic workaround.
+Do not open the user's everyday browser, Firefox, an extension-attached replacement,
+another profile, or a new authentication window as an automatic workaround. Login and
+consent loads are setup, not Core evidence.
 
-Do not ask intake questions for URL, environment, container, or destination when the plan
-and prepared tabs can supply them. Once ready, inspect the managed tabs and derive the
-actual origin, document, Preview session/epoch, natural container, workspace, and observed
-destinations. Exact identities declared by the plan remain strict.
+## One setup boundary
 
-## Capability-based runtime contract
-
-Use the configured Playwright MCP tools that are actually exposed. Do not pin behavior to
-one package version, call a guessed configuration helper, use coordinate clicks, or probe
-alternate private methods. Prefer semantic snapshots/targets, narrow evaluation, and
-filtered request inspection.
-
-The first capability record declares each surface as `true`, `false`, or `unknown`:
+Record the configured runtime and available surfaces once:
 
 ```json
 {
@@ -40,121 +30,102 @@ The first capability record declares each surface as `true`, `false`, or `unknow
     "stable_target_identity": true,
     "network_deltas": true,
     "preview_events": true,
-    "preview_tag_inventory": true,
-    "preview_variables": true
+    "preview_tag_inventory": true
   }
 }
 ```
 
-A wrong provider, browser channel, profile mode, or headed mode stops before action. A
-missing evidence capability does not start a discovery loop: proceed with the usable
-surfaces, preserve the interaction, and mark only dependent claims `BLOCKED`. Release
-validation still requires a real pilot where mandatory surfaces are available.
+Then freeze `setup_boundary.preview_cursor` at the last setup event and record
+`ORDINARY_GRANTED`, `EXPLICIT_VARIANT`, or `NOT_APPLICABLE` consent context. The first
+`next` accepts this boundary plus the capability profile. Setup page/source/network data
+is not measured evidence.
 
-An isolated profile is conditional for an explicitly fresh acquisition or consent
-scenario. It is not ordinary startup. Existing-window attachment is valid only when the
-approved scope explicitly selected `existing_chromium`.
+A wrong Playwright provider, Edge channel, profile mode, or headed mode stops before the
+action. An unavailable surface does not start a recovery loop; complete the action and
+report dependent checks `BLOCKED`.
 
-## First measured load
+## One measured action
 
-`init` must finish before `next`, but browser authentication/Preview preparation may run
-in parallel. Call the first `next` with only the capability profile and optional health
-telemetry. Do not supply binding, page, source, network, or Preview evidence from setup.
+The action card freezes event/scenario, interaction, mode, document policy, prior Preview
+cursor, planned paths, tag scope/IDs, destination/protocol, and conditional panels.
+Perform exactly that action once. Use visible completion signals and a short bounded
+settlement check, not a long fixed sleep.
 
-For Core/page load, establish ordinary consent first. If consent is already persistent,
-open the action before final Preview Connect/target navigation and use that target load as
-Core. If consent preparation required an unmeasured site page, accept the CMP, open the
-Core action, then authorize exactly one measured reload/navigation. Never perform a setup
-load plus two cleanup reloads.
+For Core, the setup page may already be open, but its tracking predates the frozen
+cursor. Perform at most one measured navigation after `next`. A current attributable
+post-boundary load may be reused. Never create a second cleanup reload because a panel is
+mixed or incomplete.
 
-If an attributable current page load occurred after the action boundary and its exact
-Preview/API Call evidence is complete, reuse it. Do not reload merely to make evidence
-look cleaner. An old page that predates the action is setup evidence, not a current Core
-pass.
+Natural navigation may produce a new document. Preserve the prior page as before-state
+and capture one post-action binding for the new document. Historical “found containers”
+in Tag Assistant do not prove the active page; use the target's active scripts/runtime.
 
-Ordinary later `next` calls take no browser evidence and reuse the latest completed
-binding/cursors. Only a new isolated context repeats the capability profile. Browser
-operation counters are optional telemetry; observable document transitions and exact
-bindings remain authoritative.
+## Paste-ready completion collector
 
-## One bounded action and Preview delta
+`next` returns `playwright_completion.code`, a complete `async (page) => {...}` callback
+for the exposed Playwright browser-code tool. Run it once after the action. Do not import
+`tag_assistant_collector.js`, copy panel text into handwritten JSON, or reopen tabs. The
+callback embeds the collector and returns a bundle directly consumable by `complete`.
 
-Each action card freezes:
+The collector is bounded to five seconds with one selector fallback. It:
 
-- event/scenario and expected interaction;
-- `OBSERVE_CURRENT`, `NAVIGATE_ONCE`, or `INTERACT_ONCE`;
-- document-change policy;
-- prior Preview epoch/index cursor;
-- current plan fields and known scenario dimensions.
+- lists every Preview index after the frozen cursor;
+- parses fully expanded `dataLayer.push(...)`/`gtag(...)` API Call arguments without
+  evaluating observed code;
+- reads API Calls for planned and unplanned business rows needed for chronology;
+- reads Tags summaries on the selected occurrence and causal technical follow-ups;
+- deep-reads only declared or runtime-discovered concerned tags;
+- switches Names/Values inside concerned tag detail to capture effective configuration
+  and runtime parameters;
+- returns component completeness separately for event list, API Call, fired list,
+  non-fired set, tag detail, and runtime parameters.
 
-Perform one user interaction. Settle by relevant completion signals rather than a long
-fixed sleep. A normal UI operation should fast-fail near five seconds; navigation may use
-its configured navigation timeout. One failure yields a precise block—it does not trigger
-60-second retries or another page load.
+Tag firing may appear on a later Trigger Group. Join causal technical rows until the next
+unrelated business API Call. Do not scan historical domains, every historical tag, or the
+whole container.
 
-On `complete`, return only Preview rows whose numeric index is greater than the frozen
-cursor in the same epoch. `cursor_end` is the last returned index. Historical rows at or
-before `cursor_start` are invalid. If the Preview epoch changed, start the new epoch at
-zero and include the matching new binding.
+The default panels are only **API Call** and **Tags**. The accumulated **Data Layer** tab
+activates for an explicit state diagnostic; **Variables** activates for an explicit
+resolved-variable diagnostic. Consent activates only for an applicable consent
+requirement/scenario. These diagnostics never substitute for the API Call, effective tag
+runtime, or browser request.
 
-Capture all new indexes caused by the action, including lifecycle, consent, state-only,
-unplanned, and technical follow-up rows. Mark exactly one Core/state API Call row when a
-state-only source anchor is needed. A top-level action ID may bind child Preview rows that
-do not repeat it. One interaction can create multiple indexes and multiple causally
-co-occurring planned events; it cannot hide a second user interaction.
-
-Deep-read only the selected occurrence and its causal technical follow-up until the next
-business-event boundary:
-
-- fully expanded API Call arguments;
-- accumulated Data Layer state;
-- Variables;
-- complete fired and relevant non-fired tag inventory;
-- concerned tag configuration/effective mapping/firing/runtime;
-- event-time consent when applicable.
-
-Do not scan unrelated historical domains, every historical Preview event, or the whole
-container.
+If the collector times out or one component is unreadable, it returns all event indexes
+and the usable canonical evidence with that component incomplete. Submit it immediately.
+Do not reload, replace the browser, install a recorder, or spend minutes normalizing it.
 
 ## Source authority
 
-The exact fully expanded Tag Assistant **API Call** is the ordinary source authority. It
-is ingested once from the Preview record. Do not create a second handwritten source copy.
-The **Data Layer** tab is accumulated post-message state and the **Variables** tab is GTM-
-resolved state; compare both independently but never call either the original push.
+The exact fully expanded Tag Assistant API Call is the ordinary source authority and is
+ingested once. Use `scripts/datalayer_recorder.js` only when the API Call is incomplete or
+pre-GTM call-time behavior is itself material. A late wrapper is not document-start
+proof. A new document needed for the recorder requires a structured retest and one
+authorized navigation.
 
-Use `scripts/datalayer_recorder.js` only when the API Call is unavailable/incomplete or a
-claim needs pre-GTM call-time behavior. A late injected wrapper is not document-start
-evidence. If a new document is truly needed to install the recorder, require the smallest
-structured retest and one authorized navigation.
+When direct call-time and API Call evidence observe the same occurrence, reconcile only
+the same action, arguments, and document. Keep surplus identical calls and every other
+interjected push so duplicates cannot disappear.
 
-When a direct recorder and Preview API Call both observe the same occurrence, reconcile
-them one to one and deduplicate only that exact action/arguments/document occurrence.
-Keep every surplus identical call and every other API Call so duplicates or unexpected
-interjections cannot disappear merely because one direct source row exists.
+## Network evidence
 
-## Network and privacy
+Prefer a native Playwright/MCP request delta opened at the action boundary and closed at
+settlement. Retain only concerned analytics/media requests, failures, and suspicious
+requests. Preserve logical-hit identity, URL without secrets, method, event,
+destination, planned decoded parameters, redirects/retries, response status/outcome, and
+parameter/body completeness.
 
-Open the request delta before the action and close it at settlement. Filter to concerned
-analytics/media sends, failed transports, and suspicious requests. Deep-read only those
-requests. The decoder retains routing/outcome and planned payload fields while excluding
-cookies, authorization headers, and unrelated traffic; do not persist a raw full-browser
-request dump.
+The paste-ready callback includes Resource Timing as a quick fallback. It can prove a
+visible endpoint and URL parameters but deliberately marks the window/body incomplete;
+missing values therefore become `BLOCKED`, not false `FAIL`. Replace that fallback with
+the native request delta when available.
 
-Preserve logical-hit identity, destination, event, document/frame/worker, redirects,
-retries, response status, failure reason, and parameter/body completeness. Merge attempts
-for one logical hit but keep duplicate logical hits separate. A missing request is a
-`FAIL` only under a complete attributable request window; otherwise it is `BLOCKED`.
+Never retain cookies, authorization headers, session tokens, or an unrelated raw browser
+dump. A missing request is `FAIL` only under a complete attributable request window;
+otherwise it is `BLOCKED`.
 
-## Binding and recovery
+## Recovery
 
-After natural navigation, keep the old page only as before-state and capture one new
-binding for the new document. Historical “found containers” in Tag Assistant do not prove
-the active page. A wrong natural container, origin, document, or Preview epoch blocks
-binding-dependent source/GTM/delivery claims; it is not itself a client tracking defect.
-
-Do not inject another container, work outside the managed window, or open an
-authentication replacement. Ask for user help only for an actual protected gate or when
-the prepared Preview/container must be corrected. A repeat needs a structured
-evidence-defect record or explicit user authorization; otherwise report the block and
-move to safe independent work.
+A wrong origin/container/document/Preview binding blocks dependent layers and is a setup
+problem, not a client tracking defect. Preserve the action and feedback. Ask the user
+only to correct the prepared Preview/target or complete a protected gate. A repeat needs
+a structured evidence-defect record or explicit user authorization.

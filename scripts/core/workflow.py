@@ -30,6 +30,8 @@ from .state import (
     stream_record_by_id,
 )
 
+_COLLECTOR_PATH = Path(__file__).resolve().parents[1] / "tag_assistant_collector.js"
+
 
 def load_json_object(path: Path | str) -> dict[str, Any]:
     source = Path(path).expanduser().resolve()
@@ -54,6 +56,82 @@ def _split_bundle(value: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]
         {key: item for key, item in value.items() if key not in control_keys},
         {key: value[key] for key in control_keys if key in value},
     )
+
+
+_CONSENT_CONTEXTS = {"ORDINARY_GRANTED", "EXPLICIT_VARIANT", "NOT_APPLICABLE"}
+
+
+def _normalize_setup_boundary(
+    value: Any, *, required: bool, preview_required: bool = True
+) -> dict[str, Any] | None:
+    """Validate the prepared browser/Preview boundary without treating it as evidence."""
+    if value is None:
+        if required:
+            raise StateError(
+                "The first or fresh-context next call needs setup_boundary after the user "
+                "has prepared the site, GTM Preview, and ordinary consent."
+            )
+        return None
+    if not isinstance(value, dict):
+        raise StateError("setup_boundary must be a JSON object.")
+    cursor = value.get("preview_cursor")
+    if not isinstance(cursor, dict):
+        raise StateError("setup_boundary.preview_cursor is required.")
+    epoch = str(cursor.get("epoch") or "").strip()
+    if not epoch and preview_required:
+        raise StateError("setup_boundary.preview_cursor.epoch is required.")
+    try:
+        index = int(cursor.get("index"))
+    except (TypeError, ValueError) as error:
+        raise StateError(
+            "setup_boundary.preview_cursor.index must be a non-negative integer."
+        ) from error
+    if index < 0:
+        raise StateError("setup_boundary.preview_cursor.index must be a non-negative integer.")
+    consent_context = str(value.get("consent_context") or "").upper()
+    if consent_context not in _CONSENT_CONTEXTS:
+        raise StateError(
+            "setup_boundary.consent_context must be ORDINARY_GRANTED, "
+            "EXPLICIT_VARIANT, or NOT_APPLICABLE."
+        )
+    binding = value.get("binding")
+    if binding is not None and not isinstance(binding, dict):
+        raise StateError("setup_boundary.binding must be an object when supplied.")
+    safe_binding = (
+        {
+            key: binding[key]
+            for key in (
+                "browser_family",
+                "browser_context_id",
+                "tab_id",
+                "document_id",
+                "frame_id",
+                "origin",
+                "preview_session_id",
+                "preview_epoch",
+                "natural_container_ids",
+                "active_container_ids",
+                "override_container_ids",
+                "workspace_version",
+            )
+            if key in binding
+        }
+        if isinstance(binding, dict)
+        else None
+    )
+    return {
+        "preview_cursor": {
+            "epoch": epoch or None,
+            "index": index,
+            **(
+                {"preview_session_id": str(cursor.get("preview_session_id"))}
+                if cursor.get("preview_session_id")
+                else {}
+            ),
+        },
+        "consent_context": consent_context,
+        **({"binding": safe_binding} if isinstance(safe_binding, dict) else {}),
+    }
 
 
 def _inject_action(bundle: dict[str, Any], action_id: str, phase: str) -> dict[str, Any]:
@@ -253,6 +331,121 @@ def _normalize_action_contract(
     return normalized_mode, normalized_policy
 
 
+def _capture_spec(events: list[dict[str, Any]], preview_boundary: dict[str, Any]) -> dict[str, Any]:
+    source_names = list(
+        dict.fromkeys(
+            str(event.get("source_event_name"))
+            for event in events
+            if event.get("source_event_name")
+        )
+    )
+    delivery_names = list(
+        dict.fromkeys(
+            str(event.get("delivery_event_name"))
+            for event in events
+            if event.get("delivery_event_name")
+        )
+    )
+    field_rows: dict[str, dict[str, Any]] = {}
+    preview_checks: list[str] = []
+    tag_ids: list[str] = []
+    tag_scope: list[str] = []
+    destinations: list[str] = []
+    protocols: list[str] = []
+    source_paths: list[str] = []
+    requires_api_call = False
+    for event in events:
+        for tag in event.get("tags", []):
+            if not isinstance(tag, dict):
+                continue
+            if tag.get("tag_id"):
+                tag_ids.append(str(tag["tag_id"]))
+            if tag.get("category"):
+                tag_scope.append(str(tag["category"]))
+            if tag.get("destination"):
+                destinations.append(str(tag["destination"]))
+        for claim in event.get("claims", []):
+            if not isinstance(claim, dict):
+                continue
+            target = claim.get("target", {}) if isinstance(claim.get("target"), dict) else {}
+            check = str(target.get("check") or "")
+            path = str(target.get("path") or "")
+            if check:
+                preview_checks.append(check)
+            for value in target.get("tag_scope", []):
+                if value:
+                    tag_scope.append(str(value))
+            if target.get("tag_id"):
+                tag_ids.append(str(target["tag_id"]))
+            if target.get("destination"):
+                destinations.append(str(target["destination"]))
+            for value in target.get("destination_allowlist", []):
+                if value:
+                    destinations.append(str(value))
+            if target.get("protocol"):
+                protocols.append(str(target["protocol"]))
+            if path:
+                if claim.get("archetype") == "source":
+                    requires_api_call = True
+                    source_paths.append(path)
+                row = field_rows.setdefault(
+                    path,
+                    {
+                        "path": path,
+                        "predicate": claim.get("predicate", {}),
+                        "checks": [],
+                    },
+                )
+                row["checks"].append(check or str(claim.get("archetype") or ""))
+    for row in field_rows.values():
+        row["checks"] = list(dict.fromkeys(value for value in row["checks"] if value))
+    preview_panels = []
+    if requires_api_call or any(
+        value in preview_checks for value in ("event_occurrence", "event_match")
+    ):
+        preview_panels.append("API Call")
+    if "data_layer_state" in preview_checks:
+        preview_panels.append("Data Layer")
+    if "resolved_variable" in preview_checks:
+        preview_panels.append("Variables")
+    if any(
+        value in preview_checks
+        for value in (
+            "tag_inventory",
+            "in_scope_tag_discovery",
+            "tag_configuration",
+            "effective_mapping",
+            "tag_firing",
+            "tag_consent",
+            "runtime_parameter",
+        )
+    ):
+        preview_panels.append("Tags")
+    return {
+        "source_anchor": {
+            "mode": "event" if source_names else "state_fields",
+            "event_names": source_names,
+            "field_paths": list(dict.fromkeys(source_paths)),
+        },
+        "delivery_event_names": delivery_names,
+        "planned_fields": list(field_rows.values()),
+        "tag_ids": list(dict.fromkeys(tag_ids)),
+        "tag_scope": list(dict.fromkeys(tag_scope)),
+        "destinations": list(dict.fromkeys(destinations)),
+        "protocols": list(dict.fromkeys(protocols)),
+        "preview_panels": preview_panels,
+        "preview_cursor": preview_boundary,
+        "timeout_ms": 5000,
+        "collection": {
+            "bounded_passes": 1,
+            "semantic_fallbacks": 1,
+            "navigation_for_evidence": "FORBIDDEN",
+            "reuse_static_tag_configuration": True,
+            "partial_result_policy": "RETURN_BLOCKED_FEEDBACK",
+        },
+    }
+
+
 def _action_card(
     events: list[dict[str, Any]],
     mode: str,
@@ -260,6 +453,12 @@ def _action_card(
     preview_boundary: dict[str, Any] | None,
 ) -> dict[str, Any]:
     journeys = [event.get("journey", {}) for event in events]
+    normalized_boundary = preview_boundary or {
+        "epoch": None,
+        "index": 0,
+        "instruction": "Use the new Preview connection from its first index.",
+    }
+    capture_spec = _capture_spec(events, normalized_boundary)
     return {
         "mode": mode,
         "document_policy": document_policy,
@@ -279,20 +478,19 @@ def _action_card(
             ),
             "Inspect the planned event once",
         ),
-        "preview_cursor": preview_boundary
-        or {
-            "epoch": None,
-            "index": 0,
-            "instruction": "Use the new Preview connection from its first index.",
-        },
+        "preview_cursor": normalized_boundary,
+        "capture_spec": capture_spec,
         "evidence_targets": [
             "page/action reality",
             "fully expanded API Call",
-            "accumulated Data Layer state",
-            "Variables",
             "concerned tag mapping, firing, and runtime",
             "browser request",
-            "every intervening Preview event",
+            "every intervening event and surrounding behavior",
+        ],
+        "conditional_diagnostics": [
+            panel
+            for panel in ("Data Layer", "Variables", "Consent")
+            if panel in capture_spec["preview_panels"]
         ],
         "current_coverage": [
             {
@@ -310,6 +508,159 @@ def _action_card(
         ],
         "completion": "Capture one bounded action delta and submit it once with Preview detail.",
     }
+
+
+def _playwright_completion_code(
+    action_id: str,
+    began_at: str,
+    capture_spec: dict[str, Any],
+) -> str:
+    """Return one paste-ready Playwright MCP callback; no imports or local-file reads needed."""
+    collector = _COLLECTOR_PATH.read_text(encoding="utf-8").strip()
+    spec_json = json.dumps(capture_spec, ensure_ascii=False, separators=(",", ":"))
+    action_json = json.dumps(action_id)
+    began_json = json.dumps(began_at)
+    return f"""async (page) => {{
+  const spec = {spec_json};
+  const actionId = {action_json};
+  const beganAt = {began_json};
+  spec.action_id = actionId;
+  const collectPreview = {collector};
+  const context = page.context();
+  context.__gtmRecetteContextId ||= `CTX-${{Date.now().toString(36)}}-${{Math.random().toString(36).slice(2, 8)}}`;
+  const pages = context.pages();
+  const isPreview = (candidate) => {{
+    try {{ return /(^|\\.)tagassistant\\.google\\.com$/i.test(new URL(candidate.url()).hostname); }}
+    catch {{ return false; }}
+  }};
+  const previewPage = pages.find(isPreview);
+  const targetPage = [...pages].reverse().find((candidate) => !isPreview(candidate) && !/^about:blank$/i.test(candidate.url())) || (isPreview(page) ? null : page);
+  const now = new Date().toISOString();
+  const priorCursor = Number(spec.preview_cursor?.index || 0);
+  let preview;
+  if (previewPage) {{
+    preview = await previewPage.evaluate(collectPreview, spec).catch((error) => ({{
+      epoch: String(spec.preview_cursor?.epoch || "preview-unavailable"),
+      cursor_start: priorCursor,
+      cursor_end: priorCursor,
+      events: [],
+      complete: false,
+      event_list_complete: false,
+      reason: `Tag Assistant collector failed: ${{String(error?.message || error)}}`,
+      completeness: {{ event_list: false, api_call: false, fired_list: false, not_fired_set: false, tag_details: false, runtime_parameters: false }},
+    }}));
+  }} else {{
+    preview = {{
+      epoch: String(spec.preview_cursor?.epoch || "preview-unavailable"),
+      cursor_start: priorCursor,
+      cursor_end: priorCursor,
+      events: [],
+      complete: false,
+      event_list_complete: false,
+      reason: "Tag Assistant page was not found in this Playwright context.",
+      completeness: {{ event_list: false, api_call: false, fired_list: false, not_fired_set: false, tag_details: false, runtime_parameters: false }},
+    }};
+  }}
+  preview.action_id = actionId;
+  preview.observed_at = now;
+
+  let pageState = {{
+    action_id: actionId,
+    phase: "after",
+    timestamp: now,
+    url: targetPage?.url() || "about:blank",
+    target_present: Boolean(targetPage),
+    page_valid: false,
+    document_id: "target-unavailable",
+  }};
+  let resourceRows = [];
+  if (targetPage) {{
+    targetPage.__gtmRecetteTabId ||= `TAB-${{Date.now().toString(36)}}-${{Math.random().toString(36).slice(2, 8)}}`;
+    const observed = await targetPage.evaluate((input) => {{
+      if (!globalThis.__gtmRecetteDocumentId) {{
+        Object.defineProperty(globalThis, "__gtmRecetteDocumentId", {{
+          value: `DOC-${{Date.now().toString(36)}}-${{Math.random().toString(36).slice(2, 8)}}`,
+          configurable: false,
+        }});
+      }}
+      const navigation = performance.getEntriesByType("navigation")[0];
+      const beganMs = Date.parse(input.beganAt);
+      const resources = performance.getEntriesByType("resource")
+        .filter((entry) => !Number.isFinite(beganMs) || performance.timeOrigin + entry.startTime >= beganMs - 2000)
+        .slice(-500)
+        .map((entry, index) => ({{
+          request_id: `${{input.actionId}}-PERF-${{index + 1}}`,
+          action_id: input.actionId,
+          timestamp: new Date(performance.timeOrigin + entry.startTime).toISOString(),
+          url: entry.name,
+          method: "GET",
+          resource_type: entry.initiatorType || "resource",
+          outcome: "observed_in_resource_timing",
+          document_id: globalThis.__gtmRecetteDocumentId,
+        }}));
+      const bodyText = String(document.body?.innerText || "").replace(/\\s+/g, " ").slice(0, 2000);
+      const soft404 = /(?:page|product|content).{{0,30}}(?:not found|introuvable)|\\b404\\b/i.test(`${{document.title}} ${{bodyText}}`);
+      const activeContainerIds = [...new Set([
+        ...Object.keys(globalThis.google_tag_manager || {{}}).filter((key) => /^GTM-[A-Z0-9]+$/i.test(key)),
+        ...[...document.scripts].flatMap((script) => [...String(script.src || script.textContent || "").matchAll(/GTM-[A-Z0-9]+/gi)].map((match) => match[0].toUpperCase())),
+      ])];
+      return {{
+        state: {{
+          action_id: input.actionId,
+          phase: "after",
+          timestamp: new Date().toISOString(),
+          url: location.href,
+          title: document.title,
+          origin: location.origin,
+          ready_state: document.readyState,
+          status_code: Number(navigation?.responseStatus) || null,
+          soft_404: soft404,
+          target_present: true,
+          page_valid: !soft404 && document.readyState !== "loading",
+          document_id: globalThis.__gtmRecetteDocumentId,
+          container_ids: activeContainerIds,
+        }},
+        resources,
+      }};
+    }}, {{ actionId, beganAt }});
+    pageState = observed.state;
+    resourceRows = observed.resources;
+  }}
+  const targetOrigin = (() => {{ try {{ return new URL(pageState.url).origin; }} catch {{ return "unknown"; }} }})();
+  const binding = {{
+    action_id: actionId,
+    observed_at: now,
+    browser_family: "chromium",
+    browser_context_id: context.__gtmRecetteContextId,
+    tab_id: targetPage?.__gtmRecetteTabId || "target-unavailable",
+    document_id: pageState.document_id,
+    origin: targetOrigin,
+    preview_session_id: preview.preview_session_id || null,
+    preview_epoch: preview.epoch,
+    natural_container_ids: pageState.container_ids || [],
+    active_container_ids: pageState.container_ids || [],
+    override_container_ids: [],
+  }};
+  const needsNetwork = (spec.protocols || []).length > 0 || (spec.destinations || []).length > 0;
+  return {{
+    binding,
+    page: pageState,
+    preview,
+    ...(needsNetwork ? {{ network: {{
+      action_id: actionId,
+      complete: false,
+      cursor_start: beganAt,
+      cursor_end: now,
+      collection_mode: "resource_timing_fallback",
+      parameter_capture_complete: false,
+      body_capture_complete: false,
+      browser_context_id: binding.browser_context_id,
+      tab_id: binding.tab_id,
+      document_id: binding.document_id,
+      requests: resourceRows,
+    }} }} : {{}}),
+  }};
+}}"""
 
 
 def _latest_preview_boundary(records: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -426,7 +777,7 @@ def _validate_after_freshness(
     continuous_boundary = parse_iso_timestamp(continuous_since) or began
     continuous_earliest = continuous_boundary - timedelta(seconds=2)
     observations = _after_observation_times(bundle)
-    required_labels = {"health", "page[0]"}
+    required_labels: set[str] = set()
     observed_labels = {label for label, value in observations if value is not None}
     missing = sorted(required_labels - observed_labels)
     if missing:
@@ -478,6 +829,7 @@ def begin_action(
     mode: str | None = None,
     document_policy: str | None = None,
     deferred_binding: bool = False,
+    setup_boundary: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     plan = load_plan(run_dir)
     records, _ = read_stream(run_dir)
@@ -583,15 +935,27 @@ def begin_action(
         raise StateError("Begin bundle is missing required runtime/before-state adapters.")
 
     baseline_operations = _operations(prepared.get("health")) or _latest_operations(records)
+    setup_binding = setup_boundary.get("binding") if isinstance(setup_boundary, dict) else None
     baseline_binding = (
-        prepared.get("binding") if isinstance(prepared.get("binding"), dict) else latest_binding
+        prepared.get("binding")
+        if isinstance(prepared.get("binding"), dict)
+        else setup_binding
+        if isinstance(setup_binding, dict)
+        else latest_binding
+    )
+    preview_boundary = (
+        setup_boundary.get("preview_cursor")
+        if isinstance(setup_boundary, dict)
+        and isinstance(setup_boundary.get("preview_cursor"), dict)
+        else _latest_preview_boundary(records)
     )
     card = _action_card(
         selected_events,
         normalized_mode,
         normalized_policy,
-        _latest_preview_boundary(records),
+        preview_boundary,
     )
+    began_at = utc_now()
 
     record = append_annotation(
         run_dir,
@@ -612,8 +976,9 @@ def begin_action(
             "baseline_document_id": (
                 baseline_binding.get("document_id") if isinstance(baseline_binding, dict) else None
             ),
+            "setup_boundary": setup_boundary,
             "action_card": card,
-            "began_at": utc_now(),
+            "began_at": began_at,
         },
         idempotency_key=f"action-begin:{action_id}",
     )
@@ -624,6 +989,18 @@ def begin_action(
         "action": record,
         "captures": [capture["record_id"] for capture in captures],
         "action_card": card,
+        "playwright_completion": {
+            "tool": "browser_run_code",
+            "code": _playwright_completion_code(
+                action_id,
+                began_at,
+                card["capture_spec"],
+            ),
+            "instruction": (
+                "After the single planned interaction, run this callback once and pass its "
+                "returned object directly to complete. Do not normalize panels manually."
+            ),
+        },
         "instruction": (
             "Perform only the action card once. Do not reload for evidence cleanup; "
             "submit one bounded completion bundle."
@@ -651,6 +1028,21 @@ def next_action(
     records, _ = read_stream(run_dir)
     incoming = dict(bundle or {})
     runtime_refresh = _first_action(records) or fresh_context_required
+    incoming_capability = incoming.get("capability", {})
+    incoming_surfaces = (
+        incoming_capability.get("surfaces", {})
+        if isinstance(incoming_capability, dict)
+        and isinstance(incoming_capability.get("surfaces", {}), dict)
+        else {}
+    )
+    preview_required = not (
+        isinstance(incoming_capability, dict) and incoming_surfaces.get("preview_events") is False
+    )
+    setup_boundary = _normalize_setup_boundary(
+        incoming.pop("setup_boundary", None),
+        required=runtime_refresh,
+        preview_required=preview_required,
+    )
     allowed = {"capability", "health"} if runtime_refresh else set()
     unexpected = sorted(set(incoming) - allowed)
     if unexpected:
@@ -724,6 +1116,7 @@ def next_action(
         mode=mode,
         document_policy=document_policy,
         deferred_binding=True,
+        setup_boundary=setup_boundary,
     )
 
 
@@ -938,6 +1331,9 @@ def _execution_violations(
         "navigations": navigation_limit,
         "reloads": reload_limit,
         "resets": reset_limit,
+        "full_preflights": 0,
+        "preview_summary_reads": 1,
+        "preview_retries": 1,
     }
     for key, limit in limits.items():
         if key in deltas and deltas[key] > limit:
@@ -1045,10 +1441,8 @@ def commit_action(
         allowed={"binding", "health", "page", "datalayer", "source", "network", "lifecycle"},
     )
     latest_binding = _latest_binding_summary(records)
-    required = {"health", "page"}
-    if latest_binding is None:
-        required.add("binding")
-    validate_bundle_value(run_dir, prepared, required_adapters=required)
+    if prepared:
+        validate_bundle_value(run_dir, prepared)
     began = parse_iso_timestamp(action.get("began_at"))
     prior_boundaries = [
         candidate.get("committed_at")
@@ -1088,7 +1482,11 @@ def commit_action(
         and existing_commit.get("data", {}).get("bundle_digest") not in {None, bundle_digest}
     ):
         raise StateError("The committed action can only be resumed with its exact original bundle.")
-    captures = capture_bundle_value(run_dir, prepared, source_id=f"commit:{action['action_id']}")
+    captures = (
+        capture_bundle_value(run_dir, prepared, source_id=f"commit:{action['action_id']}")
+        if prepared
+        else []
+    )
     capture_ids = [record["record_id"] for record in captures]
     if resuming:
         assert existing_commit is not None
@@ -1131,6 +1529,8 @@ def _persist_event_feedback(
     result: dict[str, Any],
     records: list[dict[str, Any]],
 ) -> dict[str, Any]:
+    from .report import compact_status_view
+
     output_kinds = {"EVENT_FEEDBACK_ISSUED", "PREVIEW_SYNC"}
     reviewed_through = max(
         (int(record.get("seq", 0)) for record in records if record.get("kind") not in output_kinds),
@@ -1142,6 +1542,7 @@ def _persist_event_feedback(
         "final": result["final"],
         "reviewed_through_seq": reviewed_through,
         "result_digest": content_digest(result),
+        "feedback": compact_status_view(result),
     }
     record = append_derived(
         run_dir,
@@ -1308,8 +1709,7 @@ def complete_action(
     )
     capability = _latest_capture_summary(records, "CAPTURE_CAPABILITY") or {}
     preview_available = capability.get("surfaces", {}).get("preview_events") is not False
-    if requires_preview and preview_available and not isinstance(preview, dict):
-        raise StateError("The selected event requires one bounded Preview delta in complete.")
+    preview_missing = requires_preview and preview_available and not isinstance(preview, dict)
     preview_bundle: dict[str, Any] = {}
     if isinstance(preview, dict):
         preview_value = json.loads(json.dumps(preview))
@@ -1339,6 +1739,15 @@ def complete_action(
         "execution_violations": committed["execution_violations"],
         "events": synchronized["events"],
         "revised_events": synchronized["revised_events"],
+        "capture_warning": (
+            "Preview evidence was omitted; dependent layers were reported BLOCKED."
+            if preview_missing
+            else None
+        ),
+        "instruction": (
+            "Issue the returned per-event layer feedback to the user now, before "
+            "opening or executing another action."
+        ),
     }
 
 

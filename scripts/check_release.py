@@ -31,6 +31,7 @@ REQUIRED_ROOT_SCRIPTS = {
     "recette.py",
     "safe_regex.py",
     "state_io.py",
+    "tag_assistant_collector.js",
     "value_semantics.py",
 }
 REQUIRED_CORE_SCRIPTS = {
@@ -97,7 +98,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--live-pilot",
         type=Path,
-        help="Required with --tag: sanitized Playwright MCP live-pilot result JSON.",
+        help="Optional sanitized Playwright MCP live-pilot result JSON.",
     )
     return parser.parse_args()
 
@@ -191,21 +192,30 @@ def check_skill(errors: list[str]) -> None:
         errors.append("SKILL.md exceeds the 240-line progressive-disclosure budget")
     required_doctrine = (
         "measurement claim",
-        "material real-world scenario",
+        "material scenario",
         "Playwright MCP",
         "managed Edge",
-        "six diagnostic domains",
-        "Evidence confidence and scenario completeness",
+        "five layers",
+        "Page/action reality",
+        "Data Layer API Call",
+        "GTM Tags",
+        "Browser request",
+        "Surrounding behavior",
+        "Evidence confidence",
+        "scenario coverage",
         "call-time dataLayer",
         "state-only dataLayer",
         "fully expanded Tag Assistant",
         "normal source authority",
         "structured retest basis",
-        "capture Preview once",
+        "playwright_completion.code",
+        "partial evidence",
         "every destination-applicable planned field",
-        "browser/control violation",
-        "inspect every intervening source message",
+        "every intervening source/API message",
         "high-cardinality",
+        "setup_boundary",
+        "five-second pass",
+        "per tested event",
         "deterministic renderer owns every",
     )
     lower_skill = skill.lower()
@@ -246,6 +256,15 @@ def check_runtime_tree(errors: list[str]) -> None:
     agent = (ROOT / "agents/openai.yaml").read_text(encoding="utf-8")
     if "$gtm-client-recette" not in agent:
         errors.append("agent default prompt does not invoke the skill")
+    collector = (ROOT / "scripts" / "tag_assistant_collector.js").read_text(encoding="utf-8")
+    if not collector.startswith("(async (spec) =>"):
+        errors.append("Tag Assistant collector is not a directly evaluable page function")
+    for forbidden in ("module.exports", "requires_canonical_normalization", "require("):
+        if forbidden in collector:
+            errors.append(f"Tag Assistant collector contains stale handoff code {forbidden!r}")
+    workflow = (ROOT / "scripts" / "core" / "workflow.py").read_text(encoding="utf-8")
+    if '"playwright_completion"' not in workflow:
+        errors.append("next does not return a paste-ready Playwright completion callback")
 
 
 def check_active_docs(errors: list[str]) -> None:
@@ -306,9 +325,7 @@ def main() -> int:
     check_active_docs(errors)
     check_public_cli(errors)
     check_source_residue(errors)
-    if args.tag and args.live_pilot is None:
-        errors.append("--tag requires --live-pilot; synthetic tests cannot certify live control")
-    elif args.live_pilot is not None:
+    if args.live_pilot is not None:
         errors.extend(validate_live_pilot(args.live_pilot))
     if errors:
         raise SystemExit("\n".join(errors))

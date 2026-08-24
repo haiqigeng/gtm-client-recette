@@ -101,7 +101,7 @@ class GeneralOptimizationTests(unittest.TestCase):
         capability["runtime"].pop("self_check")
         started = next_action(
             harness.run,
-            {"capability": capability},
+            harness.next_input(capability),
             event_ids=["E-view_item"],
         )
         self.assertTrue(started["action"]["data"]["action_id"].startswith("A-"))
@@ -114,9 +114,11 @@ class GeneralOptimizationTests(unittest.TestCase):
             preview_variables=False,
             preview_consent=False,
         )
+        first_input = harness.next_input(capability)
+        first_input["setup_boundary"]["preview_cursor"]["epoch"] = None
         started = next_action(
             harness.run,
-            {"capability": capability},
+            first_input,
             event_ids=["E-view_item"],
         )
         action_id = started["action"]["data"]["action_id"]
@@ -492,7 +494,7 @@ class GeneralOptimizationTests(unittest.TestCase):
         harness = V5Harness(self.root, events=[event])
         first = next_action(
             harness.run,
-            {"capability": harness.capability()},
+            harness.next_input(),
             event_ids=["E-view_item"],
         )
         action_id = first["action"]["data"]["action_id"]

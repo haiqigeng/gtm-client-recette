@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from datetime import UTC, datetime
 from typing import Any
 
-SCHEMA_VERSION = "6.0"
+SCHEMA_VERSION = "7.0"
 
 STATUSES = frozenset({"PASS", "FAIL", "BLOCKED", "REVIEW", "NOT_APPLICABLE", "PENDING"})
 STATUS_PRIORITY = {
