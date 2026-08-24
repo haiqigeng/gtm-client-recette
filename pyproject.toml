@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gtm-client-recette"
-version = "6.0.1"
-description = "Claim-driven expert client-side GTM Preview recette"
+version = "7.0.0"
+description = "Fast causal client-side GTM Preview acceptance recette"
 license = "MIT"
 requires-python = ">=3.11"
 dependencies = ["openpyxl>=3.1.2", "PyYAML>=6.0.2"]

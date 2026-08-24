@@ -1,167 +1,128 @@
 # Verdict and output
 
-## Proof obligations and evidence authority
+## Tracking-plan authority
 
-The compiler preserves source coordinates and turns each accepted requirement into one
-or more typed claims:
+The compiler preserves source coordinates and creates typed occurrence, value/state,
+relationship, order, transport, and negative proof obligations. It does not invent an
+event, tag, destination, or browser send for a source-only/state-only requirement.
 
-- occurrence: must fire, must not fire, or exact/count range;
-- value/state: present, absent, undefined, null, empty, exact, enum, type, range or regex;
-- relationship: values agree with each other or with current business reality;
-- ordering: causal sequence or before/after constraints;
-- transport: logical hit, destination, tag identity, browser request and outcome;
-- negative: complete-window proof that an event/tag/request did not occur.
+For an ordinary browser-delivered planned field, judge the same plan requirement at:
 
-Tabular intake reports rows seen, compiled, inherited from a contiguous event identity,
-and intentionally ignored. Merged/fill-down event cells are retained only inside one
-contiguous flat table; a blank separator resets that identity. In a recognized sectioned
-variable sheet, blank rows do not terminate the variable table. XLSX intake classifies
-every sheet and reconciles index events with requirement sheets. Index-only or malformed
-later events become localized non-executable events; orphan/ambiguous rows still stop
-intake. Preserve exact case for valid machine event/field identifiers. Do not silently
-reinterpret a rule or invent missing tag scope. A source-only/state-only claim remains
-source-oriented. For ordinary GA4 claims, the same
-destination-applicable plan predicate is automatically checked at the exact API Call or
-proven call-time source,
-Tag Assistant accumulated Data Layer state, resolved Variables, effective tag mapping,
-runtime payload, and decoded browser request without additional browser actions. The
-comparison is per field, not a variable-count heuristic: object/settings or automatic
-mappings count only when their effective runtime value is proved.
+1. exact API Call source value;
+2. concerned tag's effective mapping;
+3. concerned tag's runtime value;
+4. decoded browser request value.
 
-Machine evidence enters through typed capture adapters and receives stable identity.
-Agent-authored notes may explain coverage or add an evidence-backed semantic `FAIL` or
-`REVIEW`; they cannot create a machine observation or declare a pass. All public commands
-feed the same compiler, occurrence model, confidence/coverage gates and deterministic
-renderer.
+Compare fields, not raw object size. A generic settings/ecommerce object may cover many
+fields only when configuration or runtime proves that effective mapping. Complete tag
+detail with one represented field out of twelve produces eleven mapping/runtime failures.
 
-## Six domains and two gates
+Contextual values are strict inside their scenario. `en` and `fr` may each pass on their
+selected route; a product name may vary by selected product. But API Call, tag runtime,
+and request for one action must agree even when the plan predicate is merely `present` or
+contains several allowed values. Wire string coercion is allowed only for an explicitly
+transport-compatible comparison.
 
-The six domains are reporting/diagnostic groups, not a fixed checklist or serial
-workflow. Operational rows remain distinct inside them.
+Missing, undefined, null, empty, and populated remain distinct. Booleans are not numbers.
 
-1. `reality`: page/API status, soft 404, route/context, visible state, before/after change,
-   independent action/form/purchase/business outcome.
-2. `source`: exact-message occurrence, value/state/type and chronology, including
-   state-only and unplanned messages. The normal authority is a fully expanded Tag
-   Assistant API Call; a proven document-start recorder is conditional stronger
-   evidence. The accumulated Data Layer tab is never source authority.
-3. `gtm`: current Preview/container identity, matching event, resolved state, concerned
-   Data Layer tab, Variables tab, tag inventory/configuration/effective mapping/controls
-   and firing count.
-4. `delivery`: runtime parameter and logical-hit identity, decoded destination request,
-   redirect/retry lifecycle and outcome, or complete-window non-send.
-5. `behavior`: duplicate, missing, premature, delayed or interjected events; stale or
-   contaminating state; source/Preview/tag/request count and context discrepancies.
-6. `safety`: recursive sensitive-data findings in persisted evidence and outputs.
+## Five user-facing layers
 
-The evidence-confidence gate asks whether each required surface is complete, current and
-attributable to the same action/document/Preview epoch. The scenario-completeness gate
-asks whether all known material branches are closed. A missing surface blocks only the
-claims that depend on it.
+Every event feedback block always contains:
 
-## Comparison and causal rules
+| Layer | What it proves |
+|---|---|
+| Page/action reality | Reachability, route/state, interaction/outcome, visible business truth |
+| Data Layer API Call | Exact occurrence and planned source fields/values/types |
+| GTM Tags | Inventory, mapping, firing count, runtime fields/values |
+| Browser request | Logical send, destination, fields, outcome, duplicates/retries |
+| Surrounding behavior | Chronology and human-like anomaly assessment |
 
-- Preserve strict JSON semantics: booleans are not numbers; missing, undefined, null,
-  empty and populated are different states.
-- Allow wire-format coercion only in a transport claim that declares it.
-- Attribute observations by browser target, frame/document, route, action, Preview epoch,
-  event, tag, logical hit and transport attempt. Never assign an unbound row merely
-  because an action is currently open.
-- Reject capture timestamps that predate the action instead of trusting a newly supplied
-  action ID. Start `next` before the Preview connection's first measured load; keep
-  between-action unbound deltas in the continuous anomaly stream.
-- Consume Preview by epoch/index cursor. One completion may contain only indexes after
-  the frozen boundary; a new epoch must start at zero with a matching rebound identity.
-  This prevents historical session scans from becoming current evidence.
-- For a proved navigation/reload, the before page may belong to the old document while
-  occurrence evidence belongs to the explicitly rebound new document. Mixed post-action
-  documents or an unbound transition remain `BLOCKED`.
-- Merge retries/redirects for one logical hit but keep duplicate logical hits separate.
-- A settled complete exact source window proves a required event missing (`FAIL`); an
-  incomplete API Call/event list or late, partial, or truncated recorder is `BLOCKED`.
-- Missing runtime/request data under complete applicable capture is `FAIL`; incomplete
-  parameter/body capture is `BLOCKED`.
-- A dead/soft-404 page, failed form, unconfirmed purchase, or populated cart represented
-  as empty cannot pass because technical surfaces agree.
-- Unplanned source/state pushes are inspected between action boundaries. Flag only
-  material unexpected, duplicate, premature, delayed, wrong-context or contaminating
-  behavior; routine lifecycle/state noise can be classified without failing the event.
-- When ordinary consent is accidentally denied, tag/delivery rows are setup `BLOCKED`
-  with an instruction to accept the CMP; do not report client failures from that context.
-  An explicitly denied-consent scenario passes suppression only when fired/non-fired and
-  request windows are complete. Runtime/request values then become `NOT_APPLICABLE`.
-- A wrong or unattributable origin/container/Preview binding blocks every dependent
-  source/GTM/delivery/behavior claim. It does not manufacture downstream client failures.
+An inapplicable browser request is explicitly `NOT_APPLICABLE`; it is not silently
+omitted. Accumulated Data Layer, GTM Variables, consent, acquisition, recorder, form,
+media, and protected diagnostics appear only when activated. Data safety, evidence
+confidence, and scenario coverage appear when non-pass.
+
+Internally, typed claim domains may remain useful for deterministic roll-up, but they are
+not extra browser stages and must not expand the default feedback matrix.
+
+## Evidence and causal rules
+
+- Attribute evidence to browser context, tab, document/frame, action, Preview epoch/index,
+  event, concerned tag, logical hit, and transport attempt when available.
+- Consume only Preview indexes after the frozen cursor. A new epoch starts at zero with
+  a matching rebound identity.
+- The fully expanded API Call is normal source authority. Accumulated state and Variables
+  are diagnostics, never substitutes.
+- A tag may fire on a causal technical follow-up such as Trigger Group. Stop that causal
+  window at the next unrelated business event.
+- Keep every post-cursor business API Call. One uncaused `add_to_cart` between planned
+  interactions is a material interjection; routine GTM lifecycle rows are noise unless
+  they change tracking state or verdict.
+- Merge transport retries/redirects for one logical hit but keep duplicate logical hits
+  separate.
+- A settled complete source window proves a missing event `FAIL`; an incomplete source
+  window is `BLOCKED`.
+- A complete tag detail proves an absent mapping/runtime field `FAIL`; partial detail is
+  `BLOCKED`.
+- A complete attributable request window proves a missing request/parameter `FAIL`;
+  incomplete request/body capture is `BLOCKED`.
+- A dead/soft-404 page, failed form, unconfirmed purchase, stale product, or populated
+  cart represented as empty fails regardless of technically coherent downstream layers.
+- Wrong/unattributable browser or Preview binding blocks dependent checks and is not
+  relabelled as a client implementation failure.
+- An accidentally unaccepted ordinary CMP is a setup block; ask the user to accept it.
+  Consent suppression is certified only in an explicit consent scenario.
+- Agent/control violations preserve useful client evidence, block confidence where
+  necessary, and never trigger an automatic cleanup repeat.
 
 ## Status and roll-up
 
-- `PASS`: direct current-run evidence proves the applicable accepted claim.
-- `FAIL`: settled direct evidence contradicts it.
-- `BLOCKED`: an evidenced execution or observability limitation prevents judgement.
-- `REVIEW`: one precise verdict-changing semantic ambiguity remains.
-- `NOT_APPLICABLE`: evidence proves the applicability predicate false.
-- `PENDING`: the action, synchronization or scenario work is unfinished.
+- `PASS`: current attributable evidence proves the claim.
+- `FAIL`: settled complete evidence contradicts it.
+- `BLOCKED`: execution or observability prevents a trustworthy decision.
+- `REVIEW`: one precise verdict-changing ambiguity remains.
+- `NOT_APPLICABLE`: the plan/scenario creates no obligation.
+- `PENDING`: required action or scenario coverage remains unfinished.
 
-Roll-up precedence is `FAIL` > `BLOCKED` > `REVIEW` > `PENDING` > `PASS` >
+Precedence is `FAIL` > `BLOCKED` > `REVIEW` > `PENDING` > `PASS` >
 `NOT_APPLICABLE`. A definite failure is not softened because another check is blocked.
-Technical delivery is visible separately but cannot override reality, behavior,
-confidence or coverage.
 
-## One-pass canonical feedback
+## Immediate per-event feedback contract
 
-`complete` is the one-pass checkpoint. It commits action deltas, ingests the one bounded
-Preview delta, builds the causal model once, and emits canonical feedback immediately.
-If it is interrupted after the commit record, rerunning the same action ID and bundle
-resumes synchronization without another browser action.
+`complete` is tolerant of partial capture. It commits usable evidence, builds the causal
+model once, persists `EVENT_FEEDBACK_ISSUED`, and emits feedback before another action.
+Omitted page, Preview, or network evidence creates explained `BLOCKED` layers; it does
+not make the command refuse feedback.
 
-The continuous delta may begin at the prior committed boundary. Timestamped rows before
-the current action stay unbound and can revise the immediately preceding event in this
-same model pass; they are never relabelled as current-action evidence.
+Each event block contains:
 
-After every completed action, render two levels from the same canonical result even when
-scenario coverage remains pending or contains a closure error:
+- event and overall status/finality;
+- scenario status when several scenarios exist;
+- all five default layer rows in fixed order;
+- status and passed/total checks for each layer;
+- GTM subcounts for inventory, mapping, firing, and runtime;
+- for every non-pass layer: exact reason, affected fields/checks, observed/expected when
+  available, targeted `Check next`, and evidence IDs;
+- conditional diagnostics/gates only when applicable or non-pass.
 
-1. one compact row per material scenario/signature, then a six-domain event summary;
-2. compact operational-layer rows, with detailed proof-target rows retained in canonical
-   JSON/XLSX.
+Every detailed claim remains in canonical JSON/XLSX with scenario, action, target,
+status, observed, expected, reason code/reason, next check, and evidence. Grouping passing
+rows must never hide differing or non-pass fields.
 
-Each compact layer row shows status, passed/total checks, concise non-pass
-observed-versus-expected exceptions, `Check next`, and stable evidence IDs. Detailed rows
-retain scenario, domain, exact target (for example DataLayer API, GTM Preview event,
-accumulated Data Layer state, resolved variable, named tag configuration/effective
-mapping/firing/runtime, browser request/destination, reality anchor, anomaly, safety or
-gate), status, observed, expected, reason and evidence. Identical passing rows may be
-grouped; all differing and non-pass rows remain scenario-specific. Conditional layers
-remain explicit through applicability or `NOT_APPLICABLE` reasoning rather than silent
-omission. An action-card violation is an
-operator-protocol `BLOCKED` row: useful client evidence remains, no client `FAIL` is
-invented, and no automatic repeat starts.
+Late continuous evidence may revise the immediately preceding event. Emit that revised
+event feedback in the same completion response; never silently mutate it.
 
-Feedback lists concerned tags, occurrence/count, tested values/signatures, plan gaps,
-limitations and exact retest actions. Late journey anomalies may amend an earlier event.
-An incomplete coverage annotation is persisted and shown as `PENDING`/`BLOCKED`; it does
-not roll back machine evidence or suppress immediate feedback. A committed
-evidence-defect retest supersedes its referenced bad action only when the event slice and
-scenario are identical; user-request retests do not erase prior evidence.
+## Finalization
 
-## Finalization and reports
+`finish` refuses open actions/protected handoffs and non-final coverage, then renders:
 
-`finish` reconciles all compiled obligations, material branches, unclassified
-source/network/Preview observations, protected handoffs, identity/confidence gaps and
-privacy findings. It refuses non-final events and renders reports once. A completed run
-may contain honest `FAIL`, `BLOCKED` or `REVIEW`; it must not remain open merely because
-unobtainable evidence cannot become pass.
+- plan-ordered `conclusion.md` whose event table contains all five layer statuses and why;
+- canonical `results.json`;
+- validated `results.xlsx` with five-layer event summary, scenarios, detailed
+  inspections, defects/limits, evidence index, and telemetry;
+- concise sidecars where generated.
 
-Deliver:
-
-- plan-ordered `conclusion.md` and canonical `results.json`;
-- validated `results.xlsx` with conclusion, event/domain/operational details,
-  requirements, scenarios/coverage, anomalies, tags/delivery, defects/retests,
-  limitations and telemetry;
-- concise CSV/sidecar views where generated.
-
-Outputs must be formula-safe and privacy-safe. Privacy findings are action-scoped; a
-network finding applies to an event only when it belongs to that event's concerned
-logical send. An unrelated background request remains redacted evidence but cannot create
-a false event failure. `report` may rebuild only from a frozen canonical run; `reopen`
-records explicit authorization before any revision.
+Outputs are formula-safe and privacy-safe. Only action-scoped concerned evidence can
+affect an event's safety verdict. `report` rebuilds from the frozen run; `reopen` requires
+explicit authorization. The deterministic renderer owns statuses. Analyst reasoning may
+only add an evidence-backed `FAIL` or `REVIEW`.

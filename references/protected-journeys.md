@@ -23,11 +23,11 @@ with personal or client-sensitive data.
 
 ## Consent
 
-For an ordinary tracking scenario, inspect the CMP and accept it before the measured
-interaction when consent is not already granted. Do not wait for the user to notice the
-banner: otherwise expected tags may be suppressed and every downstream layer can fail
-for the wrong reason. If consent setup used an unmeasured page, authorize only one Core
-load afterward.
+For an ordinary tracking scenario, ask the user to accept the CMP in the managed window
+before the measured interaction when consent is not already granted. Do not build or
+probe vendor-specific CMP automation during startup: otherwise preparation becomes slow
+and brittle. If consent setup used an unmeasured page, authorize only one Core load
+afterward.
 
 Leave consent untouched, reject it, withdraw it, or select granular choices only when
 that scenario is explicitly requested or materially discovered. Activate consent checks
@@ -40,8 +40,8 @@ separate from any explicitly authorized override. An override tests only the ove
 path and cannot erase a natural-path defect.
 
 If an ordinary action was accidentally captured while required consent remained denied,
-classify dependent firing/delivery rows as setup `BLOCKED`, accept consent, and use one
-structured retest. Do not blame the client implementation. In an explicitly denied
+classify dependent firing/delivery rows as setup `BLOCKED`, ask the user to accept consent,
+and use one structured retest. Do not blame the client implementation. In an explicitly denied
 scenario, suppression passes only with complete fired/non-fired and network windows; an
 unavailable surface remains `BLOCKED`.
 

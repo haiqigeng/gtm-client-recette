@@ -1,7 +1,7 @@
 interface:
   display_name: "GTM Client Recette"
   short_description: "Run Playwright-first expert GTM Preview acceptance QA"
-  default_prompt: "Use $gtm-client-recette to run claim-driven client-side GTM Preview recette. Ask once for the plan, unresolved tag scope, protected prerequisites, and readiness; after ready, open a blank headed Playwright-managed Edge window immediately so the user can prepare authentication, Preview, site, and ordinary consent while init normalizes the plan. Treat any login/consent page as setup; then freeze next before exactly one measured Core load. Derive URL/environment/container from the prepared runtime. Use init -> next -> one interaction -> complete, one cursor-bounded Preview delta, no cleanup reload or guessed fallback. Keep API Call, accumulated Data Layer state, Variables, concerned tag mapping/firing/runtime, browser request, reality, anomalies, confidence, and coverage separate. Emit compact per-layer feedback after every action and retain full claim detail in canonical outputs."
+  default_prompt: "Use $gtm-client-recette to run the fastest trustworthy tracking-plan-led GTM Preview recette in headed managed Edge, reconciling reality, exact API Call, concerned GTM tag mapping/firing/runtime, browser request, and surrounding behavior, with immediate explained per-event layer feedback."
 dependencies:
   tools:
     - type: "mcp"

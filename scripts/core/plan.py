@@ -1317,6 +1317,7 @@ def _add_explicit_mirrors(
     location: str,
 ) -> None:
     mirrors = (
+        ("state_path", "gtm", "data_layer_state", "preview"),
         ("resolved_path", "gtm", "resolved_variable", "preview"),
         ("configuration_path", "gtm", "tag_configuration", "preview"),
         ("runtime_path", "delivery", "runtime_parameter", "preview"),
@@ -1354,7 +1355,6 @@ def _add_ga4_forwarding_claims(
     applicability: dict[str, Any],
     path: str,
     delivery_event_name: str | None,
-    state_event_name: str | None,
     tag_event_name: str | None,
     ga4_tags: list[dict[str, Any]],
     destinations: list[str],
@@ -1364,35 +1364,6 @@ def _add_ga4_forwarding_claims(
         "tag_scope": ["GA4"],
         "destination_allowlist": destinations,
     }
-    builder.add(
-        "gtm",
-        {
-            "surface": "preview",
-            "check": "data_layer_state",
-            "path": path,
-            "event_name": state_event_name,
-            "label": f"Tag Assistant Data Layer state - {path}",
-        },
-        predicate,
-        ["preview"],
-        source,
-        applicability=applicability,
-    )
-    if expectation.get("resolved_path") in (None, ""):
-        builder.add(
-            "gtm",
-            {
-                "surface": "preview",
-                "check": "resolved_variable",
-                "path": path,
-                "event_name": tag_event_name,
-                "label": f"Resolved variable - {path}",
-            },
-            predicate,
-            ["preview"],
-            source,
-            applicability=applicability,
-        )
     targets = ga4_tags or [None]
     for tag in targets:
         tag_id = tag["tag_id"] if tag else None
@@ -1467,7 +1438,6 @@ def _compile_requirement(
     source_event_name: str | None,
     delivery_event_name: str | None,
     source_only: bool,
-    state_only: bool,
     event_negative: bool,
 ) -> None:
     expectation = row.get("expectation") if isinstance(row.get("expectation"), dict) else row
@@ -1533,7 +1503,6 @@ def _compile_requirement(
             applicability,
             path,
             delivery_event_name,
-            None if state_only else delivery_event_name,
             delivery_event_name,
             ga4_tags,
             destinations,
@@ -1946,7 +1915,6 @@ def _compile_event(
                 source_event_name=source_event_name,
                 delivery_event_name=delivery_event_name,
                 source_only=source_only,
-                state_only=state_only,
                 event_negative=raw.get("negative") is True,
             )
         except PredicateError as error:

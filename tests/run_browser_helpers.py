@@ -11,7 +11,9 @@ from playwright.sync_api import sync_playwright
 ROOT = Path(__file__).resolve().parents[1]
 RECORDER = ROOT / "scripts" / "datalayer_recorder.js"
 CENSUS = ROOT / "scripts" / "dom_interaction_census.js"
+COLLECTOR = ROOT / "scripts" / "tag_assistant_collector.js"
 SMOKE_PAGE = ROOT / "tests" / "fixtures" / "browser_helpers_smoke.html"
+COLLECTOR_PAGE = ROOT / "tests" / "fixtures" / "tag_assistant_collector.html"
 
 
 def require(condition: bool, message: str, details: object = None) -> None:
@@ -424,6 +426,64 @@ def main() -> int:
             lifecycle,
         )
         run_context.close()
+
+        collector_page = context.new_page()
+        collector_page.goto(COLLECTOR_PAGE.as_uri())
+        collector = collector_page.evaluate(
+            COLLECTOR.read_text(encoding="utf-8"),
+            {
+                "action_id": "ACT-COLLECTOR",
+                "preview_cursor": {"epoch": "EPOCH-COLLECTOR", "index": 0},
+                "source_anchor": {
+                    "mode": "event",
+                    "event_names": ["view_item"],
+                    "field_paths": [
+                        "event",
+                        "ecommerce.currency",
+                        "ecommerce.items[].item_id",
+                    ],
+                },
+                "delivery_event_names": ["view_item"],
+                "tag_ids": ["GA4 - View Item"],
+                "tag_scope": ["GA4"],
+                "preview_panels": ["API Call", "Tags"],
+                "timeout_ms": 5000,
+            },
+        )
+        require(collector["complete"] is True, "Collector did not complete.", collector)
+        require(
+            [row["event_name"] for row in collector["events"]]
+            == ["Container Loaded", "view_item", "Trigger Group", "add_to_cart"],
+            "Collector lost the chronological interjected event.",
+            collector,
+        )
+        first = collector["events"][1]
+        payload = first["api_call"]["arguments"][0]
+        require(
+            payload["ecommerce"]["items"][0]["item_id"] == "SKU-1",
+            "Collector did not parse the fully expanded API Call.",
+            first,
+        )
+        require(
+            first["tags"][0]["runtime_parameters"]["currency"] == "EUR"
+            and first["tags"][0]["runtime_parameters"]["item_id"] == "SKU-1",
+            "Collector did not parse concerned-tag runtime Values.",
+            first,
+        )
+        require(
+            "data_layer_state" not in first and "resolved_state" not in first,
+            "Default collection opened conditional diagnostics.",
+            first,
+        )
+        panel_reads = collector_page.evaluate("window.__panelReads")
+        require(
+            "Tags:1" not in panel_reads
+            and "Tags:4" not in panel_reads
+            and panel_reads.get("Tags:2", 0) > 0
+            and panel_reads.get("Tags:3", 0) > 0,
+            "Collector inspected GTM Tags outside the planned causal window.",
+            panel_reads,
+        )
         browser.close()
 
     print("Browser helper checks passed.")

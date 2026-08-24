@@ -1,8 +1,7 @@
 # Security Policy
 
-The current source candidate is **v6.0.1**. Its stable release requires the sanitized
-live Playwright/Tag Assistant pilot described in the repository release checks. Only the
-latest stable release receives fixes.
+The current source candidate is **v7.0.0**. Only the latest stable release receives
+fixes. Sanitized live pilots may be validated, but client evidence is never committed.
 
 Report vulnerabilities privately through GitHub security advisories. Do not
 open a public issue containing credentials, personal data, client domains,

@@ -96,6 +96,7 @@ def _inspection(
         "reason_code": reason_code,
         "reason": compact_reason(reason),
         "observed": _summary(observed),
+        "_observed_exact": observed,
         "expected": _summary(
             predicate_expected(claim.get("predicate", {})) if expected is None else expected
         ),
@@ -117,49 +118,45 @@ def _actions_for_event(model: dict[str, Any], event_id: str) -> list[dict[str, A
 def _scenario_groups(
     model: dict[str, Any], event: dict[str, Any], coverage: dict[str, Any]
 ) -> list[dict[str, Any]]:
-    actions = {
-        action["action_id"]: action for action in _actions_for_event(model, event["event_id"])
-    }
-    groups = []
+    actions = _actions_for_event(model, event["event_id"])
+    groups_by_id: dict[str, dict[str, Any]] = {}
+    action_group: dict[str, str] = {}
+    for action in actions:
+        scenario_id = str(action.get("scenario_id") or "ordinary")
+        group = groups_by_id.setdefault(
+            scenario_id,
+            {
+                "scenario_id": scenario_id,
+                "label": str(action.get("scenario_label") or scenario_id),
+                "values": action.get("scenario_values", {}),
+                "actions": [],
+                "behavior_signature": None,
+            },
+        )
+        group["actions"].append(action)
+        action_group[str(action["action_id"])] = scenario_id
+
+    # Coverage reviews annotate the canonical action scenario; they do not create a
+    # second scenario group with the same action under another label.
     for scenario in coverage.get("scenarios", []):
         if not isinstance(scenario, dict):
             continue
-        selected = [
-            actions[action_id]
-            for action_id in map(str, scenario.get("action_ids", []))
-            if action_id in actions
-        ]
-        groups.append(
-            {
-                "scenario_id": str(scenario.get("scenario_id") or "ordinary"),
-                "label": str(scenario.get("label") or scenario.get("scenario_id") or "Scenario"),
-                "values": scenario.get("values", {}),
-                "actions": selected,
-                "behavior_signature": scenario.get("behavior_signature"),
-            }
-        )
-    known = {group["scenario_id"] for group in groups}
-    for action in actions.values():
-        scenario_id = str(action.get("scenario_id") or "ordinary")
-        if scenario_id not in known:
-            groups.append(
-                {
-                    "scenario_id": scenario_id,
-                    "label": str(action.get("scenario_label") or scenario_id),
-                    "values": action.get("scenario_values", {}),
-                    "actions": [action],
-                    "behavior_signature": None,
-                }
+        selected_group_ids = list(
+            dict.fromkeys(
+                action_group[action_id]
+                for action_id in map(str, scenario.get("action_ids", []))
+                if action_id in action_group
             )
-            known.add(scenario_id)
-        elif (
-            action
-            not in next(group for group in groups if group["scenario_id"] == scenario_id)["actions"]
-        ):
-            next(group for group in groups if group["scenario_id"] == scenario_id)[
-                "actions"
-            ].append(action)
-    return groups
+        )
+        for scenario_id in selected_group_ids:
+            group = groups_by_id[scenario_id]
+            if scenario.get("label"):
+                group["label"] = str(scenario["label"])
+            if isinstance(scenario.get("values"), dict) and scenario["values"]:
+                group["values"] = scenario["values"]
+            if scenario.get("behavior_signature") is not None:
+                group["behavior_signature"] = scenario.get("behavior_signature")
+    return list(groups_by_id.values())
 
 
 def _applicable(claim: dict[str, Any], scenario: dict[str, Any]) -> bool | None:
@@ -578,13 +575,32 @@ def _settlement_inspection(
     health = [row for row in evidence.get("health", []) if row.get("phase") == "after"]
     latest = health[-1] if health else None
     if latest is None:
+        pages = [row for row in evidence.get("pages", []) if row.get("phase") == "after"]
+        page = pages[-1] if pages else None
+        completion = page.get("completion", {}) if isinstance(page, dict) else {}
+        page_settled = isinstance(page, dict) and (
+            page.get("settled") is True
+            or str(page.get("ready_state") or "").casefold() in {"interactive", "complete"}
+            or (isinstance(completion, dict) and completion.get("succeeded") is True)
+        )
+        if page_settled:
+            return _inspection(
+                claim,
+                "PASS",
+                "settlement.page_boundary",
+                "The post-action page observation proves a settled visible outcome.",
+                observed=(completion or page.get("ready_state") or page.get("page_valid")),
+                expected="Settled action boundary",
+                evidence=[page.get("evidence_ref")],
+                scenario_id=scenario_id,
+            )
         return _inspection(
             claim,
             "BLOCKED",
             "settlement.unobserved",
-            "No action-bound post-interaction health/settlement evidence was captured.",
+            "No settled post-interaction page or optional health boundary was captured.",
             expected="Settled action boundary",
-            check_next="Collector health and bounded quiet/pending evidence state",
+            check_next="Current settled page outcome or optional pending-work evidence",
             scenario_id=scenario_id,
         )
     if latest.get("settled") is not True:
@@ -826,6 +842,41 @@ def _preview_matches(
     ]
 
 
+def _state_preview_anchors(
+    evidence: dict[str, list[dict[str, Any]]], event: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """Select the state-only source message by planned field evidence, not its UI label."""
+    paths = list(
+        dict.fromkeys(
+            str(claim.get("target", {}).get("path") or "")
+            for claim in event.get("claims", [])
+            if claim.get("archetype") == "source"
+            and str(claim.get("target", {}).get("path") or "") not in {"", "event"}
+        )
+    )
+    candidates = [
+        row
+        for row in evidence.get("preview_events", [])
+        if isinstance(row.get("api_call"), dict) and row.get("api_call", {}).get("complete") is True
+    ]
+    scored: list[tuple[int, dict[str, Any]]] = []
+    for row in candidates:
+        arguments = [
+            value
+            for value in row.get("api_call", {}).get("arguments", [])
+            if isinstance(value, dict)
+        ]
+        score = sum(any(path_values(argument, path) for argument in arguments) for path in paths)
+        scored.append((score, row))
+    if scored:
+        best = max(score for score, _ in scored)
+        if best > 0:
+            winners = [row for score, row in scored if score == best]
+            bookmarked = [row for row in winners if row.get("bookmarked") is True]
+            return bookmarked if len(bookmarked) == 1 else winners if len(winners) == 1 else []
+    return _preview_matches(evidence, None)
+
+
 _TECHNICAL_PREVIEW_NAMES = {
     "consentinitialisation",
     "consentinitialization",
@@ -866,22 +917,17 @@ def _preview_business_boundary(row: dict[str, Any], event_name: str) -> bool:
     return bool(not pushed and row_name != event_name and not _technical_preview_name(row_name))
 
 
-def _preview_causal_rows(
-    evidence: dict[str, list[dict[str, Any]]], event_name: str | None
+def _causal_rows_from_anchors(
+    evidence: dict[str, list[dict[str, Any]]],
+    anchors: list[dict[str, Any]],
+    *,
+    event_name: str,
+    state_only: bool,
 ) -> list[dict[str, Any]]:
-    """Join exact source rows to their bounded technical follow-up rows.
-
-    API Call, accumulated Data Layer, and Variables stay tied to the exact message.
-    Tag firing and runtime details may legitimately appear on a following GTM Trigger
-    Group, but never across the next business event.
-    """
-    exact = _preview_matches(evidence, event_name)
-    if event_name is None:
-        return exact
     all_rows = evidence.get("preview_events", [])
     output: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for source in exact:
+    for source in anchors:
         source_epoch = str(source.get("epoch") or "")
         source_action = str(source.get("action_id") or "")
         try:
@@ -910,13 +956,55 @@ def _preview_causal_rows(
                 continue
             if source_index is not None and row_index < source_index:
                 continue
-            if row is not source and _preview_business_boundary(row, str(event_name)):
-                break
+            if row is not source:
+                arguments = (
+                    row.get("api_call", {}).get("arguments", [])
+                    if isinstance(row.get("api_call"), dict)
+                    else []
+                )
+                pushed = [
+                    str(argument.get("event") or "")
+                    for argument in arguments
+                    if isinstance(argument, dict)
+                ]
+                state_boundary = state_only and any(
+                    not name or (name != event_name and not _technical_preview_name(name))
+                    for name in pushed
+                )
+                if state_boundary or _preview_business_boundary(row, event_name):
+                    break
             identity = str(row.get("occurrence_id") or f"{source_epoch}:{row_index}")
             if identity not in seen:
                 seen.add(identity)
                 output.append(row)
     return output
+
+
+def _preview_causal_rows(
+    evidence: dict[str, list[dict[str, Any]]],
+    event_name: str | None,
+    event: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Join exact source rows to their bounded technical follow-up rows.
+
+    API Call, accumulated Data Layer, and Variables stay tied to the exact message.
+    Tag firing and runtime details may legitimately appear on a following GTM Trigger
+    Group, but never across the next business event.
+    """
+    state_only = isinstance(event, dict) and event.get("mode") == "state_only"
+    anchors = (
+        _state_preview_anchors(evidence, event)
+        if state_only
+        else _preview_matches(evidence, event_name)
+    )
+    if not anchors:
+        return []
+    return _causal_rows_from_anchors(
+        evidence,
+        anchors,
+        event_name=str(event_name or ""),
+        state_only=state_only,
+    )
 
 
 def _preview_complete(rows: list[dict[str, Any]], key: str) -> bool:
@@ -1329,6 +1417,39 @@ def _configuration_mentions_path(value: Any, path: str) -> bool:
     return False
 
 
+def _configuration_has_automatic_mapping(
+    value: Any, path: str, *, ecommerce_context: bool = False
+) -> bool:
+    if not path.startswith("ecommerce."):
+        return False
+    if isinstance(value, list):
+        return any(
+            _configuration_has_automatic_mapping(child, path, ecommerce_context=ecommerce_context)
+            for child in value
+        )
+    if not isinstance(value, dict):
+        return False
+    for key, child in value.items():
+        normalized_key = "".join(
+            character for character in str(key).casefold() if character.isalnum()
+        )
+        child_context = ecommerce_context or "ecommerce" in normalized_key
+        declares_ecommerce_source = child_context and any(
+            marker in normalized_key for marker in ("send", "use", "source", "data")
+        )
+        if declares_ecommerce_source and (
+            child is True
+            or str(child or "").strip().casefold()
+            in {"true", "data layer", "datalayer", "automatic", "1"}
+        ):
+            return True
+        if isinstance(child, (dict, list)) and _configuration_has_automatic_mapping(
+            child, path, ecommerce_context=child_context
+        ):
+            return True
+    return False
+
+
 def _effective_mapping_result(
     claim: dict[str, Any],
     rows: list[dict[str, Any]],
@@ -1348,12 +1469,17 @@ def _effective_mapping_result(
         for tag in details
         if _configuration_mentions_path(tag.get("configuration"), path)
     ]
+    automatic = [
+        _tag_identity(tag)
+        for tag in details
+        if _configuration_has_automatic_mapping(tag.get("configuration"), path)
+    ]
     runtime = []
     for tag in details:
         payload = tag.get("runtime_parameters", tag.get("runtime_payload", {}))
         if any(path_values(payload, candidate) for candidate in candidates):
             runtime.append(_tag_identity(tag))
-    covered = list(dict.fromkeys([*direct, *runtime]))
+    covered = list(dict.fromkeys([*direct, *automatic, *runtime]))
     if covered:
         return _inspection(
             claim,
@@ -1363,16 +1489,31 @@ def _effective_mapping_result(
             observed={
                 "covered_by_tags": covered,
                 "direct_configuration": direct,
+                "automatic_mapping": automatic,
                 "runtime": runtime,
             },
             expected={"path": path, "concerned_tags": tag_ids},
             evidence=refs,
             scenario_id=scenario_id,
         )
-    complete = _preview_complete(rows, "tag_details") and (
-        _preview_complete(rows, "runtime_parameters")
-        or any(tag.get("runtime_complete") is True for tag in details)
+    tag_configuration_complete = (
+        _preview_complete(rows, "tag_details")
+        and bool(details)
+        and all(tag.get("configuration") is not None for tag in details)
     )
+    runtime_complete = _preview_complete(rows, "runtime_parameters") or any(
+        tag.get("runtime_complete") is True for tag in details
+    )
+
+    def unresolved_reference(value: Any) -> bool:
+        if isinstance(value, dict):
+            return any(unresolved_reference(child) for child in value.values())
+        if isinstance(value, list):
+            return any(unresolved_reference(child) for child in value)
+        return isinstance(value, str) and "{{" in value and "}}" in value
+
+    unresolved = any(unresolved_reference(tag.get("configuration")) for tag in details)
+    complete = runtime_complete or (tag_configuration_complete and not unresolved)
     return _inspection(
         claim,
         "FAIL" if complete else "BLOCKED",
@@ -1380,7 +1521,7 @@ def _effective_mapping_result(
         (
             "No direct, object/settings, automatic, or runtime mapping covers the planned parameter."
             if complete
-            else "Effective tag mapping evidence is incomplete."
+            else "Effective tag mapping evidence is incomplete or still references an unresolved settings variable."
         ),
         observed={"concerned_tags": tag_ids, "path": path},
         expected="Effective mapping for every destination-applicable planned parameter",
@@ -1394,13 +1535,19 @@ def _gtm_result(
     claim: dict[str, Any],
     evidence: dict[str, list[dict[str, Any]]],
     model: dict[str, Any],
+    event: dict[str, Any],
     scenario_id: str,
 ) -> dict[str, Any]:
     target = claim.get("target", {})
-    exact_rows = _preview_matches(evidence, target.get("event_name"))
     check = target.get("check")
+    state_only = event.get("mode") == "state_only"
+    exact_rows = (
+        _state_preview_anchors(evidence, event)
+        if state_only
+        else _preview_matches(evidence, target.get("event_name"))
+    )
     if not exact_rows:
-        if target.get("event_name") is None:
+        if state_only or target.get("event_name") is None:
             return _inspection(
                 claim,
                 "BLOCKED",
@@ -1415,7 +1562,7 @@ def _gtm_result(
     rows = (
         exact_rows
         if check in {"event_match", "resolved_variable", "data_layer_state"}
-        else _preview_causal_rows(evidence, target.get("event_name"))
+        else _preview_causal_rows(evidence, target.get("event_name"), event)
     )
 
     refs = [ref for row in rows for ref in row.get("evidence_refs", [])]
@@ -1548,10 +1695,11 @@ def _delivery_candidates(
 def _runtime_parameter_result(
     claim: dict[str, Any],
     evidence: dict[str, list[dict[str, Any]]],
+    event: dict[str, Any],
     scenario_id: str,
 ) -> dict[str, Any]:
     target = claim.get("target", {})
-    rows = _preview_causal_rows(evidence, target.get("event_name"))
+    rows = _preview_causal_rows(evidence, target.get("event_name"), event)
     tag_id = str(target.get("tag_id") or "")
     details, fired_count, _, tag_ids = _find_concerned_tags(rows, target)
     display_tag = tag_id or ", ".join(tag_ids) or "runtime-discovered in-scope tag"
@@ -1789,7 +1937,7 @@ def _delivery_result(
     target = claim.get("target", {})
     check = target.get("check")
     if check == "runtime_parameter":
-        return _runtime_parameter_result(claim, evidence, scenario_id)
+        return _runtime_parameter_result(claim, evidence, event, scenario_id)
 
     sends = _delivery_candidates(evidence, target)
     if check == "request_parameter":
@@ -3058,7 +3206,7 @@ def _evaluate_claim(
     if archetype == "source":
         return _source_result(claim, evidence, scenario_id)
     if archetype == "gtm":
-        return _gtm_result(claim, evidence, model, scenario_id)
+        return _gtm_result(claim, evidence, model, event, scenario_id)
     if archetype == "delivery":
         return _delivery_result(claim, evidence, event, scenario_id)
     if archetype == "sequence":
@@ -3116,13 +3264,73 @@ def _domain_rollup(inspections: list[dict[str, Any]]) -> dict[str, dict[str, Any
             }
             continue
         status = worst_status((row["status"] for row in rows), default="NOT_APPLICABLE")
-        reason = next((row["reason"] for row in rows if row["status"] == status), rows[0]["reason"])
+        reason_row = _best_reason_row(rows, status)
+        reason = reason_row["reason"] if reason_row else rows[0]["reason"]
         output[domain] = {"status": status, "reason": reason, "checks": len(rows)}
     return output
 
 
 def _scenario_status(domains: dict[str, dict[str, Any]]) -> str:
     return worst_status((row["status"] for row in domains.values()), default="PENDING")
+
+
+_GENERIC_REASON_CODES = {
+    "gtm.event_missing",
+    "gtm.preview_unavailable",
+    "gtm.state_anchor_ambiguous",
+    "binding.dependent_check_blocked",
+    "action.pending",
+}
+
+
+def _reason_specificity(row: dict[str, Any]) -> tuple[int, int, int]:
+    """Prefer actionable mismatches over downstream generic fallout of the same status."""
+    code = str(row.get("reason_code") or "")
+    target = row.get("target", {}) if isinstance(row.get("target"), dict) else {}
+    concrete = any(
+        token in code
+        for token in (
+            "parameter_absent",
+            "mapping_absent",
+            "predicate",
+            "mismatch",
+            "transport",
+            "duplicate",
+            "unexpected",
+            "business.",
+            "sensitive",
+        )
+    )
+    return (
+        0 if code in _GENERIC_REASON_CODES else 1,
+        1 if concrete else 0,
+        1 if target.get("path") else 0,
+    )
+
+
+def _best_reason_row(rows: list[dict[str, Any]], status: str) -> dict[str, Any] | None:
+    candidates = [row for row in rows if row.get("status") == status]
+    return max(candidates, key=_reason_specificity, default=None)
+
+
+def _expected_checks(event: dict[str, Any]) -> list[dict[str, Any]]:
+    checks = [
+        {"domain": "reality", "check": "binding"},
+        {"domain": "reality", "check": "settlement"},
+        {"domain": "behavior", "check": "execution_protocol"},
+    ]
+    for claim in event.get("claims", []):
+        if not isinstance(claim, dict):
+            continue
+        target = claim.get("target", {}) if isinstance(claim.get("target"), dict) else {}
+        checks.append(
+            {
+                "domain": claim.get("domain"),
+                "check": target.get("check"),
+                "claim_id": claim.get("claim_id"),
+            }
+        )
+    return checks
 
 
 def _pre_action_result(
@@ -3166,6 +3374,7 @@ def _pre_action_result(
         "coverage": coverage,
         "scenarios": [],
         "inspections": [],
+        "expected_checks": _expected_checks(event),
         "claim_count": event.get("claim_count", 0),
     }
 
@@ -3306,6 +3515,71 @@ def _block_binding_dependent_rows(
     return output
 
 
+def _cross_layer_values_coherent(source: Any, downstream: Any, *, wire: bool) -> bool:
+    if strict_equal(source, downstream):
+        return True
+    return wire and str(source) == str(downstream)
+
+
+def _apply_cross_layer_coherence(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Fail a passing tag/request value that differs from the exact API Call value."""
+    source_by_path: dict[str, Any] = {}
+    for row in rows:
+        target = row.get("target", {}) if isinstance(row.get("target"), dict) else {}
+        path = str(target.get("path") or "")
+        if (
+            path
+            and row.get("domain") == "source"
+            and target.get("check") != "event_occurrence"
+            and row.get("status") == "PASS"
+            and row.get("_observed_exact", MISSING) is not MISSING
+        ):
+            source_by_path.setdefault(path, row.get("_observed_exact"))
+    output = []
+    for row in rows:
+        target = row.get("target", {}) if isinstance(row.get("target"), dict) else {}
+        check = str(target.get("check") or "")
+        path = str(target.get("path") or "")
+        source = source_by_path.get(path, MISSING)
+        observed = row.get("_observed_exact", MISSING)
+        if (
+            source is not MISSING
+            and check in {"runtime_parameter", "request_parameter"}
+            and row.get("status") == "PASS"
+            and observed is not MISSING
+            and not _cross_layer_values_coherent(
+                source,
+                observed,
+                wire=check == "request_parameter",
+            )
+        ):
+            row = {
+                **row,
+                "status": "FAIL",
+                "reason_code": (
+                    "coherence.api_to_tag_mismatch"
+                    if check == "runtime_parameter"
+                    else "coherence.api_to_request_mismatch"
+                ),
+                "reason": (
+                    "The tag runtime value differs from the exact Data Layer API Call for "
+                    "the same tracking-plan field."
+                    if check == "runtime_parameter"
+                    else "The browser request value differs from the exact Data Layer API "
+                    "Call for the same tracking-plan field."
+                ),
+                "expected": _summary(source),
+                "check_next": (
+                    f"Effective tag mapping and runtime value for {path}"
+                    if check == "runtime_parameter"
+                    else f"Request encoding and value for {path}"
+                ),
+            }
+        row.pop("_observed_exact", None)
+        output.append(row)
+    return output
+
+
 def _inspect_action(
     event: dict[str, Any],
     plan: dict[str, Any],
@@ -3330,6 +3604,7 @@ def _inspect_action(
     )
     rows.extend(_consent_inspections(event, evidence, scenario_id))
     rows = _apply_consent_expectation(rows, event, evidence, group)
+    rows = _apply_cross_layer_coherence(rows)
     rows = _block_binding_dependent_rows(rows, binding)
     for row in rows:
         row["action_id"] = action_id
@@ -3423,12 +3698,9 @@ def judge_event(
         all_inspections.extend(inspections)
 
     status, confidence, domains = _event_rollup(all_inspections, coverage)
-    reason_row = next(
-        (row for row in all_inspections if row["status"] == status),
-        next(
-            (row for row in all_inspections if row["status"] in {"FAIL", "BLOCKED", "REVIEW"}),
-            None,
-        ),
+    reason_row = _best_reason_row(all_inspections, status) or next(
+        (row for row in all_inspections if row["status"] in {"FAIL", "BLOCKED", "REVIEW"}),
+        None,
     )
     return {
         "event_id": event_id,
@@ -3453,6 +3725,7 @@ def judge_event(
         "coverage": coverage,
         "scenarios": scenario_results,
         "inspections": all_inspections,
+        "expected_checks": _expected_checks(event),
         "claim_count": event.get("claim_count", 0),
     }
 

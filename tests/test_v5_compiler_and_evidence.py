@@ -72,12 +72,9 @@ class CompilerAndEvidenceTests(unittest.TestCase):
         self.assertIsNone(plan["events"][0]["source_event_name"])
         self.assertEqual(plan["events"][0]["delivery_event_name"], "page_view")
         core_claims = plan["events"][0]["claims"]
-        self.assertTrue(
-            all(
-                claim["target"].get("event_name") is None
-                for claim in core_claims
-                if claim["target"].get("check") == "data_layer_state"
-            )
+        self.assertFalse(
+            {"data_layer_state", "resolved_variable"}
+            & {str(claim["target"].get("check")) for claim in core_claims}
         )
         self.assertTrue(
             all(
@@ -85,7 +82,6 @@ class CompilerAndEvidenceTests(unittest.TestCase):
                 for claim in core_claims
                 if claim["target"].get("check")
                 in {
-                    "resolved_variable",
                     "effective_mapping",
                     "runtime_parameter",
                     "tag_inventory",
@@ -117,7 +113,7 @@ class CompilerAndEvidenceTests(unittest.TestCase):
     def test_json_yaml_and_xlsx_compile_to_typed_claims_with_source_coordinates(self) -> None:
         json_path = write_json(self.root / "plan.json", {"events": [default_event()]})
         json_plan = normalize_plan(json_path, scope=self.scope())
-        self.assertEqual(json_plan["schema_version"], "6.0")
+        self.assertEqual(json_plan["schema_version"], "7.0")
         self.assertTrue(json_plan["events"][0]["claims"])
 
         yaml_path = self.root / "plan.yaml"

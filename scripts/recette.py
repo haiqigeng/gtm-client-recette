@@ -83,7 +83,8 @@ def parser() -> argparse.ArgumentParser:
         "--action", required=True, help="Exact action_id returned by next; also enables safe retry."
     )
     complete.add_argument("--outcome-may-have-occurred", action="store_true")
-    complete.add_argument("--markdown", action="store_true")
+    complete.add_argument("--markdown", action="store_true", help="Explicit Markdown alias.")
+    complete.add_argument("--json", action="store_true", help="Print the compact JSON checkpoint.")
     complete.add_argument("--full", action="store_true")
 
     status = commands.add_parser("status", help="Replay current status without writing.")
@@ -174,12 +175,9 @@ def main(argv: list[str] | None = None) -> int:
                 action_id=args.action,
                 outcome_may_have_occurred=(True if args.outcome_may_have_occurred else None),
             )
-            if args.markdown:
-                for event in [*result["events"], *result.get("revised_events", [])]:
-                    print(render_event_feedback(event), end="")
-            elif args.full:
+            if args.full:
                 _print(result)
-            else:
+            elif args.json:
                 _print(
                     {
                         "action_id": result["action_id"],
@@ -191,6 +189,9 @@ def main(argv: list[str] | None = None) -> int:
                         ],
                     }
                 )
+            else:
+                for event in [*result["events"], *result.get("revised_events", [])]:
+                    print(render_event_feedback(event), end="")
         elif args.command == "status":
             _print(
                 status_view(args.run_dir)

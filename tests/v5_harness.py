@@ -143,6 +143,29 @@ class V5Harness:
             **updates,
         }
 
+    def setup_boundary(
+        self,
+        *,
+        consent_context: str = "ORDINARY_GRANTED",
+        include_binding: bool = True,
+    ) -> dict[str, Any]:
+        return {
+            "preview_cursor": {
+                "epoch": "EPOCH-1",
+                "index": self.preview_index - 1,
+                "preview_session_id": "PREVIEW-1",
+            },
+            "consent_context": consent_context,
+            **({"binding": self.binding()} if include_binding else {}),
+        }
+
+    def next_input(self, capability: dict[str, Any] | None = None) -> dict[str, Any]:
+        return {
+            "capability": capability or self.capability(),
+            "health": self._health("before"),
+            "setup_boundary": self.setup_boundary(),
+        }
+
     def _health(self, phase: str) -> dict[str, Any]:
         return {
             "observed_at": utc_now(),

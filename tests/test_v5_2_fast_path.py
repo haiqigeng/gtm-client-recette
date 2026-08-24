@@ -229,8 +229,8 @@ class FastPathRegressionTests(unittest.TestCase):
             (row["target"].get("check"), row["target"].get("path")): row["status"]
             for row in result["inspections"]
         }
-        self.assertEqual(checks[("data_layer_state", "ecommerce.currency")], "PASS")
-        self.assertEqual(checks[("resolved_variable", "ecommerce.currency")], "PASS")
+        self.assertNotIn(("data_layer_state", "ecommerce.currency"), checks)
+        self.assertNotIn(("resolved_variable", "ecommerce.currency"), checks)
         self.assertEqual(checks[("effective_mapping", "ecommerce.currency")], "PASS")
         self.assertEqual(checks[("runtime_parameter", "ecommerce.currency")], "PASS")
         self.assertEqual(checks[("request_parameter", "ecommerce.currency")], "PASS")

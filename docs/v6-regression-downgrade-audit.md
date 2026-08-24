@@ -1,6 +1,9 @@
 # v6 Regression and Downgrade Audit
 
-Status: v6.0.1 release audit, 2026-08-24.
+> Historical v6 working audit. The active comparison is
+> [v7 Regression and Downgrade Audit](v7-regression-downgrade-audit.md).
+
+Status: v6.0.1 post-run optimization audit, 2026-08-24.
 
 ## Executive result
 
@@ -23,7 +26,8 @@ presented as evidence of live latency.
 | v5.0.0 | Replaced fixed stages with typed claims and vertical judgement. | Initial plan/source/cross-layer contracts were incomplete. |
 | v5.1.0 | Corrected workbook intake, source authority and per-field layer projection. | Browser handoff remained split across separate action and Preview operations. |
 | v5.2.0 | Added API-Call-first source and smaller persisted handshake. | Existing-window control and agent-selected staging still produced repeated loads and long Preview handshakes in real use. |
-| v6.0.0 | Playwright-managed Edge, frozen single action and one `complete` pass. | Requires a configured compatible MCP server and a one-time login in its managed profile. |
+| v6.0.0 | Playwright-managed Edge, frozen single action and one `complete` pass. | The action card did not yet provide a complete acquisition contract; real agents still assembled Preview evidence manually and could delay feedback. |
+| v6.0.1 post-run working tree | Adds a prepared-session cursor/consent boundary, plan-derived capture specification, one bounded Tag Assistant collector, state-to-technical causal joins and compact persisted feedback. | Live Tag Assistant DOM extraction remains the release-pilot risk; incomplete extraction blocks rather than triggering a reload. |
 
 The tagged historical suites are rerun separately during final validation. They prove
 their own contracts; current adversarial tests prove that v6 retains the intended
@@ -39,14 +43,15 @@ Runtime size below uses one reproducible metric for every version: physical line
 | v5.0.0 | 28 / 11,150 | 76 pass |
 | v5.1.0 | 28 / 12,541 | 88 pass |
 | v5.2.0 | 28 / 13,063 | 95 pass |
-| v6.0.1 working tree | 28 / 14,643 | 128 pass |
+| v6.0.1 post-run working tree | 29 / 15,434 | 135 pass + 4 subtests |
 
-The optimized v6 tree remains about 17% smaller than v3.0 and 37% smaller than v3.1 by
+The optimized v6 tree remains about 13% smaller than v3.0 and 34% smaller than v3.1 by
 this repository-level runtime line count. The increase over v5.2 is concentrated in the
 enforceable Playwright/action contract, loss-aware intake, deterministic cross-layer
-judgement, compact output and generalized regressions. No runtime file, Python
-dependency, browser family, service or ledger was added. The obsolete pre-Preview pulse
-and duplicate model build remain removed.
+judgement, compact output and generalized regressions. One dependency-free browser helper
+was added for bounded Tag Assistant acquisition; no Python dependency, browser family,
+service or ledger was added. The obsolete pre-Preview pulse and duplicate model build
+remain removed.
 
 ## Regression matrix
 
@@ -66,6 +71,8 @@ and duplicate model build remain removed.
 | Forms, consent and acquisition | Preserved conditionally | Ordinary interactions run; protected credentials/CAPTCHA/payment use same-session handoff. |
 | Per-event detail | Preserved and clearer | Every applicable layer retains status, reason, expected/observed, check-next and evidence. |
 | Failure attribution | Improved | Browser/control mistakes are `BLOCKED`, separate from client implementation `FAIL`. |
+| State-only Core correlation | Improved | Planned fields identify the source API Call; accumulated state/Variables stay on that row while declared delivery or Trigger Group tag/runtime rows join causally until the next unrelated business event. |
+| Scenario identity | Improved | A coverage label can annotate an action but cannot duplicate that action into a second judged scenario. |
 
 ## New-control-path risks reviewed
 
@@ -98,9 +105,29 @@ Exact plan-declared tag or destination IDs remain strict.
 
 ### Operation guard
 
-Only target navigation, reload and approved context reset affect the protocol verdict.
-Other counters are optional diagnostics. A violation preserves evidence, blocks
-confidence and never starts an automatic clean repeat.
+Target navigation, reload and approved context reset remain guarded. When supplied,
+existing counters now also enforce zero repeated full preflights, one Preview summary
+pass and one semantic retry at most. A violation preserves evidence, blocks confidence
+and never starts an automatic clean repeat.
+
+### Prepared-session boundary and user-owned consent
+
+The first action cannot open without a Preview cursor and explicit ordinary, variant or
+not-applicable consent context. This is a small control object, not a setup evidence
+ledger. The user handles ordinary CMP preparation; the agent does not spend browser time
+probing vendor-specific consent selectors. If Preview is explicitly unavailable, a null
+epoch at index zero is accepted and only Preview-dependent claims block.
+
+### Bounded Tag Assistant collector
+
+The new helper performs one post-cursor event-list read and selected panel/tag reads in a
+five-second window. It explicitly opens API Call, scores state anchors from that panel
+only, reads Tags alone on ordinary technical rows, preserves unplanned business API calls,
+and resolves current-event tags from a declared category when exact IDs are absent. A
+missing Preview index or panel blocks completion. It never navigates, reloads, opens a
+tab, installs a recorder or switches browser. Raw panel output must still be normalized
+to the canonical schema; partial output remains `BLOCKED`. This removes manual multi-call
+discovery without claiming that unparsed text is proof.
 
 ### Capability contract instead of an exact version pin
 
