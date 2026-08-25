@@ -1,9 +1,9 @@
 interface:
   display_name: "GTM Client Recette"
-  short_description: "Run Playwright-first expert GTM Preview acceptance QA"
-  default_prompt: "Use $gtm-client-recette to run the fastest trustworthy tracking-plan-led GTM Preview recette in headed managed Edge, reconciling reality, exact API Call, concerned GTM tag mapping/firing/runtime, browser request, and surrounding behavior, with immediate explained per-event layer feedback."
+  short_description: "Fixed XLSX-to-Playwright GTM acceptance QA"
+  default_prompt: "Use $gtm-client-recette to test this XLSX tracking plan in a headed Playwright MCP GTM Preview session."
 dependencies:
   tools:
     - type: "mcp"
       value: "playwright"
-      description: "Microsoft Playwright MCP configured for headed Microsoft Edge with a persistent workspace profile and semantic browser/network/Preview capabilities."
+      description: "Standalone Playwright MCP that opens and controls the single headed browser used for GTM Preview and the target site."

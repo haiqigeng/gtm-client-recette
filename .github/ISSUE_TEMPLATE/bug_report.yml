@@ -1,36 +1,45 @@
 name: Bug report
-description: Report a reproducible skill, validation, or workbook problem
+description: Report a reproducible v8 fixed-workflow defect
 title: "[Bug]: "
 labels: [bug]
 body:
   - type: markdown
     attributes:
       value: Do not include client data, domains, IDs, screenshots, credentials, or tracking plans.
+  - type: input
+    id: skill-version
+    attributes:
+      label: Skill release
+      placeholder: v8.0.0
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Fixed-workflow area
+      options:
+        - XLSX compilation
+        - Playwright or Preview preparation
+        - Page/action reality
+        - Data Layer API Call
+        - GTM Tags
+        - Browser request
+        - Surrounding behavior
+        - Scenario coverage
+        - Immediate feedback
+        - Final XLSX
+    validations:
+      required: true
   - type: textarea
     id: behaviour
     attributes:
-      label: Observed behaviour
-      description: Identify the affected area (plan/claim compilation, browser or Preview identity, reality, source signal, GTM decision, destination delivery, surrounding behavior, data safety, evidence confidence, scenario coverage, protected journey, event feedback, or final report).
+      label: Observed behavior
+      description: Give a synthetic reproduction and timing without client evidence.
     validations:
       required: true
   - type: textarea
     id: expected
     attributes:
-      label: Expected behaviour
-    validations:
-      required: true
-  - type: input
-    id: skill-version
-    attributes:
-      label: Skill release
-      description: Report the exact release or source revision used, for example v7.0.0.
-      placeholder: v7.0.0
-    validations:
-      required: true
-  - type: textarea
-    id: reproduction
-    attributes:
-      label: Synthetic reproduction
-      description: Use synthetic values only.
+      label: Expected behavior
     validations:
       required: true
