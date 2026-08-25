@@ -1,30 +1,16 @@
 ## Change
 
-Describe the analyst-facing behaviour changed.
+Describe the fixed-workflow behavior changed and why it is necessary.
 
 ## Verification
 
-- [ ] Synthetic fixtures only
-- [ ] Ruff passes
-- [ ] Regression tests pass
-- [ ] Strict report validation passes
-- [ ] Client-side destination/business/privacy/regression fixtures pass when affected
-- [ ] Interaction coverage, continuous business-stream, and gated-journey
-      forward cases pass when affected
-- [ ] Plan inspection, browser helper, request-decoding, and incremental
-      event-validation checks pass when affected
-- [ ] Action completion is proved independently, retries retain linked action
-      windows, and relevant-stream settlement is recorded when affected
-- [ ] Supplemental journal evidence does not substitute for required Tag
-      Assistant API Call evidence
-- [ ] Applicable evidence derives from requirements; no reduced run type or
-      layer-substitution shortcut was introduced
-- [ ] Schema-v2 fixtures include current strict client-side and action-safety
-      fields, and any legacy upgrade impact is documented
-- [ ] Server-side GTM behaviour was not introduced
-- [ ] No client data, reports, screenshots, IDs, domains, or credentials
-
-## Release metadata
-
-- [ ] If this changes the release, `pyproject.toml`, `CHANGELOG.md`, `README.md`,
-      `SECURITY.md`, CI, and package naming are aligned to the same `v` version.
+- [ ] Synthetic fixtures only; no client/run residue
+- [ ] XLSX remains the only user input
+- [ ] Standalone headed Playwright MCP remains the only browser
+- [ ] Runtime commands remain `start`, `next`, `complete`, and `finish`
+- [ ] All five layers and immediate feedback remain mandatory
+- [ ] Reality contradictions and surrounding anomalies remain detectable
+- [ ] Finite and high-cardinality scenario coverage is preserved
+- [ ] No mode, toggle, retry, repair, reopen, fallback, or unused scaffolding was added
+- [ ] Ruff, unit, browser, dead-code, release, package, and install checks pass
+- [ ] Version metadata and v8 documentation are aligned

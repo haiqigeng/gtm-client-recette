@@ -2,6 +2,43 @@
 
 ## Unreleased
 
+## [v8.0.0](https://github.com/haiqigeng/gtm-client-recette/releases/tag/v8.0.0) (2026-08-26)
+
+- Replace the multi-format, multi-provider, resumable v7 architecture with one personal
+  contract: XLSX input, one standalone headed Playwright MCP window, four runtime
+  commands, immediate feedback, and one final XLSX.
+- Make event-detail workbook tabs authoritative and compile them directly. Navigation
+  tabs remain non-requirement metadata, so incomplete lists and display typos cannot
+  invent or suppress events. Code and image sections are excluded deterministically.
+- Keep exactly five mandatory layers per scenario: page/action reality, exact Tag
+  Assistant API Call, GTM Tags mapping/runtime/firing, browser request, and surrounding
+  behavior. Remove accumulated Data Layer, GTM Variables, recorder, consent engine,
+  browser-provider, handoff, fallback, repair, retry, and reopen machinery.
+- Judge every planned field independently against the tracking plan and visible action
+  context at API Call, tag mapping/runtime, and request. Cross-layer agreement cannot
+  pass a coherently wrong quantity, item, language, cart, form, or page state.
+- Add one-time Tag Assistant observer installation and one action-bounded Playwright call
+  per scenario. Its current-document boundary reuses the already loaded Core document
+  without historical contamination or another page load; later actions enforce the
+  preceding cursor. Preview extraction has a fixed five-second bound and returns honest
+  partial evidence without reload or retry.
+- Preserve every post-cursor business API Call, duplicate and interjected events, causal
+  technical rows, missing/duplicate sends, dead pages, and stale Preview contamination.
+- Enforce just-in-time material scenarios: all reachable finite values, explicit
+  unreachable values, live plan gaps, and behavior-signature sampling for
+  high-cardinality products/content.
+- Continue after ordinary failures and one blocked event. Stop only after two consecutive
+  events have all five layers blocked with no attributable evidence; emit the second
+  feedback and do not create a final workbook.
+- Standardize immediate output and the final workbook on five layer rows with status,
+  concise reason, affected fields, expected/observed values, and exact next inspection.
+- Persist one redacted canonical evidence file per action while keeping the append-only
+  stream limited to verdicts and digests, preventing repeated parsing of growing raw
+  bundles and preserving sensitive-value comparability through fingerprints.
+- Replace the old runtime with six focused files and add synthetic normalization,
+  judgement, lifecycle, report, stress, static-contract, and real-browser collector
+  regressions.
+
 ## [v7.0.0](https://github.com/haiqigeng/gtm-client-recette/releases/tag/v7.0.0) (2026-08-25)
 
 - Replace the expensive default inspection matrix with five mandatory-applicable

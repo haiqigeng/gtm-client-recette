@@ -16,7 +16,6 @@ INCLUDED = (
     "LICENSE",
     "pyproject.toml",
     "agents",
-    "references",
     "scripts",
 )
 EXCLUDED_NAMES = {
