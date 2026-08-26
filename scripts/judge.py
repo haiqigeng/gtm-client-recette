@@ -3,13 +3,10 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 from collections import Counter
-from copy import deepcopy
 from typing import Any
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from state import RunError
 
@@ -29,25 +26,6 @@ LAYER_ORDER = (
     "Surrounding behavior",
 )
 MISSING = object()
-SECRET_KEYS = {
-    "authorization",
-    "cookie",
-    "set_cookie",
-    "password",
-    "passwd",
-    "access_token",
-    "refresh_token",
-    "session_id",
-    "sessionid",
-    "csrf",
-    "xsrf",
-    "email",
-    "phone",
-    "telephone",
-    "user_id",
-    "customer_id",
-}
-SECRET_FRAGMENTS = ("password", "token", "cookie", "session", "csrf", "xsrf", "email", "phone")
 TECHNICAL_EVENT = re.compile(
     r"^(?:gtm\.|message$|container loaded$|dom ready$|window loaded$|trigger group$|consent)",
     re.I,
@@ -263,26 +241,11 @@ def _plan_value_check(
     surface: str,
 ) -> dict[str, Any]:
     passed, expected = _plan_expectation(field, path, values, observed)
-    omitted = (
-        field.get("rule") == "one_of"
-        and contextual is not MISSING
-        and _value_satisfies(observed, contextual)
-        and not passed
-    )
-    status = "PASS" if passed else "REVIEW" if omitted else "FAIL"
+    status = "PASS" if passed else "FAIL"
     reason = (
         "Value satisfies the tracking-plan rule."
         if passed
-        else "Live valid value is absent from the tracking plan."
-        if omitted
         else "Value violates the tracking-plan rule."
-    )
-    target = (
-        None
-        if passed
-        else "Tracking-plan allowed values"
-        if omitted
-        else f"{surface} value for {path}"
     )
     return _check(
         status,
@@ -291,7 +254,7 @@ def _plan_value_check(
         path=path,
         expected=expected,
         observed=observed,
-        check_next=target,
+        check_next=None if passed else f"{surface} value for {path}",
     )
 
 
@@ -605,6 +568,49 @@ def _delivery_identity_check(
     )
 
 
+def _destination_values(value: Any) -> list[str]:
+    output: list[str] = []
+    if isinstance(value, dict):
+        for key, child in value.items():
+            normalized = re.sub(r"[^a-z0-9]+", "_", str(key).casefold()).strip("_")
+            if normalized in {
+                "destination_id",
+                "measurement_id",
+                "send_to",
+                "tag_id",
+                "tid",
+            }:
+                candidates = child if isinstance(child, list) else [child]
+                for candidate in candidates:
+                    output.extend(re.findall(r"\b(?:G|GT)-[A-Z0-9-]+\b", str(candidate), re.I))
+            output.extend(_destination_values(child))
+    elif isinstance(value, list):
+        for child in value:
+            output.extend(_destination_values(child))
+    return list(dict.fromkeys(item.upper() for item in output))
+
+
+def _planned_destination_check(
+    event: dict[str, Any], payload: Any, surface: str
+) -> dict[str, Any] | None:
+    expected = event.get("expected_destination_id")
+    if expected is None:
+        return None
+    observed = _destination_values(payload)
+    passed = str(expected).upper() in observed
+    return _check(
+        "PASS" if passed else "FAIL",
+        f"{surface}.destination",
+        "GA4 destination matches the tracking plan."
+        if passed
+        else "GA4 destination is missing or differs from the tracking plan.",
+        path="destination_id",
+        expected=expected,
+        observed=observed or "absent",
+        check_next=None if passed else f"{surface} destination",
+    )
+
+
 def _gtm_firing_check(
     tags: list[dict[str, Any]], complete: bool
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -706,6 +712,16 @@ def _gtm_layer(
         return _layer(LAYER_ORDER[2], checks, True)
     runtime = _tag_payload(fired, "runtime")
     checks.append(_delivery_identity_check(event, runtime, reality, "gtm_runtime"))
+    destination_check = _planned_destination_check(
+        event,
+        {
+            "runtime": runtime,
+            "mappings": _tag_payload(fired, "mappings"),
+        },
+        "gtm",
+    )
+    if destination_check:
+        checks.append(destination_check)
     checks.extend(_gtm_mapping_checks(event["fields"], fired))
     checks.extend(
         _field_checks(
@@ -816,6 +832,9 @@ def _network_layer(
     checks.extend((_network_transport_check(requests), _network_duplicate_check(requests)))
     payload = _network_payload(requests)
     checks.append(_delivery_identity_check(event, payload, reality, "browser_request"))
+    destination_check = _planned_destination_check(event, payload, "browser_request")
+    if destination_check:
+        checks.append(destination_check)
     checks.extend(
         _field_checks(
             event["fields"],
@@ -893,10 +912,7 @@ def _unexpected_business_events(event: dict[str, Any], messages: list[dict[str, 
             continue
         if TECHNICAL_EVENT.search(name) and row.get("business") is not True:
             continue
-        justified = row.get("allowed") is True and bool(
-            str(row.get("allowed_reason") or "").strip()
-        )
-        if row.get("business") is True and not justified:
+        if row.get("business") is True:
             unexpected.append(name)
     return unexpected
 
@@ -970,33 +986,30 @@ def _behavior_layer(
 
 
 def _validate_bundle(bundle: dict[str, Any], action: dict[str, Any]) -> None:
-    if bundle.get("observer_contract") != "playwright-mcp-v8":
-        raise RunError("Evidence bundle did not come from the fixed Playwright MCP observer.")
+    required = {
+        "observer_contract",
+        "action_id",
+        "event_id",
+        "scenario_id",
+        "preview_cursor",
+        "reality",
+        "source",
+        "gtm",
+        "network",
+        "behavior",
+    }
+    if set(bundle) != required:
+        raise RunError("Evidence bundle fields do not match the fixed contract.")
+    if bundle.get("observer_contract") != "playwright-mcp-v1":
+        raise RunError("Evidence bundle did not come from the fixed native Playwright path.")
     for key in ("action_id", "event_id"):
         if str(bundle.get(key) or "") != str(action.get(key) or ""):
             raise RunError(f"Evidence {key} does not match the only open action.")
-    for key in ("reality", "source", "gtm", "network", "behavior", "scenario", "coverage"):
+    if bundle.get("scenario_id") != action.get("event_name"):
+        raise RunError("Evidence scenario_id must equal the canonical event_name.")
+    for key in ("reality", "source", "gtm", "network", "behavior"):
         if not isinstance(bundle.get(key), dict):
             raise RunError(f"Evidence bundle requires object {key!r}.")
-    scenario = bundle["scenario"]
-    if (
-        not str(scenario.get("id") or "").strip()
-        or not str(scenario.get("signature") or "").strip()
-        or not isinstance(scenario.get("values"), dict)
-    ):
-        raise RunError("Scenario requires a stable id, material signature, and values object.")
-    coverage = bundle["coverage"]
-    if not isinstance(coverage.get("complete"), bool):
-        raise RunError("Coverage requires explicit complete=true/false.")
-    if not str(coverage.get("rationale") or "").strip():
-        raise RunError("Coverage requires a concise rationale.")
-    remaining = coverage.get("remaining", [])
-    if not isinstance(remaining, list):
-        raise RunError("Coverage remaining must be an array.")
-    if not isinstance(coverage.get("unreachable"), list):
-        raise RunError("Coverage unreachable must be an array.")
-    if coverage["complete"] and remaining:
-        raise RunError("Complete coverage cannot retain remaining scenarios.")
     cursor = bundle.get("preview_cursor")
     if not isinstance(cursor, int) or cursor < int(action.get("preview_cursor", 0)):
         raise RunError("Evidence bundle has a missing or regressed Preview cursor.")
@@ -1017,6 +1030,53 @@ def judge_event(
     layers.append(source_layer)
     layers.append(_gtm_layer(event, bundle["gtm"], reality, source_payload))
     layers.append(_network_layer(event, bundle["network"], reality, source_payload))
+    if event.get("expected_destination_id") is None:
+        fired = [
+            tag
+            for tag in bundle["gtm"].get("tags", [])
+            if isinstance(tag, dict)
+            and tag.get("concerned") is not False
+            and tag.get("fired") is True
+        ]
+        tag_destinations = _destination_values(
+            {
+                "runtime": _tag_payload(fired, "runtime"),
+                "mappings": _tag_payload(fired, "mappings"),
+            }
+        )
+        request_destinations = _destination_values(
+            _network_payload(
+                [row for row in bundle["network"].get("requests", []) if isinstance(row, dict)]
+            )
+        )
+        if tag_destinations and request_destinations:
+            coherent = bool(set(tag_destinations) & set(request_destinations))
+            status = "PASS" if coherent else "FAIL"
+            reason = (
+                "Observed GA4 tag and request destinations agree."
+                if coherent
+                else "Observed GA4 tag and request destinations disagree."
+            )
+        else:
+            status = "BLOCKED"
+            reason = "The plan has no destination expectation and observed destination evidence is incomplete."
+        for index, surface in ((2, "gtm"), (3, "browser_request")):
+            layer = layers[index]
+            layer["checks"].append(
+                _check(
+                    status,
+                    f"{surface}.destination_coherence",
+                    reason,
+                    path="destination_id",
+                    expected="same observed GA4 destination",
+                    observed={
+                        "gtm": tag_destinations,
+                        "browser_request": request_destinations,
+                    },
+                    check_next=None if status == "PASS" else "GA4 tag/request destination",
+                )
+            )
+            layers[index] = _layer(layer["layer"], layer["checks"], layer["attributable"])
     layers.append(
         _behavior_layer(
             event,
@@ -1025,25 +1085,8 @@ def judge_event(
             int(action.get("preview_cursor", 0)),
         )
     )
-    coverage = bundle["coverage"]
-    if coverage["unreachable"]:
-        behavior = layers[-1]
-        behavior["checks"].append(
-            _check(
-                "BLOCKED",
-                "behavior.scenario_unreachable",
-                "One or more planned finite scenario values could not be exercised.",
-                expected="all reachable planned finite values tested",
-                observed=coverage["unreachable"],
-                check_next="Blocked scenario prerequisites",
-            )
-        )
-        layers[-1] = _layer(behavior["layer"], behavior["checks"], behavior["attributable"])
     layer_statuses = [layer["status"] for layer in layers]
-    status = worst([*layer_statuses, "PASS" if coverage["complete"] else "PENDING"])
-    zero_evidence = all(status == "BLOCKED" for status in layer_statuses) and not any(
-        layer["attributable"] for layer in layers
-    )
+    status = worst(layer_statuses)
     problems = [
         check
         for layer in layers
@@ -1059,58 +1102,12 @@ def judge_event(
         "action_id": action["action_id"],
         "event_id": event["event_id"],
         "event_name": event["event_name"],
-        "label": event["label"],
-        "scenario": bundle["scenario"],
-        "coverage": coverage,
+        "scenario_id": event["event_name"],
         "preview_cursor": bundle.get("preview_cursor", action.get("preview_cursor", 0)),
         "status": status,
         "reason": first_non_pass["reason"] if first_non_pass else "All five layers passed.",
         "layers": layers,
-        "zero_evidence": zero_evidence,
     }
-
-
-def _safe_url(value: str) -> str:
-    try:
-        parsed = urlsplit(value)
-    except ValueError:
-        return value
-    query = []
-    for key, item in parse_qsl(parsed.query, keep_blank_values=True):
-        query.append((key, _fingerprint(item) if _secret_key(key) else item))
-    return urlunsplit(
-        (parsed.scheme, parsed.netloc, parsed.path, urlencode(query), parsed.fragment)
-    )
-
-
-def _secret_key(key: str | None) -> bool:
-    normalized = re.sub(r"[^a-z0-9]+", "_", str(key or "").casefold()).strip("_")
-    return normalized in SECRET_KEYS or any(part in normalized for part in SECRET_FRAGMENTS)
-
-
-def _fingerprint(value: Any) -> str:
-    encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
-    return "[REDACTED:" + hashlib.sha256(encoded).hexdigest()[:12] + "]"
-
-
-def redact(value: Any, key: str | None = None) -> Any:
-    """Remove browser/session secrets before the canonical bundle is persisted."""
-    if _secret_key(key):
-        return _fingerprint(value)
-    if isinstance(value, dict):
-        return {str(child_key): redact(child, str(child_key)) for child_key, child in value.items()}
-    if isinstance(value, list):
-        return [redact(child, key) for child in value]
-    normalized = re.sub(r"[^a-z0-9]+", "_", str(key or "").casefold()).strip("_")
-    if isinstance(value, str) and normalized in {"url", "request_url", "page_url"}:
-        return _safe_url(value)
-    return value
-
-
-def bundle_digest(bundle: dict[str, Any]) -> str:
-    return hashlib.sha256(
-        json.dumps(bundle, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
 
 
 def event_by_id(plan: dict[str, Any], event_id: str) -> dict[str, Any]:
@@ -1118,8 +1115,3 @@ def event_by_id(plan: dict[str, Any], event_id: str) -> dict[str, Any]:
         if event.get("event_id") == event_id:
             return event
     raise RunError(f"Unknown event id: {event_id}")
-
-
-def prepare_bundle(bundle: dict[str, Any]) -> tuple[dict[str, Any], str]:
-    safe = redact(deepcopy(bundle))
-    return safe, bundle_digest(safe)

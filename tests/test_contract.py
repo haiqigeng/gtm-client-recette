@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import ast
-import re
 import unittest
 from pathlib import Path
 
@@ -9,62 +8,75 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ContractTests(unittest.TestCase):
-    def test_runtime_tree_is_lean_and_fixed(self) -> None:
-        runtime = {
-            path.name
-            for path in (ROOT / "scripts").iterdir()
-            if path.is_file()
-            and path.name
-            not in {"build_skill_package.py", "check_release.py", "verify_release_artifact.py"}
-        }
+    def test_runtime_has_only_fixed_python_components(self) -> None:
+        names = {path.name for path in (ROOT / "scripts").iterdir() if path.is_file()}
         self.assertEqual(
-            runtime,
+            names,
             {
+                "adaptive.py",
+                "browser_actions.py",
+                "browser_capture.py",
+                "evidence.py",
                 "judge.py",
-                "playwright_collector.js",
+                "mcp_bridge.py",
                 "recette.py",
                 "report.py",
+                "run_tests.py",
                 "state.py",
+                "tag_assistant.py",
                 "xlsx_plan.py",
             },
         )
-        self.assertFalse((ROOT / "references").exists())
-        self.assertFalse((ROOT / "scripts" / "core").exists())
+        self.assertFalse(any((ROOT / "scripts").glob("*.js")))
 
-    def test_runtime_cli_has_only_four_commands(self) -> None:
-        source = (ROOT / "scripts" / "recette.py").read_text(encoding="utf-8")
-        commands = set(re.findall(r'add_parser\("([^"]+)"', source))
-        self.assertEqual(commands, {"start", "next", "complete", "finish"})
-        for forbidden in ("reopen", "repair", "retry", "handoff", "mode", "provider"):
-            self.assertNotIn(f'add_parser("{forbidden}"', source)
+    def test_skill_freezes_one_scenario_ga4_and_playwright_mcp(self) -> None:
+        skill = (ROOT / "SKILL.md").read_text(encoding="utf-8").casefold()
+        self.assertIn("one live scenario per identifiable event", skill)
+        self.assertIn("no scope confirmation phrase", skill)
+        self.assertIn("playwright mcp", skill)
+        self.assertIn("tag assistant screenshots", skill)
+        for forbidden in ("retry", "fallback", "backup", "second scenario"):
+            self.assertIn(f"no {forbidden}", skill)
 
-    def test_skill_forbids_old_surfaces_and_browser_alternatives(self) -> None:
-        skill = (ROOT / "SKILL.md").read_text(encoding="utf-8").lower()
-        self.assertIn("exactly one `.xlsx`", skill)
-        self.assertIn("headed standalone playwright mcp", skill)
-        self.assertIn("do not inspect the accumulated data layer tab", skill)
-        self.assertIn("after two consecutive zero-evidence events", skill)
-        self.assertNotIn("in-app browser", skill)
-        self.assertNotIn("firefox", skill)
-        self.assertNotIn("yaml", skill)
+    def test_imperfect_plan_and_live_resolution_contract_is_explicit(self) -> None:
+        skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+        contract = (ROOT / "references" / "contracts.md").read_text(encoding="utf-8")
+        self.assertIn("shortest finite genuinely necessary", skill)
+        self.assertIn("same-origin target", skill)
+        self.assertIn('"schema_version":"3.0.0"', contract)
+        self.assertIn("data_layer_payload", contract)
+        self.assertIn("every other tab is ignored", contract.casefold())
+        self.assertIn("parsed as text without evaluation", contract)
+        self.assertIn("Tag Assistant screenshots", contract)
+        self.assertNotIn("entry_url must be", contract)
 
-    def test_collector_has_fixed_bound_and_no_old_panels(self) -> None:
-        source = (ROOT / "scripts" / "playwright_collector.js").read_text(encoding="utf-8")
-        self.assertIn("const MAX_MS = 5000", source)
-        self.assertIn('const CONTRACT = "playwright-mcp-v8"', source)
-        self.assertNotIn('readPanel("Data Layer")', source)
-        self.assertNotIn('readPanel("Variables")', source)
-        self.assertNotIn("timeout_ms", source)
-        self.assertNotIn("fallback", source.lower())
+    def test_production_runtime_has_no_page_javascript_or_ad_hoc_browser_code(self) -> None:
+        source = "\n".join(
+            path.read_text(encoding="utf-8") for path in (ROOT / "scripts").glob("*.py")
+        )
+        self.assertNotIn("playwright.sync_api", source)
+        self.assertNotIn("browser_evaluate", source)
+        self.assertNotIn("page.evaluate", source)
+        tag_source = (ROOT / "scripts" / "tag_assistant.py").read_text(encoding="utf-8")
+        self.assertIn("box.width - 20", tag_source)
+        self.assertIn("Expected exactly one collapsed API call header", tag_source)
+        self.assertNotIn("dispatchEvent", tag_source)
 
-    def test_python_runtime_has_no_obvious_empty_functions(self) -> None:
+    def test_removed_legacy_machinery_is_absent(self) -> None:
+        source = "\n".join(
+            path.read_text(encoding="utf-8") for path in (ROOT / "scripts").glob("*.py")
+        )
+        for forbidden in (
+            "compile_xlsx",
+            "consecutive_zero_evidence",
+            "coverage_unreachable",
+            "playwright-mcp-v8",
+            "prepare_bundle",
+        ):
+            self.assertNotIn(forbidden, source)
+
+    def test_python_runtime_has_no_empty_functions(self) -> None:
         for path in (ROOT / "scripts").glob("*.py"):
-            if path.name in {
-                "build_skill_package.py",
-                "check_release.py",
-                "verify_release_artifact.py",
-            }:
-                continue
             tree = ast.parse(path.read_text(encoding="utf-8"))
             for node in ast.walk(tree):
                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):

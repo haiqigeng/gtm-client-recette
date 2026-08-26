@@ -2,6 +2,60 @@
 
 ## Unreleased
 
+## v13.0.0 (2026-08-26)
+
+- Resolve one workbook from a filename, absolute path, or bounded location hint and place
+  run output in the active writable workspace.
+- Replace the mapping handoff with one canonical `inspection-plan.json`; deterministically
+  reconstruct and reconcile event/parameter/value tables with Data Layer payloads/snippets.
+- Identify one target website and one connected Tag Assistant tab while ignoring unrelated
+  extra tabs.
+- Use the canonical event name as scenario identity and remove the arbitrary twelve-action
+  setup ceiling while retaining one finite necessary setup and one measured action.
+
+## v12.0.0 (2026-08-26)
+
+- Replace the generic API Call card click with one immutable, live-verified Playwright
+  right-edge chevron click. Require exactly one collapsed card before it and one expanded
+  card after it; never click API text or collapse the card again.
+- Add one no-argument JSONL bridge per run so native MCP accessibility and network text is
+  parsed in memory without raw `.txt`, Base64, DOM-dump, or duplicate handoff files.
+- Give each event two fixed temporary screenshot paths inside its run directory. Remove
+  uncommitted images on fatal termination, reject arbitrary commit paths, and record fatal
+  termination without adding a post-report write.
+- Extend unit, integration, static-contract, no-file, and rollback tests for the new fixed
+  path while preserving one scenario, GA4-only scope, and five-layer evidence.
+
+## v11.0.0 (2026-08-26)
+
+- Replace the uncallable direct-Python Playwright runtime with exact Playwright MCP call
+  manifests and deterministic parsers for native accessibility, network, and Tag Assistant
+  output.
+- Limit screenshots to one target-page before/after pair per event. Prohibit Tag Assistant
+  screenshots, browser evaluation, generated browser JavaScript, locator alternatives,
+  retries, and runtime repair.
+- Inspect only selector-matching Tag Assistant API Call rows and bounded causal carrier rows;
+  parse fired GA4 tag Names and Values from accessibility text without evaluating code.
+- Preflight MCP inventory, prepared tabs, input, and output permissions before the run. Reuse
+  the already validated canonical plan so the XLSX is extracted and mapped exactly once.
+- Downgrade generic or dynamic workbook examples to presence checks unless cited workbook
+  semantics explicitly declare equality or a finite allowed set.
+- Replace synthetic direct-browser tests with MCP-output contract fixtures and preserve unit,
+  integration, lifecycle, report, and representative-workbook verification.
+
+## v10.0.0 (2026-08-26)
+
+- Replace perfect-workbook validation with one-pass imperfect-plan mapping: missing
+  descriptive fields, URLs, screenshots, destinations, and parameter expectations become
+  cited plan notices instead of run-fatal errors.
+- Parse supported workbook `dataLayer.push` and `gtag` code without evaluation and apply
+  field-level authority, preserving code/table conflicts as review evidence.
+- Replace the frozen-entry interaction with one ScenarioDecision per event: exact plan URL
+  when supplied, otherwise same-origin live resolution, bounded native setup before the
+  cursor fence, and exactly one measured action.
+- Keep one XLSX input, GA4-only scope, five evidence layers, one scenario per event, one
+  final XLSX, and the no-mode/no-retry/no-fallback/no-backup contract.
+
 ## [v8.0.0](https://github.com/haiqigeng/gtm-client-recette/releases/tag/v8.0.0) (2026-08-26)
 
 - Replace the multi-format, multi-provider, resumable v7 architecture with one personal

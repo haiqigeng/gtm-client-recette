@@ -10,7 +10,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from helpers import action_fixture, bundle_fixture, event_fixture
 
-from judge import judge_event, prepare_bundle
+from judge import judge_event
 from recette import feedback_markdown
 
 
@@ -95,6 +95,26 @@ class JudgeTests(unittest.TestCase):
         self.assertEqual(statuses(result)["GTM Tags"], "FAIL")
         self.assertEqual(statuses(result)["Browser request"], "FAIL")
 
+    def test_tracking_plan_destination_mismatch_fails_tag_and_request(self) -> None:
+        bundle = bundle_fixture()
+        bundle["gtm"]["tags"][0]["runtime"]["destination_id"] = "G-WRONG"
+        bundle["network"]["requests"][0]["parameters"]["destination_id"] = "G-WRONG"
+        result = judge_event(event_fixture(), action_fixture(), bundle)
+        self.assertEqual(statuses(result)["GTM Tags"], "FAIL")
+        self.assertEqual(statuses(result)["Browser request"], "FAIL")
+
+    def test_observed_destinations_must_agree_when_plan_has_none(self) -> None:
+        event = event_fixture()
+        event["expected_destination_id"] = None
+        bundle = bundle_fixture()
+        result = judge_event(event, action_fixture(), bundle)
+        self.assertEqual(statuses(result)["GTM Tags"], "PASS")
+        self.assertEqual(statuses(result)["Browser request"], "PASS")
+        bundle["network"]["requests"][0]["parameters"]["destination_id"] = "G-OTHER"
+        mismatch = judge_event(event, action_fixture(), bundle)
+        self.assertEqual(statuses(mismatch)["GTM Tags"], "FAIL")
+        self.assertEqual(statuses(mismatch)["Browser request"], "FAIL")
+
     def test_wrong_selected_api_call_identity_fails_source(self) -> None:
         bundle = bundle_fixture()
         bundle["source"]["selected"]["payload"]["event"] = "add_to_cart"
@@ -105,7 +125,7 @@ class JudgeTests(unittest.TestCase):
         bundle = bundle_fixture(quantity=2)
         bundle["reality"]["expected"]["ecommerce.items[].quantity"] = [1]
         result = judge_event(event_fixture(), action_fixture(), bundle)
-        feedback = feedback_markdown(result, False)
+        feedback = feedback_markdown(result)
         for layer in (
             "Page/action reality",
             "Data Layer API Call",
@@ -114,7 +134,8 @@ class JudgeTests(unittest.TestCase):
             "Surrounding behavior",
         ):
             self.assertIn(f"| {layer} |", feedback)
-        self.assertIn("Expected -> observed", feedback)
+        self.assertIn("expected=", feedback)
+        self.assertIn("observed=", feedback)
 
     def test_gtm_display_labels_resolve_to_plan_fields(self) -> None:
         bundle = bundle_fixture()
@@ -127,6 +148,7 @@ class JudgeTests(unittest.TestCase):
         }
         tag["runtime"] = {
             "Event Name": "view_item",
+            "Measurement ID": "G-TEST",
             "Item Name": "Synthetic product",
             "Quantity": 1,
             "Currency": "EUR",
@@ -159,7 +181,7 @@ class JudgeTests(unittest.TestCase):
         self.assertEqual(by_check["behavior.duplicate_event"], "FAIL")
         self.assertEqual(by_check["behavior.interjected_event"], "REVIEW")
 
-    def test_companion_business_event_needs_an_explicit_causal_reason(self) -> None:
+    def test_companion_business_event_is_reviewed(self) -> None:
         bundle = bundle_fixture()
         companion = {
             "cursor": 2,
@@ -170,13 +192,10 @@ class JudgeTests(unittest.TestCase):
         }
         bundle["behavior"]["messages"].append(companion)
         bundle["preview_cursor"] = 2
-        without_reason = judge_event(event_fixture(), action_fixture(), bundle)
-        self.assertEqual(statuses(without_reason)["Surrounding behavior"], "REVIEW")
-        companion["allowed_reason"] = "The interaction navigated to the product page."
-        with_reason = judge_event(event_fixture(), action_fixture(), bundle)
-        self.assertEqual(statuses(with_reason)["Surrounding behavior"], "PASS")
+        result = judge_event(event_fixture(), action_fixture(), bundle)
+        self.assertEqual(statuses(result)["Surrounding behavior"], "REVIEW")
 
-    def test_valid_live_value_omitted_from_plan_is_review_not_false_failure(self) -> None:
+    def test_value_outside_tracking_plan_allowed_values_fails(self) -> None:
         event = event_fixture()
         event["fields"][-1] = {
             "path": "ecommerce.currency",
@@ -195,9 +214,9 @@ class JudgeTests(unittest.TestCase):
                 bundle[surface]["requests"][0]["parameters"]["ecommerce"]["currency"] = "CHF"
         bundle["reality"]["expected"]["ecommerce.currency"] = "CHF"
         result = judge_event(event, action_fixture(), bundle)
-        self.assertEqual(statuses(result)["Data Layer API Call"], "REVIEW")
-        self.assertEqual(statuses(result)["GTM Tags"], "REVIEW")
-        self.assertEqual(statuses(result)["Browser request"], "REVIEW")
+        self.assertEqual(statuses(result)["Data Layer API Call"], "FAIL")
+        self.assertEqual(statuses(result)["GTM Tags"], "FAIL")
+        self.assertEqual(statuses(result)["Browser request"], "FAIL")
 
     def test_stale_preview_message_fails_surrounding_behavior(self) -> None:
         action = action_fixture()
@@ -219,33 +238,6 @@ class JudgeTests(unittest.TestCase):
         self.assertEqual(layer_status["Data Layer API Call"], "BLOCKED")
         self.assertEqual(layer_status["GTM Tags"], "BLOCKED")
         self.assertEqual(layer_status["Browser request"], "BLOCKED")
-        self.assertFalse(result["zero_evidence"])
-
-    def test_sensitive_values_are_fingerprinted_without_losing_comparability(self) -> None:
-        safe, _ = prepare_bundle(
-            {
-                "email": "analyst@example.test",
-                "other_email": "different@example.test",
-                "url": "https://example.test/?session_id=secret&campaign=safe",
-            }
-        )
-        self.assertNotIn("analyst@example.test", str(safe))
-        self.assertNotEqual(safe["email"], safe["other_email"])
-        self.assertIn("campaign=safe", safe["url"])
-        self.assertNotIn("secret", safe["url"])
-
-    def test_unreachable_planned_scenario_cannot_finish_green(self) -> None:
-        bundle = bundle_fixture()
-        bundle["coverage"]["unreachable"] = [
-            {
-                "path": "shipping_tier",
-                "value": "Express",
-                "reason": "The prepared test environment does not expose Express.",
-            }
-        ]
-        result = judge_event(event_fixture(), action_fixture(), bundle)
-        self.assertEqual(statuses(result)["Surrounding behavior"], "BLOCKED")
-        self.assertEqual(result["status"], "BLOCKED")
 
 
 if __name__ == "__main__":

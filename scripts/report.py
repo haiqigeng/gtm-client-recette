@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""Render the single final XLSX from deterministic completed-event records."""
+"""Render the exact one-sheet, four-column final XLSX."""
 
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
 from typing import Any
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
-from openpyxl.utils import get_column_letter
 
 LAYER_ORDER = (
     "Page/action reality",
@@ -17,226 +18,160 @@ LAYER_ORDER = (
     "Browser request",
     "Surrounding behavior",
 )
-PRIORITY = {
-    "NOT_APPLICABLE": 0,
-    "PASS": 1,
-    "PENDING": 2,
-    "REVIEW": 3,
-    "BLOCKED": 4,
-    "FAIL": 5,
-}
+HEADERS = ("event_name", "layer_name", "status", "details")
 STATUS_FILL = {
     "PASS": "C6EFCE",
     "FAIL": "FFC7CE",
     "BLOCKED": "F4B183",
     "REVIEW": "FFEB9C",
-    "PENDING": "D9EAF7",
     "NOT_APPLICABLE": "E7E6E6",
 }
+PROBLEM_STATUSES = {"FAIL", "BLOCKED", "REVIEW"}
 
 
-def _worst(statuses: list[str]) -> str:
-    valid = [status for status in statuses if status in PRIORITY]
-    return max(valid, key=PRIORITY.__getitem__) if valid else "BLOCKED"
+def _json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
-def _reason(layer: dict[str, Any]) -> str:
-    non_pass = next(
-        (
-            check
-            for check in layer.get("checks", [])
-            if check.get("status") in {"FAIL", "BLOCKED", "REVIEW", "PENDING"}
-        ),
-        None,
-    )
-    return str(non_pass.get("reason")) if non_pass else "All checks passed."
+def _safe_text(value: Any) -> str:
+    text = str(value if value is not None else "")
+    return "'" + text if text.startswith(("=", "+", "-", "@")) else text
 
 
-def _target(layer: dict[str, Any]) -> str:
-    targets = [
-        str(check["check_next"])
-        for check in layer.get("checks", [])
-        if check.get("check_next")
-        and check.get("status") in {"FAIL", "BLOCKED", "REVIEW", "PENDING"}
+def _relevant_checks(layer: dict[str, Any]) -> list[dict[str, Any]]:
+    checks = [check for check in layer.get("checks", []) if isinstance(check, dict)]
+    problems = [check for check in checks if check.get("status") in PROBLEM_STATUSES]
+    return problems or checks
+
+
+def _comparison(checks: list[dict[str, Any]], key: str) -> Any:
+    values = [
+        {
+            "check": check.get("check"),
+            "path": check.get("path"),
+            "value": check.get(key),
+        }
+        for check in checks
+        if check.get(key) is not None
     ]
-    return "; ".join(dict.fromkeys(targets))
+    return values or None
 
 
-def _style_sheet(sheet: Any) -> None:
-    sheet.freeze_panes = "A2"
-    sheet.auto_filter.ref = sheet.dimensions
-    for cell in sheet[1]:
-        cell.font = Font(bold=True, color="FFFFFF")
-        cell.fill = PatternFill("solid", fgColor="1F4E78")
-        cell.alignment = Alignment(vertical="top", wrap_text=True)
-    for row in sheet.iter_rows(min_row=2):
-        for cell in row:
-            if isinstance(cell.value, str) and cell.value.startswith(("=", "+", "-", "@")):
-                cell.value = "'" + cell.value
-            cell.alignment = Alignment(vertical="top", wrap_text=True)
-            if isinstance(cell.value, str) and cell.value in STATUS_FILL:
-                cell.fill = PatternFill("solid", fgColor=STATUS_FILL[cell.value])
-    for column in range(1, sheet.max_column + 1):
-        values = [str(sheet.cell(row, column).value or "") for row in range(1, sheet.max_row + 1)]
-        width = min(max(max(map(len, values), default=8) + 2, 10), 52)
-        sheet.column_dimensions[get_column_letter(column)].width = width
+def layer_details(result: dict[str, Any], layer: dict[str, Any]) -> str:
+    """Render the one fixed details grammar for immediate and XLSX feedback."""
+    checks = _relevant_checks(layer)
+    reasons = list(
+        dict.fromkeys(
+            str(check.get("reason") or "Unspecified evidence result.") for check in checks
+        )
+    )
+    evidence_file = str(result.get("evidence_file") or f"evidence-{result['event_id']}.json")
+    evidence = [f"{evidence_file}#{check.get('check') or 'layer'}" for check in checks] or [
+        evidence_file
+    ]
+    return (
+        f"reason={' | '.join(reasons)}; "
+        f"expected={_json(_comparison(checks, 'expected'))}; "
+        f"observed={_json(_comparison(checks, 'observed'))}; "
+        f"evidence={','.join(dict.fromkeys(evidence))}"
+    )
 
 
-def _latest_layers(event_results: list[dict[str, Any]]) -> dict[str, str]:
-    output = {}
-    for name in LAYER_ORDER:
-        statuses = [
-            layer["status"]
-            for result in event_results
-            for layer in result.get("layers", [])
-            if layer.get("layer") == name
+def feedback_rows(result: dict[str, Any]) -> list[dict[str, str]]:
+    """Return exactly five fixed-schema rows for one completed event."""
+    layers = {layer.get("layer"): layer for layer in result.get("layers", [])}
+    if set(layers) != set(LAYER_ORDER) or len(result.get("layers", [])) != len(LAYER_ORDER):
+        raise ValueError("Completed event must contain each evidence layer exactly once.")
+    return [
+        {
+            "event_name": _safe_text(result["event_name"]),
+            "layer_name": name,
+            "status": _safe_text(layers[name]["status"]),
+            "details": _safe_text(layer_details(result, layers[name])),
+        }
+        for name in LAYER_ORDER
+    ]
+
+
+def _validate_plan_results(
+    plan: dict[str, Any], results: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    if len(results) != len(plan.get("events", [])):
+        raise ValueError("Final report requires exactly one result per tracking-plan event.")
+    by_event: dict[str, dict[str, Any]] = {}
+    for result in results:
+        event_id = str(result.get("event_id") or "")
+        if event_id in by_event:
+            raise ValueError(f"Duplicate final result for {event_id}.")
+        by_event[event_id] = result
+    ordered = []
+    for event in plan["events"]:
+        result = by_event.get(event["event_id"])
+        if result is None:
+            raise ValueError(f"Missing final result for {event['event_name']}.")
+        if result.get("event_name") != event["event_name"]:
+            raise ValueError(f"Final event identity mismatch for {event['event_id']}.")
+        ordered.append(result)
+    return ordered
+
+
+def _validate_workbook(path: Path, ordered: list[dict[str, Any]]) -> None:
+    workbook = load_workbook(path, read_only=True, data_only=False)
+    try:
+        if workbook.sheetnames != ["Event feedback"]:
+            raise ValueError("Final workbook must contain only Event feedback.")
+        sheet = workbook["Event feedback"]
+        headers = tuple(cell.value for cell in next(sheet.iter_rows(min_row=1, max_row=1)))
+        if headers != HEADERS:
+            raise ValueError("Final workbook column contract is invalid.")
+        expected_rows = [row for result in ordered for row in feedback_rows(result)]
+        actual_rows = [
+            dict(zip(HEADERS, (cell.value for cell in row), strict=True))
+            for row in sheet.iter_rows(min_row=2)
         ]
-        output[name] = _worst(statuses)
-    return output
+        if actual_rows != expected_rows:
+            raise ValueError("Final workbook rows or order do not match committed evidence.")
+    finally:
+        workbook.close()
 
 
-def render_report(
-    plan: dict[str, Any],
-    results: list[dict[str, Any]],
-    output: Path | str,
-) -> None:
-    """Write and reopen-validate the only supported final workbook."""
+def render_report(plan: dict[str, Any], results: list[dict[str, Any]], output: Path | str) -> None:
+    """Atomically write and reopen-validate the sole supported final workbook."""
     target = Path(output).resolve()
     if target.exists():
         raise ValueError(f"Final workbook already exists: {target}")
-    if not results:
-        raise ValueError("Cannot render a report without completed event evidence.")
+    ordered = _validate_plan_results(plan, results)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_name(target.name + ".tmp.xlsx")
+    if temporary.exists():
+        raise ValueError(f"Temporary report path already exists: {temporary}")
 
     workbook = Workbook()
-    workbook.properties.title = "GTM Client Recette v8"
-    workbook.properties.subject = "Five-layer client-side GTM acceptance results"
-    conclusion = workbook.active
-    conclusion.title = "Conclusion"
-    conclusion.append(
-        [
-            "Order",
-            "Event",
-            "Technical event",
-            "Scenarios",
-            *LAYER_ORDER,
-            "Overall",
-            "Why",
-        ]
-    )
-    by_event: dict[str, list[dict[str, Any]]] = {}
-    for result in results:
-        by_event.setdefault(str(result["event_id"]), []).append(result)
-    for event in plan["events"]:
-        event_results = by_event.get(event["event_id"], [])
-        if not event_results:
-            raise ValueError(f"Missing final results for {event['label']}.")
-        layers = _latest_layers(event_results)
-        overall = _worst(list(layers.values()))
-        reasons = [
-            _reason(layer)
-            for result in event_results
-            for layer in result["layers"]
-            if layer["status"] != "PASS"
-        ]
-        conclusion.append(
-            [
-                event["plan_order"],
-                event["label"],
-                event["event_name"],
-                len(event_results),
-                *[layers[name] for name in LAYER_ORDER],
-                overall,
-                "; ".join(dict.fromkeys(reasons)) or "All scenarios and layers passed.",
-            ]
-        )
-
-    feedback = workbook.create_sheet("Event feedback")
-    feedback.append(
-        [
-            "Order",
-            "Event",
-            "Scenario",
-            "Material signature",
-            "Coverage final",
-            "Layer",
-            "Status",
-            "Why",
-            "Passed checks",
-            "Total checks",
-            "Check next",
-        ]
-    )
-    order = {event["event_id"]: event["plan_order"] for event in plan["events"]}
-    ordered_results = sorted(
-        results, key=lambda result: (order[result["event_id"]], result["action_id"])
-    )
-    for result in ordered_results:
-        for layer in result["layers"]:
-            feedback.append(
-                [
-                    order[result["event_id"]],
-                    result["label"],
-                    result["scenario"]["id"],
-                    result["scenario"]["signature"],
-                    result["coverage"]["complete"],
-                    layer["layer"],
-                    layer["status"],
-                    _reason(layer),
-                    layer["passed"],
-                    layer["total"],
-                    _target(layer),
-                ]
-            )
-
-    checks = workbook.create_sheet("Checks")
-    checks.append(
-        [
-            "Order",
-            "Event",
-            "Scenario",
-            "Layer",
-            "Status",
-            "Check",
-            "Field path",
-            "Expected",
-            "Observed",
-            "Why",
-            "Check next",
-        ]
-    )
-    for result in ordered_results:
-        for layer in result["layers"]:
-            for check in layer["checks"]:
-                checks.append(
-                    [
-                        order[result["event_id"]],
-                        result["label"],
-                        result["scenario"]["id"],
-                        layer["layer"],
-                        check["status"],
-                        check["check"],
-                        check.get("path"),
-                        check.get("expected"),
-                        check.get("observed"),
-                        check["reason"],
-                        check.get("check_next"),
-                    ]
-                )
-
-    for sheet in workbook.worksheets:
-        _style_sheet(sheet)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    workbook.save(target)
-    workbook.close()
-
-    validation = load_workbook(target, read_only=True, data_only=False)
+    sheet = workbook.active
+    sheet.title = "Event feedback"
+    sheet.append(list(HEADERS))
+    for result in ordered:
+        for row in feedback_rows(result):
+            sheet.append([row[header] for header in HEADERS])
+    sheet.freeze_panes = "A2"
+    sheet.auto_filter.ref = sheet.dimensions
+    sheet.column_dimensions["A"].width = 28
+    sheet.column_dimensions["B"].width = 28
+    sheet.column_dimensions["C"].width = 18
+    sheet.column_dimensions["D"].width = 100
+    for cell in sheet[1]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor="1F4E78")
+    for row in sheet.iter_rows(min_row=2):
+        for cell in row:
+            cell.alignment = Alignment(vertical="top", wrap_text=True)
+        row[2].fill = PatternFill("solid", fgColor=STATUS_FILL.get(row[2].value, "FFFFFF"))
     try:
-        if validation.sheetnames != ["Conclusion", "Event feedback", "Checks"]:
-            raise ValueError("Final workbook sheet contract is invalid.")
-        expected_feedback_rows = 1 + len(results) * len(LAYER_ORDER)
-        if validation["Event feedback"].max_row != expected_feedback_rows:
-            raise ValueError("Final workbook does not contain five feedback rows per scenario.")
-        if validation["Conclusion"].max_row != 1 + len(plan["events"]):
-            raise ValueError("Final workbook conclusion is not plan-complete.")
+        workbook.save(temporary)
+        workbook.close()
+        _validate_workbook(temporary, ordered)
+        os.replace(temporary, target)
     finally:
-        validation.close()
+        workbook.close()
+        if temporary.exists():
+            temporary.unlink()

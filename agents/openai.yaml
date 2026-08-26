@@ -1,7 +1,7 @@
 interface:
   display_name: "GTM Client Recette"
-  short_description: "Fixed XLSX-to-Playwright GTM acceptance QA"
-  default_prompt: "Use $gtm-client-recette to test this XLSX tracking plan in a headed Playwright MCP GTM Preview session."
+  short_description: "Imperfect-XLSX to live GTM acceptance QA"
+  default_prompt: "Use $gtm-client-recette to resolve and test this XLSX tracking plan in a headed Playwright MCP GTM Preview session."
 dependencies:
   tools:
     - type: "mcp"
