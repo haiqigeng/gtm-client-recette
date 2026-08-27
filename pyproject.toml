@@ -4,15 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gtm-client-recette"
-version = "8.0.0"
-description = "Fixed personal XLSX and Playwright MCP GTM acceptance recette"
+version = "13.0.0"
+description = "Fixed personal imperfect-XLSX and Playwright MCP GTM acceptance recette"
 license = "MIT"
 requires-python = ">=3.11"
-dependencies = ["openpyxl>=3.1.2"]
+dependencies = ["openpyxl>=3.1.2", "Pillow>=10"]
 
 [project.optional-dependencies]
 dev = ["ruff>=0.12.0", "vulture>=2.14", "radon>=6.0"]
-browser-test = ["playwright>=1.50.0,<2"]
 
 [tool.setuptools]
 packages = []

@@ -1,133 +1,36 @@
 ---
 name: gtm-client-recette
-description: Execute a personal client-side GTM acceptance recette from one XLSX tracking plan in one headed Playwright MCP browser, with fixed five-layer evidence, material-scenario coverage, continuous anomaly detection, immediate event feedback, and one final XLSX.
+description: Execute one personal GA4 client-side GTM acceptance recette from an imperfect XLSX through one prepared Playwright MCP target tab and Tag Assistant tab, testing one live scenario per identifiable event and producing immediate five-layer feedback plus one XLSX.
 ---
 
 # GTM Client Recette
 
-## North star
+Read [references/contracts.md](references/contracts.md) before execution. The input, GA4 client-tag scope, workflow, evidence layers, one-scenario coverage, feedback, and final XLSX are fixed.
 
-Maximize trustworthy findings per browser interaction. A coherent tracking chain is still
-wrong when it contradicts the real page, selected control, performed action, or visible
-outcome. Test every planned event and every materially different scenario, preserve every
-intervening business API Call, and explain each verdict before continuing.
+## Execution law
 
-## Fixed personal contract
+- Use the supplied deterministic scripts and only the MCP calls named by the current stage. Never write run-specific parsers, browser-control code, JavaScript, selectors, raw MCP files, or repairs.
+- Never use browser evaluation, tool discovery, CSS alternatives, Tag Assistant screenshots, retries, fallbacks, resume, backup, or a second scenario. The sole unsafe-code call is the verbatim API Call chevron manifest returned by `compile_api_call_expand()`.
+- A missing or ambiguous browser/Tag Assistant method is `FATAL: METHOD_UNAVAILABLE`. An unresolved target-site scenario is event-level `BLOCKED`; commit its five rows and continue.
+- An interrupted run is abandoned. A new invocation starts a new workspace run directory at event one.
 
-- Input is exactly one `.xlsx` tracking plan.
-- Browser is exactly one headed standalone Playwright MCP context opened by the agent.
-- Output is immediate per-event feedback plus one final
-  `gtm-client-recette-results.xlsx`.
-- There are no alternate formats, browsers, modes, scopes, flags, retries, fallbacks,
-  repair paths, or backup workflows.
-- Ordinary navigation, synthetic values, interactions, and form submissions are in scope.
-  The user handles credentials, MFA, CAPTCHA, verification, real payment, and ordinary
-  consent in the same Playwright window when needed.
+## Fixed pipeline
 
-Do not design the tracking plan, change or publish GTM, modify the website, certify
-server-side/vendor receipt, bypass protected controls, or make legal consent conclusions.
+1. Pass the user's XLSX filename, absolute path, or location description to `resolve_workbook_input()` once. It must resolve one readable workbook and the active writable workspace; ambiguity returns to the user without starting a run. No scope confirmation phrase is requested.
+2. Run `extract_workbook()` once. Invoke `WorkbookInterpreter` once on its source-addressed cells, formulas, links, parsed code, and images. Pass that record to `validate_inspection_plan()` once. This deterministically reconciles or reconstructs each event's name, parameters and values/value semantics, canonical Data Layer payload, and canonical snippet, then persists only `inspection-plan.json`. Missing URL, trigger, screenshot, definition, destination, type, or requiredness is nonfatal; missing mandatory event/parameter/value semantics or a contradiction between table and Data Layer is fatal.
+3. Ask for `ready`, open one headed Playwright MCP browser, then ask the user to prepare the target website and connected Tag Assistant. After `prepared`, start `mcp_bridge.py` once. Validate the fixed MCP inventory and identify one target website tab and one connected Tag Assistant tab. Ignore extra tabs.
+4. Run `start_run()` once. For each inspection-plan event in order, use the event name as scenario identity. Invoke `ScenarioResolver` once to return one same-origin target, the shortest finite genuinely necessary non-navigation setup sequence, and one measured action. Use an exact workbook URL when present; otherwise infer from event meaning, optional context, screenshots, and live website evidence. An unreliable inference is `BLOCKED`, never invented.
+5. Compile and execute navigation/setup before the cursor fence. Resolve each non-navigation interaction from one accessibility snapshot to exactly one role/name ref. Capture one target-page before snapshot/image and network list; execute the measured action once; wait once; capture one after snapshot/image and network list.
+6. Capture one post-cursor Tag Assistant overview. Inspect selector candidates and bounded causal carrier rows through accessibility text. Expand each candidate API Call once with the immutable right-edge chevron manifest and leave it expanded. Read Tags only on carrier rows and Names/Values only for fired Google/GA4 tags.
+7. Invoke `VisualAssessor` once on the two target-page images and accessibility evidence. Deterministically judge and commit Page/action reality, Data Layer API Call, GTM Tags, Browser request, and Surrounding behavior; immediately show `event_name`, `layer_name`, `status`, and `details` for all five.
+8. After every event commits, run `finish_run()` once, close the bridge, deliver only `gtm-client-recette-results.xlsx` plus the terminal record, and attempt browser close once. On a fatal run error, call `abandon_run()` once.
 
-## Fixed five-layer proof
+## Adaptive boundary
 
-Every event always reports these rows in this order:
+Only `WorkbookInterpreter` once per run, `ScenarioResolver` once per event, and `VisualAssessor` once per event are adaptive. They may interpret workbook layouts, embedded images, event meaning, website controls, and visible outcomes, but return only their fixed records. They cannot execute code, control tools, assign final statuses, change event identity or requirements, retry, or reorder the workflow.
 
-1. **Page/action reality** — reachable non-404 page, intended state, selected values,
-   performed interaction, and visible outcome.
-2. **Data Layer API Call** — the exact fully expanded Tag Assistant API Call, occurrence,
-   planned fields, JSON types, values, and every intervening business call.
-3. **GTM Tags** — concerned tag inventory, mapping, firing count, configuration, and
-   event-time runtime values from Tag Assistant Names/Values.
-4. **Browser request** — attributable client request, destination, planned values,
-   response/failure, duplicates, and retries.
-5. **Surrounding behavior** — missing, duplicate, premature, delayed, interjected, stale,
-   contaminating, or business-implausible behavior.
+## Handoff boundary
 
-The acceptance baseline is the tracking-plan rule plus the actual interaction context.
-Compare every planned field independently at API Call, GTM mapping/runtime, and browser
-request. Cross-layer equality is only supporting evidence: a chain can be coherently
-wrong. If the UI proves quantity `1` while API Call, tag, and request all contain `2`,
-those three layers fail.
+The user handles credentials, MFA, CAPTCHA, protected preparation, ordinary consent, and real payment. Never bypass protection, invent credentials, complete real payment, mutate GTM or site code, publish, or make legal conclusions.
 
-Do not inspect the accumulated Data Layer tab, GTM Variables tab, consent panels, or a
-direct dataLayer recorder. If a mandatory surface is unavailable, report its dependent
-checks `BLOCKED`; never substitute weaker evidence.
-
-## Fixed workflow
-
-Resolve `<skill-root>` as this file's directory.
-
-1. Ask only for the XLSX, known protected prerequisites, and whether the user is ready to
-   prepare GTM Preview.
-2. After `ready`, open one headed Playwright MCP window at `about:blank` immediately.
-   Start local XLSX compilation while the user prepares Tag Assistant, the target site,
-   login, and ordinary consent.
-3. Run:
-
-   ```text
-   python -B "<skill-root>/scripts/recette.py" start "<plan.xlsx>" "<new-run-dir>"
-   ```
-
-   The run directory must be absent or empty. Any invalid or ambiguous workbook stops
-   before measurement with exact sheet/row errors.
-4. Once Preview and the target are ready, execute
-   `scripts/playwright_collector.js` once through Playwright MCP. Reuse that observer for
-   the complete run. It returns `current_cursor` and `current_document_cursor`. If it
-   cannot bootstrap, stop; do not choose another browser.
-5. Run `recette.py next "<run-dir>" <preview-cursor>`. For the first Core action, pass
-   `current_document_cursor` so the prepared document is inspected without reloading. For
-   another first action, pass `current_cursor`. Thereafter pass the exact cursor returned
-   by the preceding `complete`. The command returns the only open action card. Choose the
-   material scenario from plan values, visible controls, live routes, and prior evidence.
-6. Use exactly one Playwright code execution for the scenario. In that execution: locate
-   the existing target and Tag Assistant pages; attach an action-bounded request listener;
-   capture the before reality anchor; perform exactly one interaction; wait only for its
-   explicit visible outcome and relevant activity; capture after reality; invoke
-   `globalThis.__gtmRecetteCollect` once in Tag Assistant; detach the listener; and return
-   one minimal bundle. Never split these into exploratory panel calls. For Core, observe
-   the attributable current prepared document; do not create a setup or cleanup reload.
-   The bundle must contain matching `action_id`/`event_id`, the observer contract and
-   cursor, `scenario {id, signature, values}`, `coverage {complete, rationale, remaining,
-   unreachable}`, `reality {complete, attributable, page, outcome, expected, findings}`,
-   the collector's `source`/`gtm`/`behavior`, and `network {complete, attributable,
-   requests, findings}`. Normalize request parameters to plan paths only from the captured
-   request; never guess missing values.
-7. Save the returned canonical bundle as
-   `<run-dir>/evidence-<action-id>.json` and run:
-
-   ```text
-   python -B "<skill-root>/scripts/recette.py" complete "<run-dir>" "<run-dir>/evidence-<action-id>.json"
-   ```
-
-   Show its five-layer feedback immediately. Do not begin another action first.
-8. Repeat `next -> one Playwright observation -> complete` until every material branch is
-   final, then run `recette.py finish "<run-dir>"` once.
-
-## Scenario and anomaly rules
-
-Scenario selection runs for every event. Exhaust manageable finite and reachable values
-such as language, shipping, payment, login, and cart state. For products/content or any
-high-cardinality population, test one representative per materially different behavior
-signature plus boundaries and exceptions; never enumerate equivalent members. A live
-plan-omitted value becomes a visible plan gap and another scenario when it may change
-occurrence, payload, tag, request, outcome, or verdict.
-
-The observer cursor is continuous. Inspect every business API Call since the previous
-cursor, including calls between interactions and causal technical rows such as Trigger
-Groups. Never hide a second interaction or discard an unexpected event.
-
-## Feedback, blocking, and stopping
-
-Use `PASS`, `FAIL`, `BLOCKED`, `REVIEW`, `NOT_APPLICABLE`, and `PENDING`. Every non-pass
-layer states the exact reason, affected fields/checks, expected versus observed, and the
-target a human should inspect next.
-
-A real tracking `FAIL` never stops execution. One blocked event also does not stop the
-run. Increment the consecutive-zero-evidence counter only when all five layers are
-`BLOCKED` and no attributable evidence exists. Reset it whenever a later event has any
-usable attributable evidence. After two consecutive zero-evidence events, emit the
-second feedback and stop without reload, retry, browser switch, repair, or final XLSX.
-
-Fail immediately before or during execution when the fixed contract itself is broken:
-invalid XLSX, unavailable Playwright MCP, unusable Preview/target preparation, corrupted
-run state, mismatched action identity, or lost observer contract. Never reopen or salvage
-an invalid run; start a new run after correcting the environment.
+There is no mode, no retry, no fallback, no repair, no resume, no backup, and no second scenario.

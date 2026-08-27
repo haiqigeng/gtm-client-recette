@@ -2,95 +2,166 @@ from __future__ import annotations
 
 import sys
 import tempfile
-import time
 import unittest
+from io import BytesIO
 from pathlib import Path
 
 from openpyxl import Workbook
+from openpyxl.drawing.image import Image as WorksheetImage
+from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from helpers import add_event_sheet, make_plan
+from xlsx_plan import PlanError, extract_workbook, validate_inspection_plan
 
-from xlsx_plan import PlanError, compile_xlsx
+
+def interpretation(reference: str) -> dict:
+    return {
+        "schema_version": "3.0.0",
+        "events": [
+            {
+                "event_name": "view_item",
+                "parameters": [
+                    {
+                        "data_layer_path": "ecommerce.currency",
+                        "ga4_parameter_name": "currency",
+                        "value": "EUR",
+                        "value_semantics": "EXAMPLE",
+                        "json_type": "string",
+                        "required": None,
+                        "source_refs": [reference],
+                    }
+                ],
+                "data_layer_payload": None,
+                "definition": None,
+                "trigger_description": None,
+                "entry_url": None,
+                "expected_destination_id": None,
+                "source_refs": [reference],
+            }
+        ],
+    }
+
+
+def workbook(path: Path, value: str = "view_item") -> Path:
+    book = Workbook()
+    book.active["A1"] = value
+    book.save(path)
+    book.close()
+    return path
 
 
 class PlanTests(unittest.TestCase):
-    def test_xlsx_detail_sheets_are_authoritative(self) -> None:
+    def test_variable_layout_extracts_cells_formulas_links_images_and_code(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            path = make_plan(Path(directory) / "plan.xlsx", finite=True)
-            plan = compile_xlsx(path)
-        self.assertEqual(plan["event_count"], 1)
-        self.assertEqual(plan["events"][0]["label"], "view_item")
-        paths = {field["path"]: field for field in plan["events"][0]["fields"]}
-        self.assertNotIn("images", paths)
-        self.assertEqual(paths["ecommerce.page_language"]["allowed_values"], ["en", "fr"])
-        self.assertEqual(paths["ecommerce.items[].item_name"]["rule"], "present")
-        self.assertEqual(paths["ecommerce.currency"]["expected"], "EUR")
+            path = Path(directory) / "variable.xlsx"
+            stream = BytesIO()
+            with Image.new("RGB", (8, 8), "blue") as image:
+                image.save(stream, format="PNG")
+            stream.seek(0)
+            embedded = Image.open(stream)
+            book = Workbook()
+            sheet = book.active
+            sheet.title = "Any Layout"
+            sheet["C4"] = "view_item"
+            sheet["D8"] = "=1+1"
+            sheet["C5"] = "Site"
+            sheet["C5"].hyperlink = "https://example.test/product"
+            sheet["B20"] = "dataLayer.push({event: 'view_item', ecommerce: {currency: 'EUR'}});"
+            sheet.add_image(WorksheetImage(embedded), "F3")
+            book.save(path)
+            book.close()
+            embedded.close()
+            evidence = extract_workbook(path)
+        self.assertIn("Any Layout!C4", evidence["source_refs"])
+        self.assertIn("image:Any Layout:1", evidence["source_refs"])
+        self.assertEqual(evidence["code_calls"][0]["payload"]["event"], "view_item")
 
-    def test_custom_wrapper_has_semantic_selector(self) -> None:
+    def test_parameter_table_reconstructs_canonical_data_layer(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "custom.xlsx"
-            workbook = Workbook()
-            workbook.active.title = "Cover"
-            add_event_sheet(
-                workbook,
-                "Newsletter",
-                "gtm.custom_event",
-                [("event", "string", "gtm.custom_event"), ("event_name", "string", "newsletter")],
+            path = workbook(Path(directory) / "plan.xlsx")
+            plan = validate_inspection_plan(extract_workbook(path), interpretation("Sheet!A1"))
+        event = plan["events"][0]
+        self.assertEqual(event["data_layer_payload"]["event"], "view_item")
+        self.assertEqual(event["data_layer_payload"]["ecommerce"]["currency"], "EUR")
+        self.assertIn("window.dataLayer.push", event["data_layer_snippet"])
+        self.assertEqual(event["scenario"], {"id": "view_item"})
+
+    def test_complete_data_layer_reconstructs_parameter_table(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "plan.xlsx"
+            book = Workbook()
+            book.active["A1"] = (
+                "dataLayer.push({event: 'view_item', ecommerce: {currency: 'EUR', "
+                "items: [{item_id: 'SKU-1', quantity: 1}]}});"
             )
-            workbook.save(path)
-            workbook.close()
-            event = compile_xlsx(path)["events"][0]
-        self.assertEqual(event["label"], "Newsletter")
+            book.save(path)
+            book.close()
+            evidence = extract_workbook(path)
+            value = interpretation("Sheet!A1")
+            value["events"][0]["parameters"] = []
+            plan = validate_inspection_plan(evidence, value)
         self.assertEqual(
-            event["selector"],
-            {"event": "gtm.custom_event", "event_name": "newsletter"},
+            {parameter["data_layer_path"] for parameter in plan["events"][0]["parameters"]},
+            {"ecommerce.currency", "ecommerce.items[].item_id", "ecommerce.items[].quantity"},
         )
 
-    def test_only_xlsx_is_accepted(self) -> None:
+    def test_optional_context_is_nonfatal(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "plan.yaml"
-            path.write_text("events: []", encoding="utf-8")
-            with self.assertRaisesRegex(PlanError, "exactly one .xlsx"):
-                compile_xlsx(path)
+            path = workbook(Path(directory) / "plan.xlsx")
+            event = validate_inspection_plan(extract_workbook(path), interpretation("Sheet!A1"))[
+                "events"
+            ][0]
+        self.assertIsNone(event["entry_url"])
+        self.assertEqual(
+            {notice["field"] for notice in event["mapping_notices"]},
+            {"definition", "trigger_description", "entry_url"},
+        )
 
-    def test_ambiguous_type_fails_with_sheet_and_row(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "bad.xlsx"
-            workbook = Workbook()
-            workbook.active.title = "Cover"
-            add_event_sheet(workbook, "Bad Event", "bad_event", [("value", "mystery", "x")])
-            workbook.save(path)
-            workbook.close()
-            with self.assertRaisesRegex(PlanError, r"Bad Event!10.*unsupported JSON type"):
-                compile_xlsx(path)
+    def test_missing_mandatory_semantics_or_unknown_reference_fails(self) -> None:
+        evidence = {
+            "source": {"path": "x", "filename": "x", "sha256": "0" * 64},
+            "source_refs": ["Sheet!A1"],
+            "code_calls": [],
+        }
+        value = interpretation("Sheet!A1")
+        value["events"][0]["parameters"] = []
+        with self.assertRaisesRegex(PlanError, "parameter values"):
+            validate_inspection_plan(evidence, value)
+        with self.assertRaisesRegex(PlanError, "unknown source reference"):
+            validate_inspection_plan(evidence, interpretation("Sheet!Z9"))
 
-    def test_large_plan_compiles_without_preprocessing(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "large.xlsx"
-            workbook = Workbook()
-            workbook.active.title = "Cover"
-            for event_index in range(24):
-                fields = [
-                    (f"field_{field_index}", "string", f"dynamic-{field_index}")
-                    for field_index in range(12)
-                ]
-                add_event_sheet(
-                    workbook,
-                    f"Event {event_index + 1}",
-                    f"event_{event_index + 1}",
-                    fields,
-                )
-            workbook.save(path)
-            workbook.close()
-            started = time.perf_counter()
-            plan = compile_xlsx(path)
-            elapsed = time.perf_counter() - started
-        self.assertEqual(plan["event_count"], 24)
-        self.assertEqual(plan["field_count"], 288)
-        self.assertLess(elapsed, 5.0)
+    def test_payload_and_table_contradiction_is_fatal(self) -> None:
+        evidence = {
+            "source": {"path": "x", "filename": "x", "sha256": "0" * 64},
+            "source_refs": ["Sheet!A1"],
+            "code_calls": [],
+        }
+        value = interpretation("Sheet!A1")
+        value["events"][0]["data_layer_payload"] = {
+            "event": "view_item",
+            "ecommerce": {"currency": "USD"},
+        }
+        with self.assertRaisesRegex(PlanError, "value contradicts"):
+            validate_inspection_plan(evidence, value)
+
+    def test_dynamic_placeholder_does_not_require_literal_payload_match(self) -> None:
+        evidence = {
+            "source": {"path": "x", "filename": "x", "sha256": "0" * 64},
+            "source_refs": ["Sheet!A1"],
+            "code_calls": [],
+        }
+        value = interpretation("Sheet!A1")
+        parameter = value["events"][0]["parameters"][0]
+        parameter["value"] = "%currency%"
+        parameter["value_semantics"] = "DYNAMIC"
+        value["events"][0]["data_layer_payload"] = {
+            "event": "view_item",
+            "ecommerce": {"currency": "EUR"},
+        }
+        plan = validate_inspection_plan(evidence, value)
+        self.assertEqual(plan["events"][0]["parameters"][0]["value_semantics"], "DYNAMIC")
 
 
 if __name__ == "__main__":
