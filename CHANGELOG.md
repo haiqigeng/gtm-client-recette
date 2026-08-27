@@ -12,6 +12,8 @@
   extra tabs.
 - Use the canonical event name as scenario identity and remove the arbitrary twelve-action
   setup ceiling while retaining one finite necessary setup and one measured action.
+- Align protected-branch CI with the fixed Python runtime and remove obsolete packaging and
+  direct-browser collector jobs.
 
 ## v12.0.0 (2026-08-26)
 
